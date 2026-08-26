@@ -61,16 +61,23 @@ Kue/
   Models/                   @Model classes + their Codable/enum types, one file per model
   Persistence/              ModelContainerFactory — the single place the SwiftData schema
                              and ModelContainer are constructed (production + in-memory)
-  Features/<Screen>/        One SwiftUI view (+ its own small subviews) per screen
+  Services/                 Pure/testable logic views don't own — EventStatusEngine (status
+                             derivation + reconciliation sweep), EventActions (cancel/
+                             complete/archive/delete), EventValidator (form validation),
+                             DuplicateDetectionService. Added in Phase 2 for the event
+                             engine; scheduling/notification/AI-parser logic will land here
+                             the same way in their own phases.
+  Features/<Screen>/        One SwiftUI view (+ its own small subviews) per screen. Views
+                             stay thin — they call into Services/, they don't recompute
+                             status or validate fields themselves.
 KueTests/                   Swift Testing (`import Testing`) unit tests
-KueUITests/                 XCTest UI tests (unchanged template scaffolding so far)
+KueUITests/                 XCTest UI tests
 ```
 
-`Services/` (event engine, scheduling engine, notification engine, AI parser) and a
-`Utilities/` folder don't exist yet — they'll appear when the phase that needs them
-starts (Phase 2 for the event engine, Phase 3 for scheduling, etc.). Don't pre-create
-empty folders or placeholder types for subsystems that haven't started; that's exactly
-the kind of speculative scaffolding this project deliberately avoids.
+A `Utilities/` folder doesn't exist yet — it'll appear when something is actually generic
+enough to live there. Don't pre-create empty folders or placeholder types for subsystems
+that haven't started; that's exactly the kind of speculative scaffolding this project
+deliberately avoids.
 
 Both `Kue/` (main target), `KueTests/`, and `KueUITests/` are Xcode file-system-synchronized
 groups — adding a `.swift` file under the right directory is enough; you do not need to
