@@ -77,21 +77,3 @@ enum NotificationEngine {
         scheduler.removePendingNotificationRequests(withIdentifiers: identifiers)
     }
 }
-
-private extension NotificationCandidate {
-    /// docs/08-notifications.md "Scheduling model": "a calendar or time-interval trigger."
-    /// Time-interval is used here — `fireDate` is already an absolute instant resolved
-    /// against the event's own pinned timezone upstream (WidgetContentService/
-    /// SchedulingEngine), so converting it to "seconds from now" is timezone-agnostic and
-    /// avoids re-deriving `DateComponents` in whatever zone the trigger would otherwise use.
-    func makeRequest() -> UNNotificationRequest {
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = body
-        content.sound = .default
-
-        let interval = max(fireDate.timeIntervalSinceNow, 1)
-        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
-        return UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
-    }
-}

@@ -36,6 +36,7 @@ struct KueEventProvider: AppIntentTimelineProvider {
         KueWidgetEntry(
             date: .now,
             content: .event(WidgetDisplayContent(
+                eventID: UUID(),
                 eventTitle: "Interview",
                 eventTypeDisplayName: "Interview",
                 widgetType: .countdown,
@@ -45,7 +46,8 @@ struct KueEventProvider: AppIntentTimelineProvider {
                 subline: "3 days",
                 tasksCompleted: 0,
                 tasksTotal: 0,
-                tasks: []
+                tasks: [],
+                canSnooze: false
             ))
         )
     }

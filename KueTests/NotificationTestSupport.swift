@@ -5,7 +5,9 @@
 //  Shared fakes for Phase 8 (M7) — requirement 10: "protocols/test doubles around
 //  UNUserNotificationCenter and background scheduling." No test file below ever constructs a
 //  real `SystemNotificationScheduler`/`SystemBackgroundTaskScheduler` or touches
-//  `UNUserNotificationCenter`/`BGTaskScheduler` directly.
+//  `UNUserNotificationCenter`/`BGTaskScheduler` directly. `FakeWidgetReloader` at the bottom
+//  is the Phase 9 (M8) addition for the same reason — "timeline reload invocation through an
+//  injectable wrapper" — reusing this file rather than starting a new one, same rationale.
 //
 
 import Foundation
@@ -73,5 +75,14 @@ final class FakeBackgroundTask: BackgroundTaskExecuting {
 
     func setTaskCompleted(success: Bool) {
         completedSuccess = success
+    }
+}
+
+@MainActor
+final class FakeWidgetReloader: WidgetReloading {
+    private(set) var reloadedKinds: [String] = []
+
+    func reloadTimelines(ofKind kind: String) {
+        reloadedKinds.append(kind)
     }
 }

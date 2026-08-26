@@ -5,11 +5,20 @@
 //  Small + medium rendering for all five widget types — docs/07-widget-engine.md "Widget
 //  types (V1)". Family is chosen by the user, supplied via `\.widgetFamily`, never app-owned
 //  data. `urgent` is a treatment layered on top of whichever type/phase applies, never its
-//  own case. No interactive buttons yet (Phase 9).
+//  own case.
+//
+//  Phase 9 (M8) added interactive buttons, gated to "only context-valid controls" per-type
+//  and per-state: `CompleteTaskIntent`/`SnoozeTaskIntent` appear next to a visible task only
+//  while it's incomplete (and snooze only while `content.canSnooze`); `CompleteEventIntent`
+//  appears only on the whole-event types (Countdown/Progress/Timeline — docs/07 "Exposed on
+//  the Countdown/Progress/Timeline widget types... as a single button") and only while the
+//  event hasn't already reached `.completed`/`.removed`, since offering "mark complete" on an
+//  event that's already finished or archived isn't a context-valid control.
 //
 
 import SwiftUI
 import WidgetKit
+import AppIntents
 
 struct KueWidgetEntryView: View {
     @Environment(\.widgetFamily) private var family
@@ -51,9 +60,28 @@ private struct EventContentView: View {
             body(for: content.widgetType)
 
             Spacer(minLength: 0)
+
+            if showsCompleteEventButton {
+                Button(intent: CompleteEventIntent(eventID: content.eventID)) {
+                    Label("Mark Complete", systemImage: "checkmark.circle")
+                        .font(.caption2)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .tint(content.isUrgent ? .red : .accentColor)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .containerBackground(content.isUrgent ? AnyShapeStyle(.red.opacity(0.12)) : AnyShapeStyle(.fill.tertiary), for: .widget)
+    }
+
+    /// docs/07-widget-engine.md "CompleteEventIntent" — the whole-event types only, and only
+    /// while there's still something meaningful to mark complete.
+    private var showsCompleteEventButton: Bool {
+        guard content.widgetType == .countdown || content.widgetType == .progress || content.widgetType == .timeline else {
+            return false
+        }
+        return content.phase != .completed && content.phase != .removed
     }
 
     private var header: some View {
@@ -82,7 +110,13 @@ private struct EventContentView: View {
                     .foregroundStyle(content.isUrgent ? Color.red : Color.secondary)
             }
         case .preparation:
-            if let subline = content.subline {
+            // docs/07-widget-engine.md "Preparation — today's task alongside the upcoming
+            // event." `content.tasks` is already sorted soonest-due-first, so the first
+            // incomplete one *is* "today's task" — the same row `CompleteTaskIntent`/
+            // `SnoozeTaskIntent` are documented to appear on ("per-visible-task button").
+            if let nextTask = content.tasks.first(where: { !$0.isCompleted }) {
+                TaskRow(task: nextTask, canSnooze: content.canSnooze, showsOffsetLabel: true)
+            } else if let subline = content.subline {
                 Label(subline, systemImage: "checklist")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -93,7 +127,7 @@ private struct EventContentView: View {
         case .progress:
             ProgressBody(completed: content.tasksCompleted, total: content.tasksTotal)
         case .checklist:
-            ChecklistRows(tasks: content.tasks, family: family)
+            ChecklistRows(tasks: content.tasks, family: family, canSnooze: content.canSnooze)
         }
     }
 }
@@ -142,6 +176,7 @@ private struct ProgressBody: View {
 private struct ChecklistRows: View {
     let tasks: [WidgetTaskSummary]
     let family: WidgetFamily
+    let canSnooze: Bool
 
     var body: some View {
         let visible = tasks.prefix(family == .systemSmall ? 2 : 4)
@@ -150,16 +185,57 @@ private struct ChecklistRows: View {
         } else {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(visible) { task in
-                    HStack(spacing: 4) {
-                        Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
-                            .font(.caption)
-                            .foregroundStyle(task.isCompleted ? .green : .secondary)
-                        Text(task.title)
-                            .font(.caption)
-                            .strikethrough(task.isCompleted)
-                            .lineLimit(1)
-                    }
+                    TaskRow(task: task, canSnooze: canSnooze, showsOffsetLabel: false)
                 }
+            }
+        }
+    }
+}
+
+/// One task, with its interactive controls — docs/07-widget-engine.md "CompleteTaskIntent"
+/// (per-visible-task button) / "SnoozeTaskIntent" (secondary button alongside it, hidden —
+/// not disabled — once `canSnooze` is false). Shared between Checklist's multi-row list and
+/// Preparation's single "today's task" row.
+private struct TaskRow: View {
+    let task: WidgetTaskSummary
+    let canSnooze: Bool
+    /// Preparation shows the offset ("2 days before") next to the title; Checklist doesn't
+    /// (its rows are already dense with up to 4 tasks).
+    let showsOffsetLabel: Bool
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if task.isCompleted {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            } else {
+                Button(intent: CompleteTaskIntent(taskID: task.id)) {
+                    Image(systemName: "circle")
+                }
+                .buttonStyle(.plain)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            if showsOffsetLabel {
+                Text(task.offsetLabel)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Text(task.title)
+                .font(.caption)
+                .strikethrough(task.isCompleted)
+                .lineLimit(1)
+
+            if !task.isCompleted && canSnooze {
+                Spacer(minLength: 4)
+                Button(intent: SnoozeTaskIntent(taskID: task.id)) {
+                    Image(systemName: "clock.arrow.circlepath")
+                }
+                .buttonStyle(.plain)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             }
         }
     }
