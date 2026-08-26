@@ -249,6 +249,7 @@ struct EventDetailView: View {
             if let widgetConfiguration = event.widgetConfiguration {
                 Section {
                     Toggle("Enabled", isOn: Bindable(widgetConfiguration).isEnabled)
+                        .accessibilityIdentifier("widgetEnabledToggle")
                     Picker("Widget Type", selection: Bindable(widgetConfiguration).widgetType) {
                         Text("Countdown").tag(WidgetType.countdown)
                         Text("Preparation").tag(WidgetType.preparation)
@@ -256,9 +257,10 @@ struct EventDetailView: View {
                         Text("Progress").tag(WidgetType.progress)
                         Text("Checklist").tag(WidgetType.checklist)
                     }
+                    .accessibilityIdentifier("widgetTypePicker")
                     Toggle("Show Location", isOn: Bindable(widgetConfiguration).showLocation)
                 } footer: {
-                    Text("These control how a placed Home Screen widget would render this event. Widgets themselves arrive in Phase 4.")
+                    Text("These control how a placed Home Screen widget renders this event. Turning it off removes this event from the widget's \"Next Up\" picks and its configuration list.")
                 }
             } else {
                 ContentUnavailableView(
@@ -268,6 +270,17 @@ struct EventDetailView: View {
                 )
             }
         }
+        // Requirement 9: any app-side mutation that could change what a placed widget shows
+        // must save + tell WidgetKit to reload — these bindings write directly to the
+        // @Model object with no other save point in this view.
+        .onChange(of: event.widgetConfiguration?.isEnabled) { _, _ in saveAndReloadWidget() }
+        .onChange(of: event.widgetConfiguration?.widgetType) { _, _ in saveAndReloadWidget() }
+        .onChange(of: event.widgetConfiguration?.showLocation) { _, _ in saveAndReloadWidget() }
+    }
+
+    private func saveAndReloadWidget() {
+        try? modelContext.save()
+        EventActions.reloadWidget()
     }
 }
 

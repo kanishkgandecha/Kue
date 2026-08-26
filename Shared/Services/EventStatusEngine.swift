@@ -86,21 +86,34 @@ enum EventStatusEngine {
     }
 
     private static func shouldAutoArchive(_ event: KueEvent, derivedStatus: EventStatus, now: Date) -> Bool {
-        let reachedAt: Date
-        switch derivedStatus {
-        case .cancelled:
-            reachedAt = event.cancelledAt ?? now
-        case .completed:
-            reachedAt = event.isManuallyCompleted ? (event.manuallyCompletedAt ?? now) : event.effectiveEndDate
-        default:
-            return false
-        }
+        guard derivedStatus == .completed || derivedStatus == .cancelled else { return false }
+        guard let threshold = archiveThreshold(for: event) else { return false }
+        return now >= threshold
+    }
 
+    /// The date `reconcile` would auto-archive this event at, given its current
+    /// cancel/manual-complete state and dates. Computable even *before* the event has
+    /// actually completed — the widget lifecycle's `.removed` phase (docs/07-widget-engine.md)
+    /// needs this as a future boundary to precompute, not just a live yes/no check.
+    static func archiveThreshold(for event: KueEvent) -> Date? {
+        let referenceDate: Date
+        if event.isCancelled {
+            referenceDate = event.cancelledAt ?? .distantFuture
+        } else if event.isManuallyCompleted {
+            referenceDate = event.manuallyCompletedAt ?? .distantFuture
+        } else {
+            referenceDate = event.effectiveEndDate
+        }
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: event.timeZoneIdentifier) ?? .current
-        guard let threshold = calendar.date(byAdding: .day, value: autoArchiveDays, to: reachedAt) else {
-            return false
-        }
-        return now >= threshold
+        return calendar.date(byAdding: .day, value: autoArchiveDays, to: referenceDate)
+    }
+
+    /// True once an event has been completed/cancelled for at least `autoArchiveDays` —
+    /// same rule `reconcile` uses, exposed so a *read-only* consumer (the widget extension)
+    /// can show the "removed" phase without waiting for the app's own sweep to persist
+    /// `.archived`, which the widget process never does itself.
+    static func isPastAutoArchiveWindow(_ event: KueEvent, now: Date = .now) -> Bool {
+        shouldAutoArchive(event, derivedStatus: derive(for: event, now: now), now: now)
     }
 }

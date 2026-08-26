@@ -149,7 +149,8 @@ struct WidgetContentServiceTests {
         let plan = WidgetContentService.transitionPlan(for: event, now: now)
         #expect(plan.map(\.date) == plan.map(\.date).sorted())
         #expect(plan.allSatisfy { $0.date > now })
-        #expect(plan.last?.phase == .completed) // completion is always the final boundary
+        #expect(plan.last?.phase == .removed) // auto-archive is always the final boundary
+        #expect(plan.contains { $0.phase == .completed })
     }
 
     @Test func transitionPlanIsEmptyForArchivedEvents() {

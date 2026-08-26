@@ -63,16 +63,23 @@ Shared/                     Claimed by BOTH the "Kue" app target and the "KueWid
   Persistence/              ModelContainerFactory — the single place the SwiftData schema
                              and ModelContainer are constructed (App Group store, in-memory
                              for tests/previews)
-  Services/                 EventStatusEngine (status derivation + reconciliation sweep) and
-                             WidgetContentService ("Next Up", lifecycle phase, precomputed
-                             transition dates, widget copy) — the only Services/ that moved
+  Services/                 EventStatusEngine (status derivation + reconciliation sweep,
+                             incl. `archiveThreshold`/`isPastAutoArchiveWindow` — the
+                             date-driven auto-archive math both the sweep and the read-only
+                             widget extension need), WidgetContentService ("Next Up",
+                             lifecycle phase, precomputed transition dates, widget copy,
+                             urgent-treatment rule), and WidgetKind (the one `"KueWidget"`
+                             literal both targets share) — the only Services/ that moved
                              here, because the widget extension needs them too.
 Kue/                         App-target-only.
   KueApp.swift              App entry point — builds the ModelContainer, sets HomeView as
                              root, sweeps status on scenePhase → .active
   Kue.entitlements          App Group capability
   Services/                 App-only pure/testable logic: EventActions (cancel/complete/
-                             archive/delete), EventValidator (form validation),
+                             archive/delete + `reloadWidget()`), EventReconciliation (the
+                             reusable sweep-then-reload entry point — Phase 9's App Intents
+                             and a future BGAppRefreshTask handler should call this, not
+                             re-wire HomeView's logic), EventValidator (form validation),
                              DuplicateDetectionService, SchedulingEngine (task generation).
                              Notification/AI-parser logic will land here the same way in
                              their own phases.

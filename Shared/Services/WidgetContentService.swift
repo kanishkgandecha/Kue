@@ -16,12 +16,30 @@ import Foundation
 // rather than redeclared, since both this file and the widget extension need the exact
 // same phase set docs/07-widget-engine.md describes.
 
+/// A single task, projected for widget rendering (Timeline/Checklist types) — `id` is the
+/// real `KueTask.id`, not a fresh one, so content built from the same tasks compares equal.
+struct WidgetTaskSummary: Equatable, Identifiable {
+    var id: UUID
+    var title: String
+    var isCompleted: Bool
+    var offsetLabel: String
+}
+
 struct WidgetDisplayContent: Equatable {
     var eventTitle: String
     var eventTypeDisplayName: String
+    var widgetType: WidgetType
     var phase: WidgetLifecyclePhase
+    /// docs/07-widget-engine.md: "urgent is not a lifecycle phase — it's a *treatment*."
+    /// Never a case of any enum — always a bool layered on top of `widgetType`/`phase`.
+    var isUrgent: Bool
     var headline: String
     var subline: String?
+    var tasksCompleted: Int
+    var tasksTotal: Int
+    /// Up to 4 tasks, soonest-due first — what Timeline/Checklist render; unused by the
+    /// other three types.
+    var tasks: [WidgetTaskSummary]
 }
 
 enum WidgetContentService {
@@ -29,12 +47,15 @@ enum WidgetContentService {
 
     /// The unconfigured-widget default: soonest `isEnabled` event whose derived status is
     /// upcoming/preparing/tomorrow/today/active — deterministic, ties broken by id so the
-    /// same input set always yields the same winner (required by docs/07-widget-engine.md's
-    /// determinism and this phase's own "reload dates are deterministic" requirement).
+    /// same input set always yields the same winner. Explicitly excludes completed,
+    /// cancelled, *and archived* events — archived is checked directly on `event.status`
+    /// (not inferred from the derived status) because a user can manually archive an event
+    /// that's still date-wise upcoming, which `derive(for:)` alone wouldn't catch.
     static func nextUpEvent(from events: [KueEvent], now: Date = .now) -> KueEvent? {
         let eligible: Set<EventStatus> = [.upcoming, .preparing, .tomorrow, .today, .active]
         let candidates = events.filter { event in
             guard event.widgetConfiguration?.isEnabled == true else { return false }
+            guard event.status != .archived else { return false }
             return eligible.contains(EventStatusEngine.derive(for: event, now: now))
         }
         return candidates.min { lhs, rhs in
@@ -53,9 +74,15 @@ enum WidgetContentService {
     }
 
     /// The phase that applies right now — used for the timeline's first entry and for
-    /// `snapshot(for:in:)`.
+    /// `snapshot(for:in:)`. `.removed` is date-driven via
+    /// `EventStatusEngine.isPastAutoArchiveWindow`, not solely `event.status == .archived` —
+    /// the widget extension never runs the app's sweep itself, so a completed event must
+    /// still reach `.removed` on its own once 3 days pass, even if the app hasn't been
+    /// foregrounded to persist that.
     static func currentPhase(for event: KueEvent, now: Date = .now) -> WidgetLifecyclePhase {
-        if event.status == .archived { return .removed }
+        if event.status == .archived || EventStatusEngine.isPastAutoArchiveWindow(event, now: now) {
+            return .removed
+        }
         if event.isManuallyCompleted || now >= event.effectiveEndDate { return .completed }
 
         let calendar = calendar(for: event)
@@ -80,7 +107,9 @@ enum WidgetContentService {
 
     /// Every future phase-transition boundary after `now`, ascending — the precomputed
     /// timeline this phase's widget must reload from instead of polling at a fixed interval.
-    /// Empty once the event is archived (nothing left to transition to).
+    /// Includes `.removed` (the auto-archive threshold), the one boundary that isn't purely
+    /// a function of `startDate`/`effectiveEndDate` — see `EventStatusEngine.archiveThreshold`.
+    /// Empty once the event is already archived (nothing left to transition to).
     static func transitionPlan(for event: KueEvent, now: Date = .now) -> [(date: Date, phase: WidgetLifecyclePhase)] {
         guard event.status != .archived else { return [] }
 
@@ -89,13 +118,25 @@ enum WidgetContentService {
         let oneDayBefore = calendar.date(byAdding: .day, value: -1, to: startOfEventDay)!
         let preparation = preparationThreshold(for: event, calendar: calendar)
 
-        let candidates: [(Date, WidgetLifecyclePhase)] = [
+        var candidates: [(Date, WidgetLifecyclePhase)] = [
             (preparation, .preparation),
             (oneDayBefore, .tomorrow),
             (startOfEventDay, .today),
             (event.effectiveEndDate, .completed),
         ]
+        if let archiveDate = EventStatusEngine.archiveThreshold(for: event) {
+            candidates.append((archiveDate, .removed))
+        }
         return candidates.filter { $0.0 > now }.sorted { $0.0 < $1.0 }
+    }
+
+    // MARK: - Urgent treatment (docs/07-widget-engine.md — never a WidgetType case)
+
+    /// V1: Interview and Deadline event types get the urgent treatment, and only within the
+    /// `tomorrow`/`today` phases; Exam, Trip, and Generic never do.
+    static func isUrgentTreatment(eventType: EventType, phase: WidgetLifecyclePhase) -> Bool {
+        guard phase == .tomorrow || phase == .today else { return false }
+        return eventType == .interview || eventType == .deadline
     }
 
     // MARK: - Display copy (docs/07-widget-engine.md "Widget copy" — deterministic, template-based)
@@ -125,12 +166,21 @@ enum WidgetContentService {
             subline = "Archived"
         }
 
+        let sortedTasks = event.tasks.sorted { $0.dueDate < $1.dueDate }
+
         return WidgetDisplayContent(
             eventTitle: event.title,
             eventTypeDisplayName: event.eventType.displayName,
+            widgetType: event.widgetConfiguration?.widgetType ?? .countdown,
             phase: phase,
+            isUrgent: isUrgentTreatment(eventType: event.eventType, phase: phase),
             headline: headline,
-            subline: subline
+            subline: subline,
+            tasksCompleted: event.tasks.count(where: { $0.isCompleted }),
+            tasksTotal: event.tasks.count,
+            tasks: sortedTasks.prefix(4).map {
+                WidgetTaskSummary(id: $0.id, title: $0.title, isCompleted: $0.isCompleted, offsetLabel: $0.offsetLabel)
+            }
         )
     }
 
