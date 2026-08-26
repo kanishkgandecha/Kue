@@ -333,6 +333,13 @@ struct EventFormView: View {
 
         let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let now = Date()
+        // docs/08-notifications.md "Deduplication": "the event engine first calls
+        // removePendingNotificationRequests(withIdentifiers:) for that event's prior
+        // identifiers, then re-schedules from the new timeline." Captured *before*
+        // `regenerateTasks` deletes the old (non-completed) tasks below — their per-task
+        // `-task-<taskID>` identifiers become unreconstructable once those rows are gone, so
+        // this is the only point that can still name them.
+        var staleIdentifiers: [String] = []
 
         switch mode {
         case .add(_):
@@ -369,6 +376,7 @@ struct EventFormView: View {
             event.timeZoneIdentifier = draft.timeZoneIdentifier
             event.updatedAt = now
             EventStatusEngine.reconcile(event, now: now)
+            staleIdentifiers = NotificationCandidateBuilder.allIdentifiers(for: event)
             // Regenerates from event.schedule.rules per docs/05-scheduling-engine.md
             // "Editing an event after its schedule is generated" — safe to call
             // unconditionally since it's a no-op for anything a completed task already covers.
@@ -379,6 +387,24 @@ struct EventFormView: View {
         // docs/07-widget-engine.md "Refresh strategy" — a placed widget won't otherwise
         // notice this write until its own precomputed timeline next reloads.
         EventActions.reloadWidget()
+        // docs/08-notifications.md requirement 3: schedule immediately on create/edit, even
+        // for events weeks away — not gated by a date window. Fire-and-forget, same as
+        // `reloadWidget()` above, so the sheet dismisses instantly rather than waiting on
+        // notification-center round trips. This is also "the first point it's needed"
+        // (docs/08 "Permission handling") for a brand-new install, so it's the one call site
+        // allowed to prompt for permission.
+        if !staleIdentifiers.isEmpty {
+            SystemNotificationScheduler.shared.removePendingNotificationRequests(withIdentifiers: staleIdentifiers)
+        }
+        Task {
+            let intensity = UserPreferenceStore.current(context: modelContext).notificationIntensity
+            await NotificationEngine.reschedule(
+                context: modelContext,
+                intensity: intensity,
+                scheduler: SystemNotificationScheduler.shared,
+                requestPermissionIfNeeded: true
+            )
+        }
         dismiss()
     }
 

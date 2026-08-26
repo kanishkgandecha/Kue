@@ -72,8 +72,22 @@ struct HomeView: View {
         }
         .task { EventReconciliation.run(context: modelContext) }
         .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .active {
+            switch newPhase {
+            case .active:
                 EventReconciliation.run(context: modelContext)
+                // docs/08-notifications.md "Replenishment" — foreground is one of the three
+                // triggers that picks anything trimmed by the pending-request cap back up.
+                // Passive: never prompts for permission.
+                Task {
+                    let intensity = UserPreferenceStore.current(context: modelContext).notificationIntensity
+                    await NotificationEngine.reschedule(context: modelContext, intensity: intensity, scheduler: SystemNotificationScheduler.shared)
+                }
+            case .background:
+                // Standard BGAppRefreshTask pattern — schedule the next best-effort
+                // opportunity as we leave the foreground.
+                SystemBackgroundTaskScheduler.shared.submit(identifier: BackgroundRefreshTask.identifier, earliestBeginDate: nil)
+            default:
+                break
             }
         }
     }

@@ -99,17 +99,17 @@ struct EventCRUDTests {
 
     // MARK: - Archive / unarchive
 
-    @Test func archiveThenUnarchiveRestoresDerivedStatus() throws {
+    @Test func archiveThenUnarchiveRestoresDerivedStatus() async throws {
         let context = makeContext()
         let event = KueEvent(title: "E", eventType: .generic, startDate: .distantFuture, estimatedDurationMinutes: 0, source: .manual)
         context.insert(event)
         try context.save()
         #expect(event.status == .upcoming)
 
-        EventActions.archive(event, context: context)
+        await EventActions.archive(event, context: context)
         #expect(event.status == .archived)
 
-        EventActions.unarchive(event, context: context)
+        await EventActions.unarchive(event, context: context)
         #expect(event.status == .upcoming)
     }
 }

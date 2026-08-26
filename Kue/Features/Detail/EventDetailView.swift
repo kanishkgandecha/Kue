@@ -81,6 +81,10 @@ struct EventDetailView: View {
             // Idempotent — lazily seeds/refreshes a schedule for events that predate this
             // view being open (or Phase 3 itself), without duplicating anything already there.
             SchedulingEngine.regenerateTasks(for: event, context: modelContext)
+            // Passive trigger, same as foreground/background replenishment — never prompts
+            // for permission (docs/08-notifications.md "Permission handling").
+            let intensity = UserPreferenceStore.current(context: modelContext).notificationIntensity
+            await NotificationEngine.reschedule(context: modelContext, intensity: intensity, scheduler: SystemNotificationScheduler.shared)
         }
     }
 
@@ -112,13 +116,13 @@ struct EventDetailView: View {
             Section("Actions") {
                 if displayedStatus == .archived {
                     Button("Unarchive") {
-                        EventActions.unarchive(event, context: modelContext)
+                        Task { await EventActions.unarchive(event, context: modelContext) }
                     }
                     .accessibilityIdentifier("unarchiveEventButton")
                 } else {
                     if event.isCancelled {
                         Button("Un-cancel") {
-                            EventActions.uncancel(event, context: modelContext)
+                            Task { await EventActions.uncancel(event, context: modelContext) }
                         }
                     } else {
                         Button("Cancel Event", role: .destructive) {
@@ -129,7 +133,7 @@ struct EventDetailView: View {
 
                     if event.isManuallyCompleted {
                         Button("Mark Not Complete") {
-                            EventActions.uncomplete(event, context: modelContext)
+                            Task { await EventActions.uncomplete(event, context: modelContext) }
                         }
                     } else {
                         Button("Mark Complete") {

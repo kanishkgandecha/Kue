@@ -63,11 +63,21 @@
 			);
 			target = 51131C3C87C242E89BC3120D /* KueWidget */;
 		};
+		A3B1C2D3E4F5061728394A5B /* Exceptions for "Kue" folder in "Kue" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 2678A5A6303DFB6300C1188B /* Kue */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		2678A5A9303DFB6300C1188B /* Kue */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A3B1C2D3E4F5061728394A5B /* Exceptions for "Kue" folder in "Kue" target */,
+			);
 			path = Kue;
 			sourceTree = "<group>";
 		};
@@ -507,6 +517,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Kue/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -540,6 +551,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Kue/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

@@ -112,8 +112,27 @@ struct EditScheduleView: View {
         schedule.isCustom = true
         schedule.generatedAt = .now
 
+        // docs/08-notifications.md "Deduplication": capture this event's prior identifiers
+        // *before* `regenerateTasks` deletes the old (non-completed) tasks below — see
+        // EventFormView.save()'s identical comment.
+        let staleIdentifiers = NotificationCandidateBuilder.allIdentifiers(for: event)
         SchedulingEngine.regenerateTasks(for: event, context: modelContext)
         EventActions.reloadWidget()
+        if !staleIdentifiers.isEmpty {
+            SystemNotificationScheduler.shared.removePendingNotificationRequests(withIdentifiers: staleIdentifiers)
+        }
+        // docs/08-notifications.md requirement 3/4: a custom schedule changes this event's
+        // task due dates, so its pending "task due" requests (and possibly its preparation-
+        // start timing) need to be replaced immediately, same as any other edit.
+        Task {
+            let intensity = UserPreferenceStore.current(context: modelContext).notificationIntensity
+            await NotificationEngine.reschedule(
+                context: modelContext,
+                intensity: intensity,
+                scheduler: SystemNotificationScheduler.shared,
+                requestPermissionIfNeeded: true
+            )
+        }
         dismiss()
     }
 }
