@@ -42,6 +42,9 @@ struct EventFormView: View {
     @State private var ambiguities: [DraftAmbiguity] = []
     @State private var parseFailureMessage: String?
     @State private var availability: AIAvailabilityState = .deviceIneligible
+    /// docs/03-data-model.md `UserPreference.aiParsingEnabled`: "User can force manual-only
+    /// entry." Distinct from `availability` — this is a user choice, not a hardware/OS state.
+    @State private var isAIParsingEnabled = true
 
     init(mode: Mode) {
         self.mode = mode
@@ -61,6 +64,18 @@ struct EventFormView: View {
                 timeZoneIdentifier: event.timeZoneIdentifier
             ))
         }
+    }
+
+    /// Phase 10 (M9) — the Share Extension's entry point. Still `.add` mode under the hood
+    /// (identical `save()` path, identical duplicate-check/validation), just pre-filled with
+    /// an already-parsed-and-normalized draft instead of starting from
+    /// `EventDraft(eventType:)` blank — docs/09-screens-and-ux.md "same field layout as
+    /// manual entry, but pre-filled," the same contract typed NL input already satisfies.
+    init(prefilledDraft: EventDraft, ambiguities: [DraftAmbiguity], source: EventSource) {
+        self.mode = .add(initialEventType: prefilledDraft.eventType)
+        _draft = State(initialValue: prefilledDraft)
+        _ambiguities = State(initialValue: ambiguities)
+        _draftSource = State(initialValue: source)
     }
 
     var isEditing: Bool {
@@ -186,6 +201,7 @@ struct EventFormView: View {
             .onAppear {
                 checkDuplicate()
                 availability = aiAvailabilityChecker.currentAvailability()
+                isAIParsingEnabled = UserPreferenceStore.current(context: modelContext).aiParsingEnabled
             }
             .sheet(isPresented: $isViewingDuplicate) {
                 if let duplicate {
@@ -212,7 +228,11 @@ struct EventFormView: View {
     @ViewBuilder
     private var nlInputSection: some View {
         Section {
-            if availability.isAvailable {
+            if !isAIParsingEnabled {
+                Label("AI parsing is turned off in Settings — fill in the fields below manually.", systemImage: "sparkles")
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("aiParsingDisabledMessage")
+            } else if availability.isAvailable {
                 TextField("Describe your event, e.g. \"Interview Friday at 10\"", text: $nlText, axis: .vertical)
                     .lineLimit(2...4)
                     .accessibilityIdentifier("nlInputField")
@@ -259,35 +279,25 @@ struct EventFormView: View {
         }
     }
 
+    /// `@available` (as opposed to inline in the button action) because `NLParsingPipeline`
+    /// is `@available(iOS 26.0, *)` — the deployment target already guarantees that, but the
+    /// compiler still wants the annotation at the call site since `EventFormView` itself
+    /// predates Phase 7 and isn't marked.
+    @available(iOS 26.0, *)
     private func parseNLText() async {
         isParsing = true
         parseFailureMessage = nil
         defer { isParsing = false }
 
-        let result = await nlParser.parse(text: nlText)
-        switch result {
-        case .success(let parsed):
-            applyParsedDraft(parsed)
-        case .failure(let failure):
-            parseFailureMessage = failure.message
+        let outcome = await NLParsingPipeline.run(text: nlText, parser: nlParser, timeZoneIdentifier: draft.timeZoneIdentifier)
+        if let newDraft = outcome.draft {
+            draft = newDraft
+            ambiguities = outcome.ambiguities
+            draftSource = .naturalLanguage
+            checkDuplicate()
+        } else {
+            parseFailureMessage = outcome.failureMessage
         }
-    }
-
-    /// Only exists (as opposed to inlining into `parseNLText`) because `AIParsedEventDraft`
-    /// and `NLDraftNormalizer.normalize` are `@available(iOS 26.0, *)` — the deployment
-    /// target already guarantees that, but the compiler still wants the annotation at the
-    /// call site since `EventFormView` itself predates Phase 7 and isn't marked.
-    @available(iOS 26.0, *)
-    private func applyParsedDraft(_ parsed: AIParsedEventDraft) {
-        let result = NLDraftNormalizer.normalize(
-            parsed,
-            referenceDate: .now,
-            timeZoneIdentifier: draft.timeZoneIdentifier
-        )
-        draft = result.draft
-        ambiguities = result.ambiguities
-        draftSource = .naturalLanguage
-        checkDuplicate()
     }
 
     // MARK: - Ambiguity banners (requirement 8)

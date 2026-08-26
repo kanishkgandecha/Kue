@@ -251,12 +251,35 @@ struct EventDetailView: View {
         }
     }
 
+    /// docs/09-screens-and-ux.md "Event detail" lists Notifications as one of its tabs — this
+    /// was a placeholder ("Reminders arrive in Phase 8") that outlived Phase 8 shipping;
+    /// fixed during the Phase 10 audit. Reuses `NotificationCandidateBuilder` (Shared/)
+    /// directly — the exact same candidate list `NotificationEngine.reschedule` would
+    /// actually schedule, not a re-derived summary.
     private var notificationsTab: some View {
-        ContentUnavailableView(
-            "No Notifications Yet",
-            systemImage: "bell",
-            description: Text("Reminders arrive in Phase 8.")
+        let intensity = UserPreferenceStore.current(context: modelContext).notificationIntensity
+        let candidates = NotificationCandidateBuilder.prioritized(
+            NotificationCandidateBuilder.filter(NotificationCandidateBuilder.candidates(for: event), intensity: intensity)
         )
+        return Group {
+            if candidates.isEmpty {
+                ContentUnavailableView(
+                    "No Upcoming Notifications",
+                    systemImage: "bell.slash",
+                    description: Text("Nothing left to remind you about for this event.")
+                )
+            } else {
+                List(candidates, id: \.identifier) { candidate in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(candidate.body)
+                        Text(candidate.fireDate.formatted(date: .abbreviated, time: .shortened))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityIdentifier("notificationsList")
+            }
+        }
     }
 
     // MARK: - Widget (functional settings, not rendering — docs/09-screens-and-ux.md)

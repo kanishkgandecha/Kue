@@ -171,6 +171,15 @@ struct WidgetContentServiceTests {
         #expect(content.subline == "HQ")
     }
 
+    @Test func displayContentForTodayOmitsLocationWhenShowLocationIsOff() {
+        let now = Date(timeIntervalSince1970: 1_000_000_000)
+        let event = makeEvent(title: "Interview", startDate: now)
+        event.location = "HQ"
+        event.widgetConfiguration?.showLocation = false
+        let content = WidgetContentService.displayContent(for: event, phase: .today, now: now)
+        #expect(content.subline == nil)
+    }
+
     @Test func displayContentForCompletedSaysCompleted() {
         let now = Date(timeIntervalSince1970: 1_000_000_000)
         let event = makeEvent(startDate: now)

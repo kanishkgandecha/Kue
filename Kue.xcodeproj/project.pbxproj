@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		9F360A213F2C40018CE44546 /* KueWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E77018D0EA8847A2BE14C67A /* KueWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		DFF74F03DAFED384921E846C /* KueShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 3DF5DEF77F56BF1B8D8855F9 /* KueShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -32,6 +33,13 @@
 			remoteGlobalIDString = 51131C3C87C242E89BC3120D;
 			remoteInfo = KueWidget;
 		};
+		8E4414307005CE9EBF413FFD /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2678A59F303DFB6300C1188B /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 959B72BFB1B17F264687FCC2;
+			remoteInfo = KueShare;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -42,6 +50,7 @@
 			dstSubfolderSpec = 13;
 			files = (
 				9F360A213F2C40018CE44546 /* KueWidget.appex in Embed Foundation Extensions */,
+				DFF74F03DAFED384921E846C /* KueShare.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -52,10 +61,18 @@
 		2678A5A7303DFB6300C1188B /* Kue.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Kue.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		2678A5B6303DFB6400C1188B /* KueTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = KueTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		2678A5C0303DFB6400C1188B /* KueUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = KueUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		3DF5DEF77F56BF1B8D8855F9 /* KueShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = KueShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		E77018D0EA8847A2BE14C67A /* KueWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = KueWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		3BB75FAFA648029E09F711D7 /* Exceptions for "KueShare" folder in "KueShare" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 959B72BFB1B17F264687FCC2 /* KueShare */;
+		};
 		66D0B89D379F476E9AFE9968 /* Exceptions for "KueWidget" folder in "KueWidget" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -70,6 +87,14 @@
 			);
 			target = 2678A5A6303DFB6300C1188B /* Kue */;
 		};
+		C70FEA0CE5330D431747B4A9 /* Exceptions for "Kue" folder in "KueShare" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+				KueApp.swift,
+			);
+			target = 959B72BFB1B17F264687FCC2 /* KueShare */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -77,6 +102,7 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				A3B1C2D3E4F5061728394A5B /* Exceptions for "Kue" folder in "Kue" target */,
+				C70FEA0CE5330D431747B4A9 /* Exceptions for "Kue" folder in "KueShare" target */,
 			);
 			path = Kue;
 			sourceTree = "<group>";
@@ -96,6 +122,14 @@
 			path = Shared;
 			sourceTree = "<group>";
 		};
+		4DB8A4220245BF2A7ACD27FC /* KueShare */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				3BB75FAFA648029E09F711D7 /* Exceptions for "KueShare" folder in "KueShare" target */,
+			);
+			path = KueShare;
+			sourceTree = "<group>";
+		};
 		E2A1ABA6DECD4EB99174FE46 /* KueWidget */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -107,6 +141,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		0BC85BCE593710B636CF77D5 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		2678A5A4303DFB6300C1188B /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -143,6 +184,7 @@
 			children = (
 				2678A5A9303DFB6300C1188B /* Kue */,
 				E2A1ABA6DECD4EB99174FE46 /* KueWidget */,
+				4DB8A4220245BF2A7ACD27FC /* KueShare */,
 				271E3D159C5E4D9F9FC97245 /* Shared */,
 				2678A5B9303DFB6400C1188B /* KueTests */,
 				2678A5C3303DFB6400C1188B /* KueUITests */,
@@ -155,6 +197,7 @@
 			children = (
 				2678A5A7303DFB6300C1188B /* Kue.app */,
 				E77018D0EA8847A2BE14C67A /* KueWidget.appex */,
+				3DF5DEF77F56BF1B8D8855F9 /* KueShare.appex */,
 				2678A5B6303DFB6400C1188B /* KueTests.xctest */,
 				2678A5C0303DFB6400C1188B /* KueUITests.xctest */,
 			);
@@ -177,6 +220,7 @@
 			);
 			dependencies = (
 				91B588D9FD794A368CD14164 /* PBXTargetDependency */,
+				3855DBD88D8346125CAE4649 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				2678A5A9303DFB6300C1188B /* Kue */,
@@ -258,6 +302,30 @@
 			productReference = E77018D0EA8847A2BE14C67A /* KueWidget.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		959B72BFB1B17F264687FCC2 /* KueShare */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 68044CB40E3A42142F7ACB9F /* Build configuration list for PBXNativeTarget "KueShare" */;
+			buildPhases = (
+				98E6F93162D470EC5639813B /* Sources */,
+				0BC85BCE593710B636CF77D5 /* Frameworks */,
+				0B78CAF79016EDB7E38B9B83 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				2678A5A9303DFB6300C1188B /* Kue */,
+				271E3D159C5E4D9F9FC97245 /* Shared */,
+				4DB8A4220245BF2A7ACD27FC /* KueShare */,
+			);
+			name = KueShare;
+			packageProductDependencies = (
+			);
+			productName = KueShare;
+			productReference = 3DF5DEF77F56BF1B8D8855F9 /* KueShare.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -282,6 +350,9 @@
 					51131C3C87C242E89BC3120D = {
 						CreatedOnToolsVersion = 26.6;
 					};
+					959B72BFB1B17F264687FCC2 = {
+						CreatedOnToolsVersion = 26.6;
+					};
 				};
 			};
 			buildConfigurationList = 2678A5A2303DFB6300C1188B /* Build configuration list for PBXProject "Kue" */;
@@ -300,6 +371,7 @@
 			targets = (
 				2678A5A6303DFB6300C1188B /* Kue */,
 				51131C3C87C242E89BC3120D /* KueWidget */,
+				959B72BFB1B17F264687FCC2 /* KueShare */,
 				2678A5B5303DFB6400C1188B /* KueTests */,
 				2678A5BF303DFB6400C1188B /* KueUITests */,
 			);
@@ -307,6 +379,13 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		0B78CAF79016EDB7E38B9B83 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		2678A5A5303DFB6300C1188B /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -366,6 +445,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		98E6F93162D470EC5639813B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -378,6 +464,11 @@
 			isa = PBXTargetDependency;
 			target = 2678A5A6303DFB6300C1188B /* Kue */;
 			targetProxy = 2678A5C1303DFB6400C1188B /* PBXContainerItemProxy */;
+		};
+		3855DBD88D8346125CAE4649 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 959B72BFB1B17F264687FCC2 /* KueShare */;
+			targetProxy = 8E4414307005CE9EBF413FFD /* PBXContainerItemProxy */;
 		};
 		91B588D9FD794A368CD14164 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -654,6 +745,34 @@
 			};
 			name = Release;
 		};
+		2D8901634C5584417FA7B108 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = KueShare/KueShare.entitlements;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = KueShare/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Add to Kue";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kanishkgandecha.Kue.KueShare;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		5FD3A49C6C214362AA6A0991 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -710,6 +829,34 @@
 			};
 			name = Release;
 		};
+		EC28B8DCDE854C723F9F6BE6 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = KueShare/KueShare.entitlements;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = KueShare/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Add to Kue";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kanishkgandecha.Kue.KueShare;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -745,6 +892,15 @@
 			buildConfigurations = (
 				2678A5D1303DFB6400C1188B /* Debug */,
 				2678A5D2303DFB6400C1188B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		68044CB40E3A42142F7ACB9F /* Build configuration list for PBXNativeTarget "KueShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EC28B8DCDE854C723F9F6BE6 /* Debug */,
+				2D8901634C5584417FA7B108 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
