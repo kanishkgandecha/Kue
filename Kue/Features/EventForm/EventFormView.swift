@@ -13,7 +13,9 @@ import SwiftData
 
 struct EventFormView: View {
     enum Mode {
-        case add
+        /// `initialEventType` lets the Templates screen (Phase 6) pre-select a type without
+        /// its own copy of the form — still just manual entry underneath, zero AI involved.
+        case add(initialEventType: EventType)
         case edit(KueEvent)
     }
 
@@ -31,8 +33,8 @@ struct EventFormView: View {
     init(mode: Mode) {
         self.mode = mode
         switch mode {
-        case .add:
-            _draft = State(initialValue: EventDraft())
+        case .add(let initialEventType):
+            _draft = State(initialValue: EventDraft(eventType: initialEventType))
         case .edit(let event):
             _draft = State(initialValue: EventDraft(
                 title: event.title,
@@ -165,7 +167,7 @@ struct EventFormView: View {
         let now = Date()
 
         switch mode {
-        case .add:
+        case .add(_):
             let event = KueEvent(
                 title: title,
                 eventType: draft.eventType,
@@ -223,6 +225,6 @@ struct EventFormView: View {
 }
 
 #Preview {
-    EventFormView(mode: .add)
+    EventFormView(mode: .add(initialEventType: .generic))
         .modelContainer(ModelContainerFactory.makeInMemory())
 }

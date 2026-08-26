@@ -22,6 +22,13 @@ struct HomeView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \KueEvent.startDate) private var events: [KueEvent]
     @State private var isAddingEvent = false
+    @State private var isShowingTemplates = false
+    @State private var addEventType: EventType = .generic
+    /// Set by `TemplatesView`'s selection, consumed once its sheet has fully dismissed —
+    /// see the `onDismiss` below. Presenting the Add sheet immediately (nesting it inside
+    /// the still-open Templates sheet instead) leaves Templates covering Home underneath
+    /// once Add itself dismisses, so the newly created event isn't reachable/tappable.
+    @State private var pendingTemplateEventType: EventType?
 
     var body: some View {
         NavigationStack {
@@ -37,6 +44,15 @@ struct HomeView: View {
                     }
                     ToolbarItem(placement: .navigationBarTrailing) {
                         Button {
+                            isShowingTemplates = true
+                        } label: {
+                            Label("Templates", systemImage: "doc.on.doc")
+                        }
+                        .accessibilityIdentifier("templatesButton")
+                    }
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button {
+                            addEventType = .generic
                             isAddingEvent = true
                         } label: {
                             Label("Add Event", systemImage: "plus")
@@ -45,7 +61,13 @@ struct HomeView: View {
                     }
                 }
                 .sheet(isPresented: $isAddingEvent) {
-                    EventFormView(mode: .add)
+                    EventFormView(mode: .add(initialEventType: addEventType))
+                }
+                .sheet(isPresented: $isShowingTemplates, onDismiss: presentAddForPendingTemplate) {
+                    TemplatesView { type in
+                        pendingTemplateEventType = type
+                        isShowingTemplates = false
+                    }
                 }
         }
         .task { EventReconciliation.run(context: modelContext) }
@@ -54,6 +76,13 @@ struct HomeView: View {
                 EventReconciliation.run(context: modelContext)
             }
         }
+    }
+
+    private func presentAddForPendingTemplate() {
+        guard let type = pendingTemplateEventType else { return }
+        pendingTemplateEventType = nil
+        addEventType = type
+        isAddingEvent = true
     }
 
     private var visibleEvents: [KueEvent] {
@@ -85,6 +114,9 @@ struct HomeView: View {
             } actions: {
                 Button("New Event") {
                     isAddingEvent = true
+                }
+                Button("Start from a Template") {
+                    isShowingTemplates = true
                 }
             }
         } else {

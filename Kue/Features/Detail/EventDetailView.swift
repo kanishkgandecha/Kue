@@ -29,6 +29,7 @@ struct EventDetailView: View {
     @State private var tab: DetailTab = .info
     @State private var isEditing = false
     @State private var isConfirmingDelete = false
+    @State private var isCustomizingSchedule = false
 
     /// Reconciliation rule 1 (docs/04-event-types.md): always recompute status on a
     /// single-event read rather than trusting the persisted value — except archive, which is
@@ -178,7 +179,7 @@ struct EventDetailView: View {
     /// Chronological view of the same generated tasks — due date first, no completion
     /// affordance (that's Tasks). Distinguishes "when does prep happen" from "what's left."
     private var timelineTab: some View {
-        Group {
+        VStack(spacing: 0) {
             if sortedTasks.isEmpty {
                 ContentUnavailableView(
                     "No Preparation Timeline",
@@ -198,6 +199,18 @@ struct EventDetailView: View {
                     }
                 }
             }
+
+            // docs/09-screens-and-ux.md "Custom schedule editing" — reached from here, not
+            // the Tasks tab, since this screen edits the *rule set* the tasks come from.
+            Button("Customize Schedule") {
+                isCustomizingSchedule = true
+            }
+            .accessibilityIdentifier("customizeScheduleButton")
+            .padding()
+            .disabled(displayedStatus == .archived)
+        }
+        .sheet(isPresented: $isCustomizingSchedule) {
+            EditScheduleView(event: event)
         }
     }
 

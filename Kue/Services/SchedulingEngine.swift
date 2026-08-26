@@ -16,7 +16,10 @@ import Foundation
 import SwiftData
 
 /// One task the engine has decided should exist, before it's turned into a `KueTask`.
-struct ScheduledTaskPlan: Equatable {
+/// `nonisolated` because the project defaults new types to `@MainActor`
+/// (`SWIFT_DEFAULT_ACTOR_ISOLATION`), but this is a plain, thread-safe value type compared
+/// in Swift Testing's `#expect`, which runs test bodies off the main actor.
+nonisolated struct ScheduledTaskPlan: Equatable {
     var title: String
     var dueDate: Date
     var offsetLabel: String
@@ -96,6 +99,59 @@ enum SchedulingEngine {
         totalDays(offset) <= Double(maxOffsetDays)
     }
 
+    /// The other half of "validate minimum lead time and maximum offset" (Phase 6, Edit
+    /// Schedule) — an offset amounting to less than `minimumLeadTime` isn't meaningfully
+    /// "before" the event at all (e.g. a rule that would fire 30 seconds ahead of it).
+    static func isOffsetAboveMinimumLeadTime(_ offset: DateComponents) -> Bool {
+        totalDays(offset) * 86_400 >= minimumLeadTime
+    }
+
+    enum CustomRuleValidationError: LocalizedError, Equatable, Identifiable {
+        case taskTitleRequired
+        case offsetTooSmall
+        case offsetTooLarge
+
+        var id: String { errorDescription ?? "" }
+
+        var errorDescription: String? {
+            switch self {
+            case .taskTitleRequired:
+                return "Give this task a title."
+            case .offsetTooSmall:
+                return "This offset doesn't leave enough lead time before the event."
+            case .offsetTooLarge:
+                return "Offsets beyond \(SchedulingEngine.maxOffsetDays) days aren't supported."
+            }
+        }
+    }
+
+    /// Everything Edit Schedule must check before letting a rule into `KueSchedule.rules` —
+    /// docs/05-scheduling-engine.md "Custom schedule validation": "this is AI-adjacent input
+    /// ... and must not bypass validation just because it's 'custom.'"
+    static func validateCustomRule(offset: DateComponents, taskTitle: String) -> [CustomRuleValidationError] {
+        var errors: [CustomRuleValidationError] = []
+        if taskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            errors.append(.taskTitleRequired)
+        }
+        if !isOffsetAboveMinimumLeadTime(offset) {
+            errors.append(.offsetTooSmall)
+        }
+        if !isOffsetWithinMaximum(offset) {
+            errors.append(.offsetTooLarge)
+        }
+        return errors
+    }
+
+    /// The due date a single rule would produce against a given `startDate` — what Edit
+    /// Schedule sorts and previews by. Same date math as `plan(...)`, exposed standalone
+    /// since Edit Schedule needs it for rules that may not survive the backward clamp yet
+    /// (the event hasn't been saved with this rule set at all).
+    static func dueDate(for offset: DateComponents, startDate: Date, timeZoneIdentifier: String) -> Date? {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: timeZoneIdentifier) ?? .current
+        return calendar.date(byAdding: negated(offset), to: startDate)
+    }
+
     private static func totalDays(_ offset: DateComponents) -> Double {
         Double(offset.day ?? 0)
             + Double(offset.hour ?? 0) / 24
@@ -158,7 +214,9 @@ enum SchedulingEngine {
         return "\(eventType.displayName) prep — condensed, \(timing)"
     }
 
-    private static func offsetLabel(_ components: DateComponents) -> String {
+    /// Not `private` — Edit Schedule's rule rows (which don't have a `ScheduledTaskPlan`,
+    /// only a raw `ScheduleRule`) format their offset the same way, via this function.
+    static func offsetLabel(_ components: DateComponents) -> String {
         if let day = components.day, day > 0 {
             return day == 1 ? "1 day before" : "\(day) days before"
         }

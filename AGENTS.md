@@ -86,6 +86,12 @@ Kue/                         App-target-only.
   Features/<Screen>/        One SwiftUI view (+ its own small subviews) per screen. Views
                              stay thin — they call into Services/, they don't recompute
                              status, validate fields, or plan schedules themselves.
+                             Templates/ (built-in Interview/Exam/Trip/Deadline picker — no
+                             `Template` rows persisted, just `SchedulingEngine.defaultRules`)
+                             and EditSchedule/ (custom `ScheduleRule` list/add/edit/delete)
+                             are Phase 6 additions; both still route every mutation through
+                             `SchedulingEngine.regenerateTasks` — neither ever inserts a
+                             `KueTask` directly.
 KueWidget/                   Widget-extension-target-only: KueWidgetBundle (@main),
                              KueWidget (the Widget), KueEventProvider
                              (AppIntentTimelineProvider — a thin wrapper over
