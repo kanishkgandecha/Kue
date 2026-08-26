@@ -76,6 +76,11 @@ struct EventDetailView: View {
             }
             .accessibilityIdentifier("confirmDeleteButton")
         }
+        .task {
+            // Idempotent — lazily seeds/refreshes a schedule for events that predate this
+            // view being open (or Phase 3 itself), without duplicating anything already there.
+            SchedulingEngine.regenerateTasks(for: event, context: modelContext)
+        }
     }
 
     // MARK: - Info
@@ -164,29 +169,65 @@ struct EventDetailView: View {
         event.isAllDay ? .dateTime.month().day().year() : .dateTime.month().day().year().hour().minute()
     }
 
-    // MARK: - Timeline / Tasks / Notifications (restrained empty states — later phases)
+    // MARK: - Timeline / Tasks (Phase 3) / Notifications (still a later phase)
 
+    private var sortedTasks: [KueTask] {
+        event.tasks.sorted { $0.dueDate < $1.dueDate }
+    }
+
+    /// Chronological view of the same generated tasks — due date first, no completion
+    /// affordance (that's Tasks). Distinguishes "when does prep happen" from "what's left."
     private var timelineTab: some View {
-        ContentUnavailableView(
-            "No Preparation Timeline Yet",
-            systemImage: "calendar.badge.clock",
-            description: Text("The scheduling engine arrives in Phase 3.")
-        )
+        Group {
+            if sortedTasks.isEmpty {
+                ContentUnavailableView(
+                    "No Preparation Timeline",
+                    systemImage: "calendar.badge.clock",
+                    description: Text(timelineEmptyReason)
+                )
+            } else {
+                List(sortedTasks) { task in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(task.dueDate.formatted(.dateTime.month().day().hour().minute()))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(task.title)
+                        Text(task.offsetLabel)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+        }
+    }
+
+    /// docs/05-scheduling-engine.md "Backward-scheduling clamp" — an event starting within
+    /// `SchedulingEngine.minimumLeadTime` legitimately has zero surviving offsets; say so
+    /// rather than implying something's broken.
+    private var timelineEmptyReason: String {
+        event.startDate.timeIntervalSinceNow < SchedulingEngine.minimumLeadTime
+            ? "This event is starting too soon for any preparation task to fit."
+            : "No schedule has been generated for this event yet."
     }
 
     private var tasksTab: some View {
         Group {
-            if event.tasks.isEmpty {
+            if sortedTasks.isEmpty {
                 ContentUnavailableView(
                     "No Tasks Yet",
                     systemImage: "checklist",
-                    description: Text("Preparation tasks are generated once scheduling arrives in Phase 3.")
+                    description: Text(timelineEmptyReason)
                 )
             } else {
-                List(event.tasks.sorted(by: { $0.sortOrder < $1.sortOrder })) { task in
+                List(sortedTasks) { task in
                     HStack {
                         Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
-                        Text(task.title)
+                        VStack(alignment: .leading) {
+                            Text(task.title)
+                            Text(task.offsetLabel)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }

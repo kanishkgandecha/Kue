@@ -186,6 +186,7 @@ struct EventFormView: View {
             )
             modelContext.insert(widgetConfiguration)
             event.widgetConfiguration = widgetConfiguration
+            SchedulingEngine.regenerateTasks(for: event, context: modelContext, now: now)
         case .edit(let event):
             event.title = title
             event.eventType = draft.eventType
@@ -198,6 +199,10 @@ struct EventFormView: View {
             event.timeZoneIdentifier = draft.timeZoneIdentifier
             event.updatedAt = now
             EventStatusEngine.reconcile(event, now: now)
+            // Regenerates from event.schedule.rules per docs/05-scheduling-engine.md
+            // "Editing an event after its schedule is generated" — safe to call
+            // unconditionally since it's a no-op for anything a completed task already covers.
+            SchedulingEngine.regenerateTasks(for: event, context: modelContext, now: now)
         }
 
         try? modelContext.save()
