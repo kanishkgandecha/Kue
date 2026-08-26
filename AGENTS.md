@@ -48,11 +48,13 @@ tasks; no model call in that path.
 - **Widget size is never app-owned.** Widget family (small/medium) is chosen by the user
   per placed Home Screen instance — don't reintroduce a `size` field on
   `WidgetConfiguration` or `UserPreference`. See `docs/03-data-model.md` "WidgetConfiguration."
-- **Phases build in order.** V1 (Phases 1–10 / M0–M9) is now complete — see "Current
-  implementation status" below. Any *new* work is post-V1 (`docs/01-vision-and-scope.md`
-  "What NOT to build in V1": OCR, Voice, calendar integration, context engine, Live
-  Activities, large/Lock Screen widgets, user-defined templates, ...) and needs the project
-  owner to explicitly say V1's done and post-V1 work has started before you add it.
+- **Phases build in order.** V1 (Phases 1–10 / M0–M9) is complete — see "Current
+  implementation status" below. **Kue 2.0 has started** (see "Kue 2.0 has started" below),
+  but so far *only* its Phase 1 migration foundation — no Kue 2.0 user-facing feature
+  (`docs/01-vision-and-scope.md` "What NOT to build in V1": OCR, Voice, calendar integration,
+  context engine, Live Activities, large/Lock Screen widgets, user-defined templates, ...) has
+  been built, and none should be until the project owner explicitly says a specific one has
+  started.
 
 ## Current implementation status
 
@@ -99,6 +101,36 @@ that were deliberately *not* code-fixed (with the reasoning for each) — includ
 `WidgetState` staying unpopulated and `EventStatus.preparing` staying unproduced, both
 intentional and documented there, not oversights to "fix" later.
 
+## Kue 2.0 has started
+
+**Kue 2.0 work has begun. Kue v1.0 is shipped and installed with real SwiftData data in one
+App Group store** — every phase from here on must treat that store as real, present, and
+non-discardable, not a fixture that can be reset. Phase 1 ("SwiftData Migration Foundation")
+is done: `KueSchemaV1` (`Shared/Persistence/Migrations/`) freezes the exact V1.0 model shape,
+`KueMigrationPlan` wires it through `ModelContainerFactory`, and `KueTests/Migrations/`
+proves a real V1 store round-trips losslessly through it, accepts new writes after migrating,
+and those writes persist across a further reopen. See `docs/15-schema-migrations.md` for the
+full policy.
+
+**`KueSchemaV1` — i.e. the exact model shape V1.0 shipped — is the migration baseline for
+everything Kue 2.0 does.** Every future migration stage in `KueMigrationPlan` starts counting
+from it; there is no earlier version, and none should ever be added retroactively "before"
+it. **The rule, from here on: every future stored-property change to any `@Model` type
+requires a new `VersionedSchema`, a real `MigrationStage` in `KueMigrationPlan`, and a
+passing migration test with a representative fixture covering the changed shape — before it
+ships, not after.** Do not edit `Shared/Models/*.swift` for a shape change without first
+reading `docs/15-schema-migrations.md`'s "How to add a schema version." `KueSchemaV1.swift`
+itself must never be edited again once written — it's a historical snapshot of what real
+devices already have on disk, not a moving target.
+
+**Physical-device deployment is deferred until final Kue 2.0 sign-off.** Every Kue 2.0 phase
+— this one included — is built, migrated, and tested entirely in the iOS Simulator
+(`xcodebuild build`/`test` with a `platform=iOS Simulator` destination only); the real V1.0
+installation and its data on the project owner's iPhone must stay untouched, and no phase
+should run `xcodebuild` against a physical-device destination, alter device
+provisioning/signing/registration, or otherwise install/launch a build there, until the
+project owner explicitly signs off on the finished Kue 2.0 work and says it's time to deploy.
+
 ## Project structure
 
 ```
@@ -108,7 +140,15 @@ Shared/                     Claimed by BOTH the "Kue" app target and the "KueWid
   Models/                   @Model classes + their Codable/enum types, one file per model
   Persistence/              ModelContainerFactory — the single place the SwiftData schema
                              and ModelContainer are constructed (App Group store, in-memory
-                             for tests/previews)
+                             for tests/previews), plus `ModelContainerOpenOutcome`/
+                             `StoreOpenDiagnostic` (Kue 2.0 Phase 1 — `makeDefaultOrDiagnostic()`'s
+                             recoverable-failure result type; see that file's own doc comments).
+    Migrations/             Kue 2.0 Phase 1. KueSchemaV1.swift (the frozen, exact V1.0 model
+                             shape — never edit once written) and KueMigrationPlan.swift
+                             (currently one schema, zero stages — see docs/15-schema-
+                             migrations.md for how a future version adds one). Both read by
+                             `ModelContainerFactory.schema`/`.migrationPlan`, which every
+                             production target and `makeInMemory()` build from.
   Services/                 EventStatusEngine (status derivation + reconciliation sweep,
                              incl. `archiveThreshold`/`isPastAutoArchiveWindow` — the
                              date-driven auto-archive math both the sweep and the read-only
@@ -288,6 +328,13 @@ Kue/                         App-target-only.
                              Extension's entry point into this same confirmation UI, still
                              `.add` mode under the hood (identical `save()`/duplicate-check
                              path); see that init's own doc comment.
+                             StoreRecovery/StoreOpenFailureView.swift — Kue 2.0 Phase 1,
+                             requirement 9's "recoverable diagnostic path": shown by KueApp
+                             instead of HomeView when `ModelContainerFactory.
+                             makeDefaultOrDiagnostic()` fails. Not a 2.0 product feature —
+                             baseline persistence-failure safety net every phase from here on
+                             depends on; no "delete and start fresh" action on purpose (see
+                             that file's own header).
 KueWidget/                   Widget-extension-target-only: KueWidgetBundle (@main),
                              KueWidget (the Widget), KueEventProvider
                              (AppIntentTimelineProvider — a thin wrapper over
@@ -365,6 +412,22 @@ KueTests/                   Swift Testing (`import Testing`) unit tests — `@te
                              is a manual-device check — Share Extensions have no launchable
                              icon of their own for `XCUIApplication` to drive, a platform
                              limitation, not a shortcut taken here.
+    Migrations/             Kue 2.0 Phase 1 — reusable migration-test infrastructure, not a
+                             one-off. MigrationTestSupport.swift (real, on-disk stores at a
+                             throwaway temp URL — *never* the production App Group path;
+                             `makeV1Store` reconstructs the historical, pre-migration-plan
+                             construction every real device's store was actually built with,
+                             `reopenThroughCurrentMigrationPlan` reopens it through
+                             `ModelContainerFactory`'s real, current wiring), MigrationFixtures
+                             .swift (representative data across every V1 event type, all-day/
+                             timed, completed tasks, custom schedules, widget configuration,
+                             notification preferences, cancellation, manual completion,
+                             archived records — plus a `Snapshot` type everything is checked
+                             against after a reopen, since a reopened container hands back
+                             *new* model instances, not the ones inserted), SchemaV1Migration
+                             Tests.swift (the actual proof — see docs/15-schema-migrations.md).
+                             Reuse these three files' patterns for every future schema
+                             version's own migration test.
 KueUITests/                  XCTest UI tests
 ```
 

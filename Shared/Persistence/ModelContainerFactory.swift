@@ -2,39 +2,48 @@
 //  ModelContainerFactory.swift
 //  Kue
 //
-//  Centralizes the SwiftData schema/ModelContainer so the app, the widget extension,
-//  previews, and tests all build it the same way. Lives in Shared/ (not Kue/) because both
-//  the "Kue" app target and the "KueWidget" extension target claim this synchronized group —
-//  see docs/03-data-model.md "Shared storage: App Group" and AGENTS.md's Phase 4 note.
+//  Centralizes the SwiftData schema/ModelContainer so the app, the widget extension, the
+//  Share Extension, previews, and tests all build it the same way. Lives in Shared/ (not
+//  Kue/) because Kue, KueWidget, *and* KueShare all claim this synchronized group — see
+//  docs/03-data-model.md "Shared storage: App Group" and AGENTS.md's "Three targets" note.
 //
-//  Phase 4: makeDefault()'s store now lives in the App Group container, not the app's
-//  private sandbox — one live file both processes open, never a copy or snapshot.
+//  Phase 4: makeDefault()'s store lives in the App Group container, not the app's private
+//  sandbox — one live file every process opens, never a copy or snapshot.
+//
+//  Kue 2.0 Phase 1 (SwiftData Migration Foundation, see docs/15-schema-migrations.md):
+//  `schema`/`migrationPlan` below are now built from `KueSchemaV1`/`KueMigrationPlan`
+//  (Persistence/Migrations/) instead of a bare, unversioned `Schema([...])` literal — every
+//  one of `makeDefault()`/`makeDefaultOrNil()`/`makeDefaultOrDiagnostic()`/`makeInMemory()`
+//  routes through the same `makeDefaultThrowing()` (or an equivalent explicit construction
+//  for `makeInMemory()`), so there is exactly one place all three production targets and
+//  every test get their schema/migration wiring from — requirement 4's "consistently."
 //
 
 import SwiftData
 import Foundation
 
 enum ModelContainerFactory {
-    /// Must match the App Group entitlement on both the Kue and KueWidget targets.
+    /// Must match the App Group entitlement on the Kue, KueWidget, and KueShare targets.
     static let appGroupIdentifier = "group.com.kanishkgandecha.Kue"
 
     private static let storeFileName = "Kue.sqlite"
 
-    /// Every `@Model` type Kue persists in V1.
-    static let schema = Schema([
-        KueEvent.self,
-        KueTask.self,
-        KueSchedule.self,
-        WidgetConfiguration.self,
-        WidgetState.self,
-        Template.self,
-        UserPreference.self,
-    ])
+    /// Built from `KueSchemaV1` (Persistence/Migrations/) — the exact, frozen shape every
+    /// real V1.0 store already on-disk was written against. Do **not** replace this with a
+    /// bare `Schema([...])` literal again; that would silently detach the schema this app
+    /// opens stores with from the versioned/migratable one `KueMigrationPlan` describes.
+    static let schema = Schema(versionedSchema: KueSchemaV1.self)
 
-    /// The app's real, on-disk store — shared with the widget extension via the App Group
+    /// Currently a single version with zero migration stages (nothing has changed shape
+    /// yet) — see `KueMigrationPlan`'s own header for what adding a real stage looks like.
+    static let migrationPlan: any SchemaMigrationPlan.Type = KueMigrationPlan.self
+
+    /// The app's real, on-disk store — shared with both extensions via the App Group
     /// container. Crashes on failure, same as Phase 1–3: a broken store is a real bug the
-    /// app shouldn't silently paper over. The widget extension must use
-    /// `makeDefaultOrNil()` instead — see docs/13-error-handling.md "Widget refresh failure".
+    /// app shouldn't silently paper over. Prefer `makeDefaultOrDiagnostic()` from any call
+    /// site that can present a recovery UI instead of crashing outright (KueApp does); the
+    /// widget/Share Extension must use `makeDefaultOrNil()` instead — see
+    /// docs/13-error-handling.md "Widget refresh failure".
     static func makeDefault() -> ModelContainer {
         do {
             return try makeDefaultThrowing()
@@ -44,24 +53,42 @@ enum ModelContainerFactory {
     }
 
     /// Same store as `makeDefault()`, but reports failure instead of crashing — for the
-    /// widget extension, where a broken store must fall back to a placeholder-style entry,
-    /// never take down the whole extension process.
+    /// widget extension and Share Extension, where a broken store must degrade gracefully
+    /// (a placeholder-style widget entry; an alert + no-op in the Share Extension), never
+    /// take down the whole extension process.
     static func makeDefaultOrNil() -> ModelContainer? {
         try? makeDefaultThrowing()
+    }
+
+    /// Same store as `makeDefault()`, but never crashes — reports failure as a
+    /// `StoreOpenDiagnostic` instead, carrying the store URL and the underlying error, so a
+    /// caller that *can* show UI (KueApp) can present a recoverable diagnostic path rather
+    /// than a hard crash. Requirement 9: "must never silently delete user data" — nothing on
+    /// this path (or anywhere else in this file) ever deletes, resets, or recreates the
+    /// store on a failed open; a failed open leaves the on-disk file exactly as it was.
+    static func makeDefaultOrDiagnostic() -> ModelContainerOpenOutcome {
+        do {
+            return .success(try makeDefaultThrowing())
+        } catch {
+            return .failure(StoreOpenDiagnostic(storeURL: storeURL(), underlyingError: error))
+        }
     }
 
     private static func makeDefaultThrowing() throws -> ModelContainer {
         let url = storeURL()
         migrateLegacyStore(from: legacyApplicationSupportDirectory(), to: url)
         let configuration = ModelConfiguration(schema: schema, url: url)
-        return try ModelContainer(for: schema, configurations: [configuration])
+        return try ModelContainer(for: schema, migrationPlan: migrationPlan, configurations: [configuration])
     }
 
-    /// Ephemeral store for unit tests and SwiftUI previews — never touches disk.
+    /// Ephemeral store for unit tests and SwiftUI previews — never touches disk. Also routed
+    /// through `migrationPlan` (a currently-empty stage list is a no-op for a store that was
+    /// just created from scratch), so tests exercise the same construction path production
+    /// does — requirement 4.
     static func makeInMemory() -> ModelContainer {
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         do {
-            return try ModelContainer(for: schema, configurations: [configuration])
+            return try ModelContainer(for: schema, migrationPlan: migrationPlan, configurations: [configuration])
         } catch {
             fatalError("Could not create in-memory ModelContainer: \(error)")
         }
@@ -113,5 +140,25 @@ enum ModelContainerFactory {
     private static func legacyApplicationSupportDirectory() -> URL {
         (try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false))
             ?? FileManager.default.temporaryDirectory
+    }
+}
+
+// MARK: - Failure handling (requirement 9: recoverable diagnostic path, never silent data loss)
+
+enum ModelContainerOpenOutcome {
+    case success(ModelContainer)
+    case failure(StoreOpenDiagnostic)
+}
+
+/// Everything a recovery UI needs to show the user something specific and true, never a
+/// generic "something went wrong" (docs/13-error-handling.md's own house rule, applied here
+/// too) — the store's on-disk location (so support/debugging can find it) and the real
+/// underlying `Error` SwiftData reported, not a swallowed one.
+struct StoreOpenDiagnostic {
+    let storeURL: URL
+    let underlyingError: Error
+
+    var errorDescription: String {
+        underlyingError.localizedDescription
     }
 }
