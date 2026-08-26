@@ -11,6 +11,18 @@ import SwiftData
 /// V1 event type taxonomy — docs/03-data-model.md §"KueEvent", docs/04-event-types.md.
 enum EventType: String, Codable, CaseIterable {
     case generic, deadline, exam, interview, trip
+
+    /// Shared with the widget extension (entity subtitle, widget copy) — lives here rather
+    /// than an app-only Services file for that reason.
+    var displayName: String {
+        switch self {
+        case .generic: return "Generic"
+        case .deadline: return "Deadline"
+        case .exam: return "Exam"
+        case .interview: return "Interview"
+        case .trip: return "Trip"
+        }
+    }
 }
 
 /// docs/03-data-model.md "EventStatus". `draft` is transient (pre-confirmation UI state only)

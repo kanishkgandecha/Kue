@@ -70,14 +70,4 @@ extension EventType {
         case .trip: return 0
         }
     }
-
-    var displayName: String {
-        switch self {
-        case .generic: return "Generic"
-        case .deadline: return "Deadline"
-        case .exam: return "Exam"
-        case .interview: return "Interview"
-        case .trip: return "Trip"
-        }
-    }
 }

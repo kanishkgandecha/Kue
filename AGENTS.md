@@ -56,21 +56,40 @@ tasks; no model call in that path.
 ## Project structure
 
 ```
-Kue/
-  KueApp.swift              App entry point — builds the ModelContainer, sets HomeView as root
+Shared/                     Claimed by BOTH the "Kue" app target and the "KueWidget"
+                             extension target (see "Two targets" below) — only code with
+                             zero SwiftUI/WidgetKit/App-only dependencies belongs here.
   Models/                   @Model classes + their Codable/enum types, one file per model
   Persistence/              ModelContainerFactory — the single place the SwiftData schema
-                             and ModelContainer are constructed (production + in-memory)
-  Services/                 Pure/testable logic views don't own — EventStatusEngine (status
-                             derivation + reconciliation sweep), EventActions (cancel/
-                             complete/archive/delete), EventValidator (form validation),
-                             DuplicateDetectionService. Added in Phase 2 for the event
-                             engine; scheduling/notification/AI-parser logic will land here
-                             the same way in their own phases.
+                             and ModelContainer are constructed (App Group store, in-memory
+                             for tests/previews)
+  Services/                 EventStatusEngine (status derivation + reconciliation sweep) and
+                             WidgetContentService ("Next Up", lifecycle phase, precomputed
+                             transition dates, widget copy) — the only Services/ that moved
+                             here, because the widget extension needs them too.
+Kue/                         App-target-only.
+  KueApp.swift              App entry point — builds the ModelContainer, sets HomeView as
+                             root, sweeps status on scenePhase → .active
+  Kue.entitlements          App Group capability
+  Services/                 App-only pure/testable logic: EventActions (cancel/complete/
+                             archive/delete), EventValidator (form validation),
+                             DuplicateDetectionService, SchedulingEngine (task generation).
+                             Notification/AI-parser logic will land here the same way in
+                             their own phases.
   Features/<Screen>/        One SwiftUI view (+ its own small subviews) per screen. Views
                              stay thin — they call into Services/, they don't recompute
-                             status or validate fields themselves.
-KueTests/                   Swift Testing (`import Testing`) unit tests
+                             status, validate fields, or plan schedules themselves.
+KueWidget/                   Widget-extension-target-only: KueWidgetBundle (@main),
+                             KueWidget (the Widget), KueEventProvider
+                             (AppIntentTimelineProvider — a thin wrapper over
+                             WidgetContentService, owns no phase math itself),
+                             KueWidgetConfigurationIntent + KueEventEntity/Query (the
+                             configuration picker), KueWidgetEntryView, Info.plist,
+                             KueWidget.entitlements.
+KueTests/                   Swift Testing (`import Testing`) unit tests — `@testable import
+                             Kue` sees everything in Shared/ and Kue/, since both compile
+                             into the "Kue" module. There's no separate widget test target;
+                             WidgetContentService's testability is *why* it lives in Shared/.
 KueUITests/                 XCTest UI tests
 ```
 
@@ -79,9 +98,31 @@ enough to live there. Don't pre-create empty folders or placeholder types for su
 that haven't started; that's exactly the kind of speculative scaffolding this project
 deliberately avoids.
 
-Both `Kue/` (main target), `KueTests/`, and `KueUITests/` are Xcode file-system-synchronized
-groups — adding a `.swift` file under the right directory is enough; you do not need to
-edit `project.pbxproj` by hand.
+All five folders above are Xcode file-system-synchronized groups — adding a `.swift` file
+under the right directory is enough; you do not need to edit `project.pbxproj` by hand.
+**Exception:** `Shared/` is synchronized to *two* targets at once (Kue and KueWidget both
+list it in their `fileSystemSynchronizedGroups`) — that's what makes one copy of
+`ModelContainerFactory`/the `@Model` types compile into both without a shared framework.
+If a file needs App-only or Widget-only imports, it does not belong in `Shared/`.
+
+### Two targets: Kue (app) + KueWidget (extension)
+
+Added in Phase 4. Both join the App Group `group.com.kanishkgandecha.Kue`
+(`docs/03-data-model.md` "Shared storage: App Group") so `ModelContainerFactory.makeDefault()`
+opens the *same* on-disk store in either process — never a copy or snapshot. The widget
+extension must call `ModelContainerFactory.makeDefaultOrNil()` (not `makeDefault()`), since
+a broken store there should degrade to a placeholder-style widget entry, not crash the
+extension process (`docs/13-error-handling.md` "Widget refresh failure").
+
+Both targets currently use `CODE_SIGN_STYLE = Manual` with an ad-hoc identity (`-`) — this
+environment has no Apple Developer Team configured, and automatic signing silently strips
+App-Group-dependent entitlements from the final signature when there's no team to validate
+the capability against (confirmed empirically while building this out: the pre-strip
+"-Simulated.xcent" intermediate keeps the entitlement, but automatic signing's *actual*
+signed output does not, regardless of Automatic vs Manual). On a machine with a real
+(even free Personal) Team signed into Xcode, switching back to Automatic should work
+identically or better — do that if it becomes available rather than assuming Manual is a
+permanent requirement.
 
 ## Build & test
 

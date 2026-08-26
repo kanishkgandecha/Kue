@@ -74,13 +74,15 @@ enum EventStatusEngine {
     /// Call on app launch/foreground. Filters in Swift rather than via `#Predicate` on an enum
     /// property — V1's event counts are small and this avoids relying on SwiftData predicate
     /// support for Codable enum equality.
-    static func sweep(context: ModelContext, now: Date = .now) {
-        guard let events = try? context.fetch(FetchDescriptor<KueEvent>()) else { return }
+    @discardableResult
+    static func sweep(context: ModelContext, now: Date = .now) -> Bool {
+        guard let events = try? context.fetch(FetchDescriptor<KueEvent>()) else { return false }
         var changed = false
         for event in events where event.status != .archived {
             if reconcile(event, now: now) { changed = true }
         }
         if changed { try? context.save() }
+        return changed
     }
 
     private static func shouldAutoArchive(_ event: KueEvent, derivedStatus: EventStatus, now: Date) -> Bool {

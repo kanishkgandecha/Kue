@@ -7,9 +7,17 @@
 //  behavior. Every mutation here re-derives `status` immediately afterward via
 //  EventStatusEngine, so the persisted field never drifts from what these actions imply.
 //
+//  Every action also reloads the widget's timeline — docs/07-widget-engine.md "Refresh
+//  strategy": SwiftData writes in one process aren't observed by the other, so a placed
+//  widget only reflects a change once something explicitly asks WidgetKit to reload. Without
+//  this, a widget keeps showing whatever its last precomputed timeline said until that
+//  timeline's own next transition date arrives (which could be a fixed fallback interval
+//  away, or never, for `.archived` events).
+//
 
 import Foundation
 import SwiftData
+import WidgetKit
 
 enum EventActions {
     /// Cancelling and manually completing are mutually exclusive — cancelling clears any
@@ -21,6 +29,7 @@ enum EventActions {
         event.manuallyCompletedAt = nil
         EventStatusEngine.reconcile(event, now: now)
         try? context.save()
+        reloadWidget()
     }
 
     static func uncancel(_ event: KueEvent, context: ModelContext, now: Date = .now) {
@@ -28,6 +37,7 @@ enum EventActions {
         event.cancelledAt = nil
         EventStatusEngine.reconcile(event, now: now)
         try? context.save()
+        reloadWidget()
     }
 
     /// Manually completing clears any prior cancellation — mirror of `cancel`.
@@ -38,6 +48,7 @@ enum EventActions {
         event.cancelledAt = nil
         EventStatusEngine.reconcile(event, now: now)
         try? context.save()
+        reloadWidget()
     }
 
     static func uncomplete(_ event: KueEvent, context: ModelContext, now: Date = .now) {
@@ -45,6 +56,7 @@ enum EventActions {
         event.manuallyCompletedAt = nil
         EventStatusEngine.reconcile(event, now: now)
         try? context.save()
+        reloadWidget()
     }
 
     /// Immediate manual archive, independent of the auto-archive window.
@@ -52,6 +64,7 @@ enum EventActions {
         event.status = .archived
         event.updatedAt = now
         try? context.save()
+        reloadWidget()
     }
 
     /// Restores an archived event to its freshly-derived, date-driven status.
@@ -59,6 +72,7 @@ enum EventActions {
         event.status = EventStatusEngine.derive(for: event, now: now)
         event.updatedAt = now
         try? context.save()
+        reloadWidget()
     }
 
     /// Cascade-deletes via the `.cascade` delete rules on KueEvent's relationships
@@ -66,5 +80,12 @@ enum EventActions {
     static func delete(_ event: KueEvent, context: ModelContext) {
         context.delete(event)
         try? context.save()
+        reloadWidget()
+    }
+
+    /// Fire-and-forget — safe to call even when no widget is placed, and safe to call from
+    /// the test host process (it just no-ops if there's nothing to reload).
+    static func reloadWidget() {
+        WidgetCenter.shared.reloadTimelines(ofKind: WidgetKind.kue)
     }
 }

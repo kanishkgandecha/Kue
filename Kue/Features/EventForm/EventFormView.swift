@@ -206,6 +206,9 @@ struct EventFormView: View {
         }
 
         try? modelContext.save()
+        // docs/07-widget-engine.md "Refresh strategy" — a placed widget won't otherwise
+        // notice this write until its own precomputed timeline next reloads.
+        EventActions.reloadWidget()
         dismiss()
     }
 

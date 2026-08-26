@@ -48,11 +48,20 @@ struct HomeView: View {
                     EventFormView(mode: .add)
                 }
         }
-        .task { EventStatusEngine.sweep(context: modelContext) }
+        .task { sweepAndReloadWidgetIfChanged() }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
-                EventStatusEngine.sweep(context: modelContext)
+                sweepAndReloadWidgetIfChanged()
             }
+        }
+    }
+
+    /// A sweep-driven status change (e.g. an event crossing into `.today`, or auto-archiving)
+    /// can change what "Next Up" resolves to just as much as a user edit does — see
+    /// docs/07-widget-engine.md "Refresh strategy".
+    private func sweepAndReloadWidgetIfChanged() {
+        if EventStatusEngine.sweep(context: modelContext) {
+            EventActions.reloadWidget()
         }
     }
 
