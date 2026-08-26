@@ -67,13 +67,13 @@ final class KueEvent {
     @Relationship(deleteRule: .cascade, inverse: \KueTask.event)
     var tasks: [KueTask]
 
-    @Relationship(deleteRule: .cascade)
+    @Relationship(deleteRule: .cascade, inverse: \KueSchedule.event)
     var schedule: KueSchedule?
 
-    @Relationship(deleteRule: .cascade)
+    @Relationship(deleteRule: .cascade, inverse: \WidgetConfiguration.event)
     var widgetConfiguration: WidgetConfiguration?
 
-    @Relationship(deleteRule: .cascade)
+    @Relationship(deleteRule: .cascade, inverse: \WidgetState.event)
     var widgetState: WidgetState?
 
     var createdAt: Date

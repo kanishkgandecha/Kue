@@ -132,3 +132,4 @@ struct KueTests {
         #expect(event.effectiveEndDate != midnight) // must not complete at the instant it starts
     }
 }
+

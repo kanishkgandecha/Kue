@@ -15,10 +15,17 @@ final class Template {
     var id: UUID
     var name: String
     var eventType: EventType
-    var scheduleRules: [ScheduleRule]
+    /// See docs/03-data-model.md "KueSchedule" / this file's `KueSchedule.rulesData` —
+    /// same array-of-struct-with-DateComponents issue, same JSON-`Data` workaround.
+    private var scheduleRulesData: Data
     /// Post-V1: always false in V1; user-defined templates are V3 scope.
     var isUserDefined: Bool
     var isBuiltIn: Bool
+
+    var scheduleRules: [ScheduleRule] {
+        get { (try? JSONDecoder().decode([ScheduleRule].self, from: scheduleRulesData)) ?? [] }
+        set { scheduleRulesData = (try? JSONEncoder().encode(newValue)) ?? Data() }
+    }
 
     init(
         id: UUID = UUID(),
@@ -31,7 +38,7 @@ final class Template {
         self.id = id
         self.name = name
         self.eventType = eventType
-        self.scheduleRules = scheduleRules
+        self.scheduleRulesData = (try? JSONEncoder().encode(scheduleRules)) ?? Data()
         self.isUserDefined = isUserDefined
         self.isBuiltIn = isBuiltIn
     }

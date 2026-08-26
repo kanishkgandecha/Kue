@@ -15,9 +15,18 @@ final class KueSchedule {
     var id: UUID
     var event: KueEvent?
     var templateType: ScheduleTemplateType
-    var rules: [ScheduleRule]
+    /// `[ScheduleRule]` doesn't round-trip as a native SwiftData array-of-struct attribute —
+    /// `ScheduleRule.offset: DateComponents` crashes Core Data's encoder even for an empty
+    /// array. Stored as JSON `Data` instead — this is what "stored as transformable" in
+    /// docs/03-data-model.md meant; `rules` below is the public, spec-typed surface.
+    private var rulesData: Data
     var isCustom: Bool
     var generatedAt: Date
+
+    var rules: [ScheduleRule] {
+        get { (try? JSONDecoder().decode([ScheduleRule].self, from: rulesData)) ?? [] }
+        set { rulesData = (try? JSONEncoder().encode(newValue)) ?? Data() }
+    }
 
     init(
         id: UUID = UUID(),
@@ -30,7 +39,7 @@ final class KueSchedule {
         self.id = id
         self.event = event
         self.templateType = templateType
-        self.rules = rules
+        self.rulesData = (try? JSONEncoder().encode(rules)) ?? Data()
         self.isCustom = isCustom
         self.generatedAt = generatedAt
     }
