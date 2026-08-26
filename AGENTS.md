@@ -81,8 +81,25 @@ Kue/                         App-target-only.
                              and a future BGAppRefreshTask handler should call this, not
                              re-wire HomeView's logic), EventValidator (form validation),
                              DuplicateDetectionService, SchedulingEngine (task generation).
-                             Notification/AI-parser logic will land here the same way in
-                             their own phases.
+                             Notification logic will land here the same way in its own phase.
+                             Phase 7 (M6) added the NL-AI layer, entirely on-device
+                             (FoundationModels) and entirely deterministic downstream of the
+                             model call — see docs/06-ai-layer.md: AIAvailability.swift
+                             (4-state runtime check, session-cached), AIParsedEventDraft.swift
+                             (`@Generable` parser schema), RelativeDateResolver.swift (pure,
+                             hand-rolled date-phrase resolver — deliberately not
+                             `NSDataDetector`, which has no injectable reference date and so
+                             can't be tested deterministically), NLDraftNormalizer.swift
+                             (schema/date/range/type validation, never trusts the model's own
+                             `startDate`/`endDate` guess over `rawDateText`/`rawEndDateText`),
+                             NLParsing.swift (`FoundationModelsParser` + prompt version tag),
+                             AIEnvironment.swift (the `\.nlParser`/`\.aiAvailabilityChecker`
+                             DI seam — KueApp installs the real implementations; KueTests
+                             injects fixtures and never touches `LanguageModelSession`).
+                             EventFormView reuses itself as the NL input surface *and* the
+                             post-parse confirmation UI (same sheet, pre-filled) rather than
+                             a separate screen — docs/09-screens-and-ux.md "same field layout
+                             as manual entry, but pre-filled."
   Features/<Screen>/        One SwiftUI view (+ its own small subviews) per screen. Views
                              stay thin — they call into Services/, they don't recompute
                              status, validate fields, or plan schedules themselves.
