@@ -369,7 +369,7 @@ struct EventFormView: View {
             modelContext.insert(event)
             let widgetConfiguration = WidgetConfiguration(
                 event: event,
-                widgetType: defaultWidgetType(for: draft.eventType)
+                widgetType: WidgetType.defaultType(for: draft.eventType)
             )
             modelContext.insert(widgetConfiguration)
             event.widgetConfiguration = widgetConfiguration
@@ -416,15 +416,6 @@ struct EventFormView: View {
             )
         }
         dismiss()
-    }
-
-    /// docs/07-widget-engine.md "Widget types (V1)" default-per-event-type mapping.
-    private func defaultWidgetType(for eventType: EventType) -> WidgetType {
-        switch eventType {
-        case .interview, .exam, .deadline: return .preparation
-        case .trip: return .timeline
-        case .generic: return .countdown
-        }
     }
 }
 
