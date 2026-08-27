@@ -31,12 +31,22 @@ struct VoiceInputView: View {
     // KueShare extension target (see AGENTS.md "Three targets"), where `UIApplication.shared`
     // doesn't compile at all; `openURL` is the extension-safe SwiftUI equivalent.
     @Environment(\.openURL) private var openURL
+    // Kue 2.0 Phase 7 — requirement 32: restrained start/stop feedback; never the real
+    // Taptic Engine under `KueUITests`.
+    @Environment(\.kueHaptics) private var haptics
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var coordinator: VoiceInputCoordinator?
     @State private var isParsing = false
     @State private var parseFailureMessage: String?
     @State private var isAIAvailable = true
     @State private var tickTask: Task<Void, Never>?
+    // Kue 2.0 Phase 7 — requirement 29/31: a restrained recording pulse; the "Recording"
+    // label + icon already convey the state on their own (requirement 30), this is purely
+    // reinforcing motion, off entirely under Reduce Motion rather than replaced with a
+    // reduced variant, since a *continuously looping* animation is exactly the kind Reduce
+    // Motion exists to remove.
+    @State private var isPulsing = false
 
     var body: some View {
         NavigationStack {
@@ -118,24 +128,25 @@ struct VoiceInputView: View {
         VStack(spacing: 20) {
             Image(systemName: "waveform")
                 .font(.system(size: 44))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KueColor.secondaryText)
                 .accessibilityHidden(true)
 
             // Requirement 37 — persistent, accurate, specific on-device disclosure, shown
             // before any permission is even requested.
             Text("Kue processes your voice on-device to turn it into event details. Kue requests on-device speech recognition and never uploads or keeps your recording. Voice input is optional.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                .font(KueTypography.footnote)
+                .foregroundStyle(KueColor.secondaryText)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
                 .accessibilityIdentifier("voiceOnDeviceDisclosure")
 
             Button {
+                haptics.play(.recordingStarted)
                 Task { await coordinator.startRecording() }
             } label: {
                 Label("Start Recording", systemImage: "mic.fill")
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.glassProminent)
             .accessibilityIdentifier("voiceStartRecordingButton")
         }
         .padding()
@@ -150,9 +161,16 @@ struct VoiceInputView: View {
             // "Recording," not a color alone.
             Label("Recording", systemImage: "record.circle.fill")
                 .font(.headline)
-                .foregroundStyle(.red)
+                .foregroundStyle(KueColor.recording)
+                .opacity(isPulsing ? 0.55 : 1)
                 .accessibilityIdentifier("voiceRecordingIndicator")
                 .accessibilityLabel("Recording in progress")
+                .onAppear {
+                    guard !reduceMotion else { return }
+                    withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                        isPulsing = true
+                    }
+                }
 
             Text(Self.formattedDuration(coordinator.elapsedSeconds))
                 .font(.system(.title2, design: .monospaced))
@@ -162,19 +180,25 @@ struct VoiceInputView: View {
 
             ScrollView {
                 Text(coordinator.transcript.isEmpty ? "Listening…" : coordinator.transcript)
-                    .foregroundStyle(coordinator.transcript.isEmpty ? .secondary : .primary)
+                    .foregroundStyle(coordinator.transcript.isEmpty ? KueColor.secondaryText : KueColor.primaryText)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding()
             }
             .frame(maxHeight: 160)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+            // Kue 2.0 Phase 7 — a compact live-status surface (requirement 9), not the dense
+            // "long text content" requirement 10 says never to glass-ify; the transcript here
+            // is a short, growing live readout, not a form/article.
+            .kueGlassSurface()
             .accessibilityIdentifier("voiceLiveTranscript")
             .accessibilityLabel("Live transcript")
             .accessibilityValue(coordinator.transcript.isEmpty ? "Listening" : coordinator.transcript)
 
-            Button("Stop") { coordinator.stopRecording() }
-                .buttonStyle(.borderedProminent)
-                .accessibilityIdentifier("voiceStopButton")
+            Button("Stop") {
+                haptics.play(.recordingStopped)
+                coordinator.stopRecording()
+            }
+            .buttonStyle(.glassProminent)
+            .accessibilityIdentifier("voiceStopButton")
         }
         .padding()
     }
@@ -185,16 +209,16 @@ struct VoiceInputView: View {
         Form {
             Section {
                 Text("Kue processes your voice on-device to turn it into event details. Kue requests on-device speech recognition and never uploads or keeps your recording. Voice input is optional.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .font(KueTypography.footnote)
+                    .foregroundStyle(KueColor.secondaryText)
                     .accessibilityIdentifier("voiceOnDeviceDisclosureReview")
             }
 
             if let autoStopReason = coordinator.autoStopReason {
                 Section {
                     Text(autoStopReason)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .font(KueTypography.footnote)
+                        .foregroundStyle(KueColor.secondaryText)
                         .accessibilityIdentifier("voiceAutoStopReason")
                 }
             }
@@ -202,7 +226,7 @@ struct VoiceInputView: View {
             if let warning = coordinator.confidence.warningMessage {
                 Section {
                     Label(warning, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(KueColor.warning)
                         .accessibilityIdentifier("voiceLowConfidenceWarning")
                 }
             }
@@ -223,7 +247,7 @@ struct VoiceInputView: View {
             if let parseFailureMessage {
                 Section {
                     Text(parseFailureMessage)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(KueColor.error)
                         .accessibilityIdentifier("voiceParseFailureMessage")
                 }
             }
@@ -246,8 +270,8 @@ struct VoiceInputView: View {
 
                 if !isAIAvailable {
                     Text(aiAvailabilityChecker.currentAvailability().message ?? "")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(KueTypography.footnote)
+                        .foregroundStyle(KueColor.secondaryText)
                         .accessibilityIdentifier("voiceParserUnavailableMessage")
                 }
             }
@@ -269,11 +293,11 @@ struct VoiceInputView: View {
                     }
                 }
                 .accessibilityIdentifier("voiceOpenSettingsButton")
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glassProminent)
             } else {
                 Button("Try Again") { coordinator.retry() }
                     .accessibilityIdentifier("voiceRetryButton")
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.glassProminent)
             }
 
             Button("Enter Manually") { onSwitchToManualEntry() }
@@ -321,4 +345,24 @@ struct VoiceInputView: View {
     private static func formattedDuration(_ seconds: Int) -> String {
         String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
+}
+
+// Kue 2.0 Phase 7 — requirement 43: representative Voice states. Always the fake services
+// (never the real Speech framework/microphone) — Xcode's preview canvas must never activate
+// the real microphone (requirement 48's own spirit, applied here).
+#Preview("Voice Input — Light") {
+    VoiceInputView(onContinue: { _, _ in }, onSwitchToManualEntry: {}, onSwitchToOCR: {})
+        .environment(\.voiceAuthorizationChecker, FakeVoiceAuthorizationChecker())
+        .environment(\.voiceAudioSessionManager, FakeVoiceAudioSessionManager())
+        .environment(\.voiceMicrophoneCapture, FakeVoiceMicrophoneCapture())
+        .environment(\.voiceSpeechRecognizer, FakeVoiceSpeechRecognizer())
+}
+
+#Preview("Voice Input — Dark") {
+    VoiceInputView(onContinue: { _, _ in }, onSwitchToManualEntry: {}, onSwitchToOCR: {})
+        .environment(\.voiceAuthorizationChecker, FakeVoiceAuthorizationChecker())
+        .environment(\.voiceAudioSessionManager, FakeVoiceAudioSessionManager())
+        .environment(\.voiceMicrophoneCapture, FakeVoiceMicrophoneCapture())
+        .environment(\.voiceSpeechRecognizer, FakeVoiceSpeechRecognizer())
+        .preferredColorScheme(.dark)
 }

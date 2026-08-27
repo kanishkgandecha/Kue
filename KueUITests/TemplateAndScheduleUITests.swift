@@ -38,7 +38,7 @@ final class TemplateAndScheduleUITests: XCTestCase {
     // MARK: - Template selection (requirement 2/3: fully scheduled, zero AI)
 
     func testSelectingATemplateCreatesAFullyScheduledEvent() {
-        app.buttons["templatesButton"].tap()
+        app.selectTab("tab-templates")
 
         let interviewTemplate = app.buttons["template-interview"]
         XCTAssertTrue(interviewTemplate.waitForExistence(timeout: 5))
@@ -53,8 +53,12 @@ final class TemplateAndScheduleUITests: XCTestCase {
         titleField.typeText(title)
         app.buttons["saveEventButton"].tap()
 
-        // Creation completes end to end and Templates' own sheet doesn't linger underneath
-        // (a nested-sheet bug this test originally caught) — the new event is reachable.
+        // Kue 2.0 Phase 7 — Templates is its own tab now: saving pops back onto its stack
+        // (proving creation completed and nothing lingers underneath, the same "no
+        // nested-sheet bug" guarantee this test originally caught), and the new event is
+        // reachable from Home.
+        app.selectTab("tab-home")
+        app.revealHomeEventIfInsideCollapsedCompletedSection(titled: title)
         XCTAssertTrue(app.staticTexts[title].waitForExistence(timeout: 5))
         app.staticTexts[title].tap()
         XCTAssertTrue(app.navigationBars[title].waitForExistence(timeout: 5))
@@ -73,7 +77,7 @@ final class TemplateAndScheduleUITests: XCTestCase {
         // therefore already in the past and correctly clamped away from Tasks (see
         // CustomScheduleTests for that behavior at the unit level). This test stays scoped
         // to what Edit Schedule itself guarantees: the rule you add shows up in its list.
-        app.buttons["addEventButton"].tap()
+        app.openManualAddForm()
         let titleField = app.textFields["eventTitleField"]
         XCTAssertTrue(titleField.waitForExistence(timeout: 5))
         let title = uniqueTitle("UI Test Custom Schedule")
@@ -81,6 +85,9 @@ final class TemplateAndScheduleUITests: XCTestCase {
         titleField.typeText(title)
         app.buttons["saveEventButton"].tap()
 
+        // Kue 2.0 Phase 7 — saving dismisses back to the Add tab, not Home.
+        app.selectTab("tab-home")
+        app.revealHomeEventIfInsideCollapsedCompletedSection(titled: title)
         XCTAssertTrue(app.staticTexts[title].waitForExistence(timeout: 5))
         app.staticTexts[title].tap()
         app.segmentedControls.buttons["Timeline"].tap()
@@ -104,7 +111,7 @@ final class TemplateAndScheduleUITests: XCTestCase {
     }
 
     func testDeletingAScheduleRuleViaSwipe() {
-        app.buttons["addEventButton"].tap()
+        app.openManualAddForm()
         let titleField = app.textFields["eventTitleField"]
         XCTAssertTrue(titleField.waitForExistence(timeout: 5))
         let title = uniqueTitle("UI Test Swipe Delete")
@@ -117,6 +124,9 @@ final class TemplateAndScheduleUITests: XCTestCase {
         }
         app.buttons["saveEventButton"].tap()
 
+        // Kue 2.0 Phase 7 — saving dismisses back to the Add tab, not Home.
+        app.selectTab("tab-home")
+        app.revealHomeEventIfInsideCollapsedCompletedSection(titled: title)
         XCTAssertTrue(app.staticTexts[title].waitForExistence(timeout: 5))
         app.staticTexts[title].tap()
         app.segmentedControls.buttons["Timeline"].tap()

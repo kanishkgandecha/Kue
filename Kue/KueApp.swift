@@ -65,7 +65,7 @@ struct KueApp: App {
         WindowGroup {
             switch openOutcome {
             case .success(let container):
-                HomeView()
+                RootTabView()
                     // Real, on-device-only implementations — see docs/06-ai-layer.md "Parser
                     // runtime & credentials". Everywhere else in the app reads these only
                     // through the `NLParsing`/`AIAvailabilityChecking` environment seam
@@ -97,6 +97,9 @@ struct KueApp: App {
                     .environment(\.voiceAudioSessionManager, Self.makeVoiceAudioSessionManager())
                     .environment(\.voiceMicrophoneCapture, Self.makeVoiceMicrophoneCapture())
                     .environment(\.voiceSpeechRecognizer, Self.makeVoiceSpeechRecognizer())
+                    // Kue 2.0 Phase 7 — same launch-argument-gated seam as Calendar/OCR/Voice
+                    // above: haptics never fire under `XCUIApplication` automation.
+                    .environment(\.kueHaptics, Self.makeHapticPlayer())
                     .modelContainer(container)
             case .failure(let diagnostic):
                 StoreOpenFailureView(diagnostic: diagnostic) {
@@ -188,6 +191,16 @@ struct KueApp: App {
     @MainActor
     private static func makeVoiceSpeechRecognizer() -> VoiceSpeechRecognizing {
         FakeVoiceSpeechRecognizer.makeFromLaunchArguments() ?? SystemVoiceSpeechRecognizer()
+    }
+
+    /// Kue 2.0 Phase 7 — UI tests already launch with one of the fake-service arguments above
+    /// whenever they exercise a haptic-triggering action; reusing `usesFakeAIServices`'s
+    /// underlying check would be wrong (haptics fire on far more screens than AI-gated ones),
+    /// so this checks for *any* `KueUITests` launch argument via the same isolated-store flag
+    /// every other seam in this file keys off.
+    @MainActor
+    private static func makeHapticPlayer() -> KueHapticPlaying {
+        ModelContainerFactory.isUITestIsolatedStore ? FakeHapticPlayer() : SystemHapticPlayer.shared
     }
 
     /// Kue 2.0 Phase 4 — see the call site's own comment above for the full gating argument.

@@ -99,14 +99,14 @@ struct OCRImportView: View {
         VStack(spacing: 20) {
             Image(systemName: "text.viewfinder")
                 .font(.system(size: 44))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KueColor.secondaryText)
                 .accessibilityHidden(true)
 
             // Requirement 21/22 — persistent, accurate, specific on-device disclosure, shown
             // before any image is even picked.
             Text("Processed on-device. The image you select is processed locally on this device and is never uploaded by Kue.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                .font(KueTypography.footnote)
+                .foregroundStyle(KueColor.secondaryText)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
                 .accessibilityIdentifier("ocrOnDeviceDisclosure")
@@ -118,7 +118,7 @@ struct OCRImportView: View {
                 Button("Choose Test Image") {
                     startProcessing(data: OCRFixtureImage.data)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glassProminent)
                 .accessibilityIdentifier("ocrChooseFixtureImageButton")
             } else {
                 // Requirement 2/3 — the system picker; PHPickerViewController-backed, so it
@@ -127,7 +127,7 @@ struct OCRImportView: View {
                 PhotosPicker(selection: $pickerItem, matching: .images) {
                     Label("Choose Photo", systemImage: "photo.on.rectangle")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glassProminent)
                 .accessibilityIdentifier("ocrChoosePhotoButton")
                 .onChange(of: pickerItem) { _, newItem in
                     guard let newItem else { return }
@@ -152,7 +152,7 @@ struct OCRImportView: View {
                 .accessibilityLabel("Processing image on-device")
             Text("Reading text on-device…")
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KueColor.secondaryText)
         }
         .padding()
         .accessibilityIdentifier("ocrLoadingState")
@@ -167,8 +167,8 @@ struct OCRImportView: View {
                 // Requirement 21 — the disclosure stays visible through the whole flow, not
                 // just the initial screen.
                 Text("Processed on-device. The image you select is processed locally on this device and is never uploaded by Kue.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .font(KueTypography.footnote)
+                    .foregroundStyle(KueColor.secondaryText)
                     .accessibilityIdentifier("ocrOnDeviceDisclosureReview")
             }
 
@@ -177,7 +177,7 @@ struct OCRImportView: View {
                     // Requirement 39 — non-color-only: an icon + specific text, not just a
                     // colored dot.
                     Label(warning, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(KueColor.warning)
                         .accessibilityIdentifier("ocrLowConfidenceWarning")
                 }
             }
@@ -192,7 +192,7 @@ struct OCRImportView: View {
             if let parseFailureMessage {
                 Section {
                     Text(parseFailureMessage)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(KueColor.error)
                         .accessibilityIdentifier("ocrParseFailureMessage")
                 }
             }
@@ -218,8 +218,8 @@ struct OCRImportView: View {
                     // actionable message (mirrors AIAvailabilityState's own copy), not a
                     // disabled button with no explanation.
                     Text(aiAvailabilityChecker.currentAvailability().message ?? "")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(KueTypography.footnote)
+                        .foregroundStyle(KueColor.secondaryText)
                         .accessibilityIdentifier("ocrParserUnavailableMessage")
                 }
             }
@@ -234,7 +234,7 @@ struct OCRImportView: View {
             ContentUnavailableView(message, systemImage: systemImage)
             Button("Choose Another Photo") { resetToInitial() }
                 .accessibilityIdentifier("ocrChooseAnotherPhotoButton")
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glassProminent)
         }
         // Deliberately no identifier on this outer container — see `initialState`'s own
         // comment; `ocrChooseAnotherPhotoButton`'s presence, or the message text itself,
@@ -387,4 +387,24 @@ enum OCRFixtureImage {
         }
         return image.jpegData(compressionQuality: 0.9) ?? Data()
     }()
+}
+
+// Kue 2.0 Phase 7 — requirement 43: representative OCR states for the design review. Always
+// the fake recognizer (never `SystemOCRTextRecognizer`) — Xcode's preview canvas must never
+// touch the real Vision framework/Photos library (requirement 48's own spirit, applied here).
+#Preview("OCR Import — Light") {
+    OCRImportView { _, _ in }
+        .environment(\.ocrTextRecognizer, FakeOCRTextRecognizer(resultToReturn: .success(.fixtureEvent)))
+}
+
+#Preview("OCR Import — Dark") {
+    OCRImportView { _, _ in }
+        .environment(\.ocrTextRecognizer, FakeOCRTextRecognizer(resultToReturn: .success(.fixtureEvent)))
+        .preferredColorScheme(.dark)
+}
+
+#Preview("OCR Import — Large Dynamic Type") {
+    OCRImportView { _, _ in }
+        .environment(\.ocrTextRecognizer, FakeOCRTextRecognizer(resultToReturn: .success(.fixtureEvent)))
+        .environment(\.sizeCategory, .accessibilityExtraExtraExtraLarge)
 }

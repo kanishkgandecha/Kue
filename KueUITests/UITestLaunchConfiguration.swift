@@ -80,3 +80,79 @@ enum UITestLaunchConfiguration {
         XCUIDevice.shared.orientation = .portrait
     }
 }
+
+// Kue 2.0 Phase 7 — Event Detail gained a new header section (status badge + preparation
+// progress) above "Info"/"Actions", pushing every row below it further down. A `Form`'s rows
+// aren't in the accessibility tree until actually scrolled into view, so any Actions-section
+// button below that header (Delete, Add/Update Calendar, Duplicate) isn't reliably materialized
+// or hittable on first render — this used to live as a private one-file helper in
+// EventManagementUITests before more than one file needed it.
+extension XCUIElement {
+    /// Swipes `app` up, a bounded number of times, until `self` actually exists and is
+    /// hittable — doesn't assume whether SwiftUI's `Form` renders as a `UITableView` or
+    /// `UICollectionView` under the hood (that's changed across iOS versions), and never
+    /// assumes a fixed scroll distance.
+    func scrollUpUntilHittable(in app: XCUIApplication, maxSwipes: Int = 6) {
+        var attempts = 0
+        while !(exists && isHittable) && attempts < maxSwipes {
+            app.swipeUp()
+            attempts += 1
+        }
+    }
+}
+
+// Kue 2.0 Phase 7 — the bottom navigation bar replaced Home's old toolbar (Add/Settings/
+// Templates/More-Ways-to-Add menu/Filter & Sort). Every test file's old direct
+// `app.buttons["addEventButton"/"settingsButton"/...].tap()` call routed through exactly this
+// shape, so these are the one place that shape needed to change — every UI test below now goes
+// through one of these instead of re-deriving the new navigation path itself.
+extension XCUIApplication {
+    /// Selects one of the five bottom-navigation destinations by its `tab-*` identifier
+    /// (`RootTabView.swift`).
+    func selectTab(_ identifier: String) {
+        let tab = buttons[identifier]
+        XCTAssertTrue(tab.waitForExistence(timeout: 5), "Expected tab bar button \(identifier) to exist.")
+        tab.tap()
+    }
+
+    /// Opens the Add tab and starts "Create Manually" — equivalent of the old single-tap
+    /// `addEventButton`, which opened the identical `EventFormView` sheet directly.
+    func openManualAddForm() {
+        selectTab("tab-add")
+        let manual = buttons["addMethodManual"]
+        XCTAssertTrue(manual.waitForExistence(timeout: 5))
+        manual.tap()
+    }
+
+    /// Opens the Add tab and taps one of its rows directly — equivalent of the old
+    /// `moreAddOptionsButton` menu, whose items (`importFromCalendarButton`/
+    /// `scanScreenshotButton`/`voiceInputButton`) now live on `AddHubView` with no menu step.
+    func openAddMethod(_ identifier: String) {
+        selectTab("tab-add")
+        let row = buttons[identifier]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+    }
+
+    /// A freshly created event's `startDate` defaults to "now," so it can become `.completed`
+    /// within seconds of saving (before this call even runs) — landing it inside Home's
+    /// collapsed-by-default Completed section instead of a date section, invisible to a plain
+    /// `app.staticTexts[title]` lookup. Only expands the Completed disclosure when `title`
+    /// isn't already on-screen (an ordinary date-sectioned event needs no help, and a second
+    /// call within the same test — the disclosure is already expanded — never accidentally
+    /// re-collapses it), matching how a user would open the section to check.
+    func revealHomeEventIfInsideCollapsedCompletedSection(titled title: String) {
+        guard !staticTexts[title].waitForExistence(timeout: 2) else { return }
+        // A `DisclosureGroup`'s own accessibility identifier resolves to an ambiguous element
+        // whose reported automation type XCUITest itself flags as mismatched ("computed Other
+        // from legacy attributes vs StaticText from modern attribute") — tapping *that* element
+        // (matched via `.any`) synthesizes a tap at the wrong coordinates entirely (observed
+        // landing on the Templates tab instead). The disclosure's own label text — "Completed
+        // (N)" — renders as a plain, correctly-positioned `StaticText`; tapping that instead
+        // reliably toggles the same disclosure.
+        let header = staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Completed ('")).firstMatch
+        if header.waitForExistence(timeout: 2) {
+            header.tap()
+        }
+    }
+}

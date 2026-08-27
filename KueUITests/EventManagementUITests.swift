@@ -19,22 +19,11 @@ private extension XCUIElement {
         }
         typeText(text)
     }
-
-    /// Info's "Actions" section (Cancel/Complete/Skip-if-recurring/Archive/Calendar/
-    /// Duplicate/Delete) is long enough that its last row — Delete — isn't always already
-    /// materialized/on-screen the instant the detail view appears, unlike every earlier row
-    /// in that same section. Swipes `app` up, a bounded number of times, until `self` actually
-    /// exists and is hittable — doesn't assume whether SwiftUI's `Form` renders as a
-    /// `UITableView` or `UICollectionView` under the hood (that's changed across iOS
-    /// versions), and never assumes a fixed scroll distance.
-    func scrollUpUntilHittable(in app: XCUIApplication, maxSwipes: Int = 6) {
-        var attempts = 0
-        while !(exists && isHittable) && attempts < maxSwipes {
-            app.swipeUp()
-            attempts += 1
-        }
-    }
 }
+
+// `scrollUpUntilHittable(in:maxSwipes:)` moved to `UITestLaunchConfiguration.swift` once more
+// than this one file needed it (Event Detail's "Actions" section — Calendar/Duplicate/Delete —
+// isn't always already materialized/hittable the instant the detail view appears).
 
 final class EventManagementUITests: XCTestCase {
     private var app: XCUIApplication!
@@ -48,12 +37,17 @@ final class EventManagementUITests: XCTestCase {
     }
 
     private func createEvent(title: String) {
-        app.buttons["addEventButton"].tap()
+        app.openManualAddForm()
         let titleField = app.textFields["eventTitleField"]
         XCTAssertTrue(titleField.waitForExistence(timeout: 5))
         titleField.tap()
         titleField.typeText(title)
         app.buttons["saveEventButton"].tap()
+        // Kue 2.0 Phase 7 — saving dismisses back to the Add tab, not Home; every caller below
+        // immediately looks for the new event's row, so land back on Home the same way a user
+        // would.
+        app.selectTab("tab-home")
+        app.revealHomeEventIfInsideCollapsedCompletedSection(titled: title)
     }
 
     /// Unique per invocation — the app's real on-disk store persists across UI test runs,

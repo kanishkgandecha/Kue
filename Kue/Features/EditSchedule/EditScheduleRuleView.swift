@@ -83,7 +83,7 @@ struct EditScheduleRuleView: View {
                     Section {
                         ForEach(errors) { error in
                             Label(error.errorDescription ?? "", systemImage: "xmark.octagon")
-                                .foregroundStyle(.red)
+                                .foregroundStyle(KueColor.error)
                         }
                     }
                     .accessibilityIdentifier("scheduleRuleErrors")

@@ -26,7 +26,7 @@ final class SearchAndOrganizationUITests: XCTestCase {
     }
 
     private func createEvent(title: String, eventType: String? = nil) {
-        app.buttons["addEventButton"].tap()
+        app.openManualAddForm()
         let titleField = app.textFields["eventTitleField"]
         XCTAssertTrue(titleField.waitForExistence(timeout: 5))
         titleField.tap()
@@ -38,6 +38,10 @@ final class SearchAndOrganizationUITests: XCTestCase {
             }
         }
         app.buttons["saveEventButton"].tap()
+        // Kue 2.0 Phase 7 — saving dismisses back to the Add tab; every caller either checks
+        // Home directly or navigates on to the Search tab itself.
+        app.selectTab("tab-home")
+        app.revealHomeEventIfInsideCollapsedCompletedSection(titled: title)
         XCTAssertTrue(app.staticTexts[title].waitForExistence(timeout: 5))
     }
 
@@ -45,12 +49,13 @@ final class SearchAndOrganizationUITests: XCTestCase {
         app.searchFields.firstMatch
     }
 
-    // MARK: - Search + clear (requirement 14)
+    // MARK: - Search + clear (requirement 14, moved to its own tab in Phase 7)
 
-    func testSearchingFiltersHomeToMatchingTitle() {
+    func testSearchingFiltersToMatchingTitle() {
         let title = uniqueTitle("UI Test Search Target")
         createEvent(title: title)
 
+        app.selectTab("tab-search")
         XCTAssertTrue(searchField.waitForExistence(timeout: 5))
         searchField.tap()
         searchField.typeText(title)
@@ -58,10 +63,14 @@ final class SearchAndOrganizationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts[title].waitForExistence(timeout: 5))
     }
 
-    func testClearingSearchRestoresTheDefaultHomeList() {
+    func testClearingSearchReturnsToTheEmptyQueryState() {
+        // Kue 2.0 Phase 7 — Search is its own dedicated page now, not an always-populated list
+        // embedded in Home: clearing the query returns to the "search your events" prompt
+        // (`searchEmptyQueryView`), not a restored default list — there is no default list here.
         let title = uniqueTitle("UI Test Clear Search")
         createEvent(title: title)
 
+        app.selectTab("tab-search")
         XCTAssertTrue(searchField.waitForExistence(timeout: 5))
         searchField.tap()
         searchField.typeText(uniqueTitle("Some Query That Matches Nothing At All"))
@@ -74,7 +83,8 @@ final class SearchAndOrganizationUITests: XCTestCase {
             searchField.buttons.firstMatch.tap()
         }
 
-        XCTAssertTrue(app.staticTexts[title].waitForExistence(timeout: 5))
+        let emptyQueryView = app.descendants(matching: .any).matching(identifier: "searchEmptyQueryView").firstMatch
+        XCTAssertTrue(emptyQueryView.waitForExistence(timeout: 5))
     }
 
     func testSearchingForANonexistentTitleShowsAnEmptyResultsState() {
@@ -87,6 +97,7 @@ final class SearchAndOrganizationUITests: XCTestCase {
         // execution order.
         createEvent(title: uniqueTitle("UI Test Empty Search Baseline"))
 
+        app.selectTab("tab-search")
         XCTAssertTrue(searchField.waitForExistence(timeout: 5))
         searchField.tap()
         searchField.typeText(uniqueTitle("Definitely Not A Real Event Title"))
@@ -97,9 +108,10 @@ final class SearchAndOrganizationUITests: XCTestCase {
         XCTAssertTrue(emptyView.waitForExistence(timeout: 5))
     }
 
-    // MARK: - Filter + sort sheet (requirement 14)
+    // MARK: - Filter + sort sheet (requirement 14, now on the Search tab)
 
     func testOpeningFilterSortSheetShowsSortAndFilterControls() {
+        app.selectTab("tab-search")
         XCTAssertTrue(app.buttons["filterSortButton"].waitForExistence(timeout: 5))
         app.buttons["filterSortButton"].tap()
 
@@ -116,9 +128,16 @@ final class SearchAndOrganizationUITests: XCTestCase {
         let interviewTitle = uniqueTitle("UI Test Filter Interview")
         createEvent(title: interviewTitle, eventType: "Interview")
 
+        app.selectTab("tab-search")
         app.buttons["filterSortButton"].tap()
-        XCTAssertTrue(app.switches["filterType-interview"].waitForExistence(timeout: 5))
-        app.switches["filterType-interview"].tap()
+        let interviewToggle = app.switches["filterType-interview"]
+        XCTAssertTrue(interviewToggle.waitForExistence(timeout: 5))
+        // A plain `.tap()` taps this row's *center*, which — same as
+        // `RecurringEventsUITests.enableRecurrence()`'s own documented fix for this exact
+        // SwiftUI quirk — lands on the label side rather than ever actually flipping the
+        // switch. Tapping near the switch's own side of the row (its right edge) reliably
+        // toggles it instead.
+        interviewToggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
         app.buttons["doneFilterSortButton"].tap()
 
         XCTAssertTrue(app.staticTexts[interviewTitle].waitForExistence(timeout: 5))
@@ -133,6 +152,7 @@ final class SearchAndOrganizationUITests: XCTestCase {
         let title = uniqueTitle("UI Test Sort By Priority")
         createEvent(title: title)
 
+        app.selectTab("tab-search")
         app.buttons["filterSortButton"].tap()
         // Segmented picker — each option renders as a tappable button segment.
         XCTAssertTrue(app.buttons["Priority"].waitForExistence(timeout: 5))
@@ -153,8 +173,14 @@ final class SearchAndOrganizationUITests: XCTestCase {
         createEvent(title: title)
 
         app.staticTexts[title].tap()
-        XCTAssertTrue(app.buttons["duplicateEventButton"].waitForExistence(timeout: 5))
-        app.buttons["duplicateEventButton"].tap()
+        let duplicateEventButton = app.buttons["duplicateEventButton"]
+        // Kue 2.0 Phase 7 — `duplicateEventButton` sits below Event Detail's new header
+        // section, same as Delete/Calendar actions; it isn't materialized in the accessibility
+        // tree at all until scrolled into view, so `scrollUpUntilHittable` (which loops its own
+        // `exists` check) must run *before* asserting existence, not after.
+        duplicateEventButton.scrollUpUntilHittable(in: app)
+        XCTAssertTrue(duplicateEventButton.waitForExistence(timeout: 5))
+        duplicateEventButton.tap()
 
         // The duplicated event's own detail screen is presented — its navigation title is
         // the (identical) title, proving a second, independent event was created and opened.

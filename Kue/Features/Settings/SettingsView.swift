@@ -20,6 +20,8 @@ import UserNotifications
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.calendarProvider) private var calendarProvider
+    // Kue 2.0 Phase 7 — requirement 32/34: the one destructive confirmation this screen has.
+    @Environment(\.kueHaptics) private var haptics
     @State private var preference: UserPreference?
     @State private var authorizationStatus: UNAuthorizationStatus = .notDetermined
     @State private var isConfirmingDeleteEverything = false
@@ -132,6 +134,7 @@ struct SettingsView: View {
             Button("Delete Everything", role: .destructive) {
                 PrivacyActions.deleteEverything(context: modelContext, scheduler: scheduler, widgetReloader: widgetReloader)
                 preference = UserPreferenceStore.current(context: modelContext)
+                haptics.play(.destructiveConfirmed)
             }
             .accessibilityIdentifier("confirmDeleteEverythingButton")
         }
@@ -145,15 +148,15 @@ struct SettingsView: View {
                 .accessibilityIdentifier("notificationStatusOn")
         case .denied:
             Label("Notifications are off", systemImage: "bell.slash")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KueColor.secondaryText)
                 .accessibilityIdentifier("notificationStatusDenied")
         case .notDetermined:
             Label("Not yet requested", systemImage: "bell")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KueColor.secondaryText)
                 .accessibilityIdentifier("notificationStatusNotDetermined")
         @unknown default:
             Label("Notifications are off", systemImage: "bell.slash")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KueColor.secondaryText)
         }
     }
 
@@ -170,23 +173,23 @@ struct SettingsView: View {
                 .accessibilityIdentifier("calendarStatusWriteOnly")
         case .denied:
             Label("Calendar access is off", systemImage: "calendar.badge.exclamationmark")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KueColor.secondaryText)
                 .accessibilityIdentifier("calendarStatusDenied")
         case .restricted:
             Label("Calendar access is restricted", systemImage: "lock")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KueColor.secondaryText)
                 .accessibilityIdentifier("calendarStatusRestricted")
         case .notDetermined:
             Label("Not yet requested", systemImage: "calendar")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KueColor.secondaryText)
                 .accessibilityIdentifier("calendarStatusNotDetermined")
         case .unavailable:
             Label("Calendar access is unavailable", systemImage: "calendar.badge.exclamationmark")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KueColor.secondaryText)
                 .accessibilityIdentifier("calendarStatusUnavailable")
         case .unknown:
             Label("Calendar access is unavailable", systemImage: "calendar.badge.exclamationmark")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KueColor.secondaryText)
                 .accessibilityIdentifier("calendarStatusUnknown")
         }
     }
@@ -210,9 +213,25 @@ struct SettingsView: View {
     }
 }
 
-#Preview {
+#Preview("Settings — Light") {
     NavigationStack {
         SettingsView()
             .modelContainer(ModelContainerFactory.makeInMemory())
     }
+}
+
+#Preview("Settings — Dark") {
+    NavigationStack {
+        SettingsView()
+            .modelContainer(ModelContainerFactory.makeInMemory())
+    }
+    .preferredColorScheme(.dark)
+}
+
+#Preview("Settings — Large Dynamic Type") {
+    NavigationStack {
+        SettingsView()
+            .modelContainer(ModelContainerFactory.makeInMemory())
+    }
+    .environment(\.sizeCategory, .accessibilityExtraExtraExtraLarge)
 }

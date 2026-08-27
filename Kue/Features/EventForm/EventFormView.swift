@@ -28,6 +28,9 @@ struct EventFormView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.nlParser) private var nlParser
     @Environment(\.aiAvailabilityChecker) private var aiAvailabilityChecker
+    // Kue 2.0 Phase 7 — requirement 32/34: a successful create/save gets one restrained
+    // confirmation haptic; never the real Taptic Engine under `KueUITests`.
+    @Environment(\.kueHaptics) private var haptics
     @Query private var allEvents: [KueEvent]
 
     @State private var draft: EventDraft
@@ -109,13 +112,14 @@ struct EventFormView: View {
                 }
 
                 if let duplicate {
+                    // Kue 2.0 Phase 7 — one shared banner treatment (KueBanner) rather than a
+                    // bespoke orange `Label` — same identifier, same "tap to view" affordance.
                     Section {
-                        Button {
-                            isViewingDuplicate = true
-                        } label: {
-                            Label("You already have \"\(duplicate.title)\" on this date.", systemImage: "exclamationmark.triangle")
-                                .foregroundStyle(.orange)
-                        }
+                        KueBanner(
+                            kind: .warning,
+                            message: "You already have \"\(duplicate.title)\" on this date.",
+                            action: ("View Event", { isViewingDuplicate = true })
+                        )
                         .accessibilityIdentifier("duplicateWarning")
                     }
                 }
@@ -196,11 +200,15 @@ struct EventFormView: View {
                     Section {
                         ForEach(errors) { error in
                             Label(error.errorDescription ?? "", systemImage: "xmark.octagon")
-                                .foregroundStyle(.red)
+                                .foregroundStyle(KueColor.error)
+                                .font(KueTypography.footnote)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         ForEach(recurrenceErrors) { error in
                             Label(error.errorDescription ?? "", systemImage: "xmark.octagon")
-                                .foregroundStyle(.red)
+                                .foregroundStyle(KueColor.error)
+                                .font(KueTypography.footnote)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     .accessibilityIdentifier("validationErrors")
@@ -419,16 +427,12 @@ struct EventFormView: View {
     }
 
     private func ambiguityRow(_ ambiguity: DraftAmbiguity) -> some View {
-        HStack(alignment: .top) {
-            Label(ambiguity.question, systemImage: "questionmark.circle")
-                .foregroundStyle(.orange)
-                .font(.footnote)
-            Spacer()
-            Button("Resolved") {
-                ambiguities.removeAll { $0.id == ambiguity.id }
-            }
-            .font(.footnote)
-        }
+        KueBanner(
+            kind: .notice,
+            message: ambiguity.question,
+            systemImage: "questionmark.circle",
+            action: ("Resolved", { ambiguities.removeAll { $0.id == ambiguity.id } })
+        )
         .accessibilityIdentifier("ambiguity-\(ambiguity.field)")
     }
 
@@ -450,7 +454,10 @@ struct EventFormView: View {
     private func save() {
         errors = EventValidator.validate(draft)
         recurrenceErrors = isRecurrenceRuleEditable ? EventValidator.validateRecurrence(draft) : []
-        guard errors.isEmpty, recurrenceErrors.isEmpty, ambiguities.isEmpty else { return }
+        guard errors.isEmpty, recurrenceErrors.isEmpty, ambiguities.isEmpty else {
+            haptics.play(.actionFailed)
+            return
+        }
 
         let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let now = Date()
@@ -547,6 +554,7 @@ struct EventFormView: View {
                 requestPermissionIfNeeded: true
             )
         }
+        haptics.play(.eventCreated)
         dismiss()
     }
 
@@ -563,7 +571,19 @@ struct EventFormView: View {
     }
 }
 
-#Preview {
+#Preview("Event Form — Light") {
     EventFormView(mode: .add(initialEventType: .generic))
         .modelContainer(ModelContainerFactory.makeInMemory())
+}
+
+#Preview("Event Form — Dark") {
+    EventFormView(mode: .add(initialEventType: .generic))
+        .modelContainer(ModelContainerFactory.makeInMemory())
+        .preferredColorScheme(.dark)
+}
+
+#Preview("Event Form — Large Dynamic Type") {
+    EventFormView(mode: .add(initialEventType: .generic))
+        .modelContainer(ModelContainerFactory.makeInMemory())
+        .environment(\.sizeCategory, .accessibilityExtraExtraExtraLarge)
 }

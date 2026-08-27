@@ -32,8 +32,8 @@ struct CalendarDestinationPickerView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(calendar.title)
                                 Text(calendar.sourceTitle)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .font(KueTypography.footnote)
+                                    .foregroundStyle(KueColor.secondaryText)
                             }
                         }
                         .accessibilityIdentifier("calendarDestination-\(calendar.calendarIdentifier)")

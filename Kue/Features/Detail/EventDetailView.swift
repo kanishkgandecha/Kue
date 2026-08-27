@@ -26,6 +26,9 @@ struct EventDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Environment(\.calendarProvider) private var calendarProvider
+    // Kue 2.0 Phase 7 — requirement 32/34: restrained, injectable haptic feedback. Never the
+    // real Taptic Engine under `KueUITests` — see `KueHaptics.swift`.
+    @Environment(\.kueHaptics) private var haptics
 
     @State private var tab: DetailTab = .info
     @State private var isEditing = false
@@ -114,17 +117,20 @@ struct EventDetailView: View {
                 // (requirement 16): each option names exactly what it deletes.
                 Button("Delete This Occurrence", role: .destructive) {
                     OccurrenceReconciliationService.deleteOccurrence(event, scope: .thisOccurrence, context: modelContext)
+                    haptics.play(.destructiveConfirmed)
                     dismiss()
                 }
                 .accessibilityIdentifier("confirmDeleteOccurrenceButton")
                 Button("Delete This and Future Occurrences", role: .destructive) {
                     OccurrenceReconciliationService.deleteOccurrence(event, scope: .thisAndFuture, context: modelContext)
+                    haptics.play(.destructiveConfirmed)
                     dismiss()
                 }
                 .accessibilityIdentifier("confirmDeleteThisAndFutureButton")
             } else {
                 Button("Delete", role: .destructive) {
                     EventActions.delete(event, context: modelContext)
+                    haptics.play(.destructiveConfirmed)
                     dismiss()
                 }
                 .accessibilityIdentifier("confirmDeleteButton")
@@ -172,6 +178,23 @@ struct EventDetailView: View {
 
     private var infoTab: some View {
         Form {
+            // Kue 2.0 Phase 7 — requirement 15's "clear title and event status" up front,
+            // before the detail rows: a glanceable status badge plus, when this event has
+            // generated tasks, the same preparation-progress readout Home's `EventCard` shows.
+            Section {
+                HStack {
+                    EventStatusBadge(style: KueStatusStyle.forEvent(event, status: displayedStatus))
+                    Spacer()
+                }
+                if !event.tasks.isEmpty && displayedStatus != .completed && displayedStatus != .cancelled && displayedStatus != .archived {
+                    PreparationProgressView(
+                        completedCount: event.tasks.filter(\.isCompleted).count,
+                        totalCount: event.tasks.count
+                    )
+                }
+            }
+            .listRowBackground(Color.clear)
+
             Section {
                 LabeledContent("Type", value: event.eventType.displayName)
                 LabeledContent("Status", value: statusLabel)
@@ -223,6 +246,7 @@ struct EventDetailView: View {
                     } else {
                         Button("Mark Complete") {
                             EventActions.complete(event, context: modelContext)
+                            haptics.play(.taskCompleted)
                         }
                         .accessibilityIdentifier("completeEventButton")
                     }
@@ -264,11 +288,21 @@ struct EventDetailView: View {
                 }
                 .accessibilityIdentifier("duplicateEventButton")
                 .disabled(isDuplicating)
+            }
 
+            // Kue 2.0 Phase 7 — requirement 16: an irreversible action must not visually
+            // compete with the reversible ones above it (Archive/Cancel/Skip can all be
+            // undone; deleting an event, its tasks, schedule, and widget settings cannot).
+            // A dedicated, clearly-labeled section is the plain-Form equivalent of iOS's own
+            // "Danger Zone" convention — no different button role or color than before
+            // (`role: .destructive` already rendered this red), just physically separated.
+            Section {
                 Button("Delete Event", role: .destructive) {
                     isConfirmingDelete = true
                 }
                 .accessibilityIdentifier("deleteEventButton")
+            } footer: {
+                Text("This can't be undone.")
             }
         }
     }
@@ -595,12 +629,34 @@ struct EventDetailView: View {
     }
 }
 
-#Preview {
+private func previewEvent(withTasks: Bool = false) -> (ModelContainer, KueEvent) {
     let container = ModelContainerFactory.makeInMemory()
     let event = KueEvent(title: "Preview Event", eventType: .interview, startDate: .now, estimatedDurationMinutes: 60, source: .manual)
     container.mainContext.insert(event)
-    return NavigationStack {
-        EventDetailView(event: event)
+    if withTasks {
+        let task = KueTask(event: event, title: "Review resume", dueDate: .now, isCompleted: true, offsetLabel: "1 day before")
+        container.mainContext.insert(task)
+        event.tasks = [task]
     }
-    .modelContainer(container)
+    return (container, event)
+}
+
+#Preview("Event Detail — Light") {
+    let (container, event) = previewEvent(withTasks: true)
+    return NavigationStack { EventDetailView(event: event) }
+        .modelContainer(container)
+}
+
+#Preview("Event Detail — Dark") {
+    let (container, event) = previewEvent(withTasks: true)
+    return NavigationStack { EventDetailView(event: event) }
+        .modelContainer(container)
+        .preferredColorScheme(.dark)
+}
+
+#Preview("Event Detail — Large Dynamic Type") {
+    let (container, event) = previewEvent(withTasks: true)
+    return NavigationStack { EventDetailView(event: event) }
+        .modelContainer(container)
+        .environment(\.sizeCategory, .accessibilityExtraExtraExtraLarge)
 }

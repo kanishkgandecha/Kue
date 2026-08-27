@@ -33,10 +33,9 @@ final class VoiceInputUITests: XCTestCase {
     }
 
     private func openVoiceInput() {
-        // Import from Calendar / Scan Screenshot / Voice Input are collapsed into one "More
-        // Ways to Add" menu — see HomeView's own comment.
-        app.buttons["moreAddOptionsButton"].tap()
-        app.buttons["voiceInputButton"].tap()
+        // Kue 2.0 Phase 7 — Voice Input is its own row on the Add tab's hub page now, no menu
+        // step.
+        app.openAddMethod("voiceInputButton")
     }
 
     // MARK: 1. Opening Voice input
@@ -183,7 +182,7 @@ final class VoiceInputUITests: XCTestCase {
         openVoiceInput()
         XCTAssertTrue(app.buttons["Cancel"].waitForExistence(timeout: 5))
         app.buttons["Cancel"].tap()
-        XCTAssertTrue(app.buttons["addEventButton"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["addMethodManual"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Fake Voice Interview Friday at 10 AM"].waitForExistence(timeout: 2))
     }
 
@@ -193,7 +192,7 @@ final class VoiceInputUITests: XCTestCase {
         app.buttons["voiceStartRecordingButton"].tap()
         XCTAssertTrue(app.buttons["voiceStopButton"].waitForExistence(timeout: 5))
         app.buttons["Cancel"].tap()
-        XCTAssertTrue(app.buttons["addEventButton"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["addMethodManual"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Fake Voice Interview Friday at 10 AM"].waitForExistence(timeout: 2))
     }
 
@@ -224,6 +223,9 @@ final class VoiceInputUITests: XCTestCase {
         XCTAssertTrue(titleField.waitForExistence(timeout: 5))
         app.buttons["saveEventButton"].tap()
 
+        // Kue 2.0 Phase 7 — saving dismisses back to the Add tab, not Home.
+        app.selectTab("tab-home")
+        app.revealHomeEventIfInsideCollapsedCompletedSection(titled: "Fake OCR Screenshot Interview")
         XCTAssertTrue(app.staticTexts["Fake OCR Screenshot Interview"].waitForExistence(timeout: 5))
     }
 }

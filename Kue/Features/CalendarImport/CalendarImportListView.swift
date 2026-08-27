@@ -104,8 +104,8 @@ struct CalendarImportListView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(event.title)
                             Text(event.startDate.formatted(date: .abbreviated, time: event.isAllDay ? .omitted : .shortened))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(KueTypography.footnote)
+                                .foregroundStyle(KueColor.secondaryText)
                         }
                     }
                     .accessibilityIdentifier("calendarImportRow-\(event.externalIdentifier)")
@@ -121,7 +121,7 @@ struct CalendarImportListView: View {
             // the user deliberately tapped "Import from Calendar" — never at launch/onboarding.
             Text(CalendarAuthorizationState.notDetermined.explanation ?? "")
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(KueColor.secondaryText)
                 .padding(.horizontal)
             Button {
                 Task { await requestAccess() }
@@ -133,7 +133,7 @@ struct CalendarImportListView: View {
                 }
             }
             .accessibilityIdentifier("importRequestAccessButton")
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.glassProminent)
             .disabled(isRequestingAccess)
         }
         .padding()
@@ -175,4 +175,18 @@ struct CalendarImportListView: View {
         // reliably right after this one closes.
         onSelect(outcome.draft)
     }
+}
+
+// Kue 2.0 Phase 7 — requirement 43: representative Calendar-import states. Always the fake
+// provider (never `SystemCalendarProvider`) — Xcode's preview canvas must never touch the
+// real Calendar database (requirement 48's own spirit, applied here).
+#Preview("Calendar Import — Light") {
+    CalendarImportListView { _ in }
+        .environment(\.calendarProvider, FakeCalendarProvider(stateToReturn: .fullAccess))
+}
+
+#Preview("Calendar Import — Dark") {
+    CalendarImportListView { _ in }
+        .environment(\.calendarProvider, FakeCalendarProvider(stateToReturn: .fullAccess))
+        .preferredColorScheme(.dark)
 }

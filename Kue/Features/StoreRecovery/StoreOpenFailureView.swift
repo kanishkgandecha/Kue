@@ -25,32 +25,38 @@ struct StoreOpenFailureView: View {
     let onRetry: () -> Void
 
     var body: some View {
+        // Kue 2.0 Phase 7 — requirement 25: a calm, serious presentation, never implying data
+        // loss. Deliberately plain content on `KueColor.screenBackground`, not a glass
+        // surface — requirement 10, and this is exactly the kind of screen where translucency
+        // would undermine, not support, the reassurance this view exists to give.
         ScrollView {
-            VStack(spacing: 20) {
+            VStack(spacing: KueSpacing.xl) {
                 Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 44))
-                    .foregroundStyle(.orange)
+                    .font(.system(size: KueIconSize.extraLarge))
+                    .foregroundStyle(KueColor.warning)
+                    .accessibilityHidden(true)
 
-                VStack(spacing: 8) {
+                VStack(spacing: KueSpacing.sm) {
                     Text("Kue Couldn't Open Your Data")
-                        .font(.title2)
-                        .fontWeight(.semibold)
+                        .font(KueTypography.screenTitle)
                         .multilineTextAlignment(.center)
 
-                    // The specific, factual reassurance requirement 9 calls for — never
-                    // generic "something went wrong" copy (docs/13-error-handling.md).
+                    // The specific, factual reassurance requirement 9/25 calls for — never
+                    // generic "something went wrong" copy, never implying deletion
+                    // (docs/13-error-handling.md).
                     Text("Your events haven't been deleted or changed. They're still on this device — Kue just couldn't open them this time.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .font(KueTypography.body)
+                        .foregroundStyle(KueColor.secondaryText)
                         .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Button("Try Again", action: onRetry)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.glassProminent)
                     .accessibilityIdentifier("storeOpenRetryButton")
 
                 DisclosureGroup("Technical Details") {
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: KueSpacing.sm) {
                         LabeledContent("Location") {
                             Text(diagnostic.storeURL.path)
                         }
@@ -58,27 +64,39 @@ struct StoreOpenFailureView: View {
                             Text(diagnostic.errorDescription)
                         }
                     }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(KueTypography.footnote)
+                    .foregroundStyle(KueColor.secondaryText)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 4)
+                    .padding(.top, KueSpacing.xs)
                 }
                 .accessibilityIdentifier("storeOpenDiagnosticDetails")
             }
-            .padding()
+            .padding(KueSpacing.xl)
             .frame(maxWidth: 480)
         }
+        .background(KueColor.screenBackground)
         .accessibilityIdentifier("storeOpenFailureView")
     }
 }
 
-#Preview {
-    StoreOpenFailureView(
-        diagnostic: StoreOpenDiagnostic(
-            storeURL: URL(fileURLWithPath: "/private/var/mobile/Containers/Shared/AppGroup/.../Kue.sqlite"),
-            underlyingError: NSError(domain: "SwiftData", code: 1, userInfo: [NSLocalizedDescriptionKey: "Example error for preview"])
-        ),
-        onRetry: {}
+private func previewDiagnostic() -> StoreOpenDiagnostic {
+    StoreOpenDiagnostic(
+        storeURL: URL(fileURLWithPath: "/private/var/mobile/Containers/Shared/AppGroup/.../Kue.sqlite"),
+        underlyingError: NSError(domain: "SwiftData", code: 1, userInfo: [NSLocalizedDescriptionKey: "Example error for preview"])
     )
+}
+
+#Preview("Store Recovery — Light") {
+    StoreOpenFailureView(diagnostic: previewDiagnostic(), onRetry: {})
+}
+
+#Preview("Store Recovery — Dark") {
+    StoreOpenFailureView(diagnostic: previewDiagnostic(), onRetry: {})
+        .preferredColorScheme(.dark)
+}
+
+#Preview("Store Recovery — Large Dynamic Type") {
+    StoreOpenFailureView(diagnostic: previewDiagnostic(), onRetry: {})
+        .environment(\.sizeCategory, .accessibilityExtraExtraExtraLarge)
 }

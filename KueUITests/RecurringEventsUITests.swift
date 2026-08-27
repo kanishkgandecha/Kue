@@ -45,7 +45,7 @@ final class RecurringEventsUITests: XCTestCase {
     }
 
     private func openAddForm() {
-        app.buttons["addEventButton"].tap()
+        app.openManualAddForm()
         XCTAssertTrue(app.textFields["eventTitleField"].waitForExistence(timeout: 5))
     }
 
@@ -103,17 +103,18 @@ final class RecurringEventsUITests: XCTestCase {
         app.buttons[name].tap()
     }
 
-    /// Home's real on-disk store persists across every UI test run in this whole target, and
-    /// a freshly created zero-duration event whose `startDate` defaults to "now" is often
-    /// already `.completed` by the time `save()` actually runs (a few seconds have elapsed
-    /// since the form opened) — landing it in Home's "Completed" section, which — after many
-    /// prior runs have accumulated a growing "Upcoming" section above it (this suite's own
-    /// recurring series produce genuinely-future occurrences) — is reliably scrolled out of
-    /// the accessibility tree's lazily-rendered view. Rather than fight that with more
-    /// scrolling, this searches for the event by its own unique title first: Home's search
-    /// (`.searchable`, docs/16-search-and-organization.md) switches to a small, flat, always
-    /// fully-rendered "Results" list, independent of section/scroll position.
+    /// Home's real on-disk store persists across every UI test run in this whole target, and a
+    /// freshly created zero-duration event whose `startDate` defaults to "now" is often already
+    /// `.completed` by the time `save()` actually runs (a few seconds have elapsed since the
+    /// form opened) — landing it in Home's collapsed Completed section, or a date-sectioned row
+    /// pushed down by many prior runs' accumulated events, either of which is unreliable to
+    /// scroll to. Rather than fight that, this searches for the event by its own unique title
+    /// instead: Kue 2.0 Phase 7 moved search to its own dedicated tab (`SearchView`) — switching
+    /// there gets the same small, flat, always fully-rendered "Results" list this helper always
+    /// relied on, independent of section/scroll position (previously Home's own embedded
+    /// `.searchable`; the underlying `EventListQueryEngine` behavior is unchanged).
     private func search(_ title: String) {
+        app.selectTab("tab-search")
         let searchField = app.searchFields.firstMatch
         XCTAssertTrue(searchField.waitForExistence(timeout: 5))
         searchField.tap()

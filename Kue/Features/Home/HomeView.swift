@@ -3,237 +3,58 @@
 //  Kue
 //
 //  See docs/09-screens-and-ux.md "Screen inventory" / "Navigation" and docs/04-event-types.md
-//  "Reconciliation" — Home groups non-archived events into Upcoming / Active / Completed,
-//  computed live from EventStatusEngine.derive(for:) per reconciliation rule 1 (always
-//  recompute on read) rather than trusting a possibly-stale persisted `status`.
+//  "Reconciliation" — statuses are always computed live via `EventStatusEngine.derive(for:)`
+//  per reconciliation rule 1 (never trust a possibly-stale persisted `status`).
+//
+//  Kue 2.0 Phase 7 — Design System / Liquid Glass redesign, second pass
+//  (docs/21-design-system.md "Home — date-sectioned timeline"). Home is now the app's
+//  centered-wordmark timeline root inside `RootTabView`'s five-destination bottom navigation:
+//   - Search, Add, Templates, and Settings all moved to their own bottom-navigation
+//     destinations (`SearchView`/`AddHubView`/`TemplatesView`/`SettingsView`) — Home's own
+//     toolbar carries nothing anymore, so `KueWordmark` renders as a true full-width-centered
+//     `.principal` toolbar item with nothing competing against it.
+//   - Rows are grouped by calendar date (Today / Tomorrow / specific dates / a restrained
+//     trailing "Later" group) via `HomeTimelineGrouping` — a pure, timezone-pinned,
+//     deterministic grouping of the exact same `EventStatusEngine`-derived events the old
+//     Upcoming/Active/Completed sections showed, not a new business rule.
+//   - Completed/cancelled events live in their own compact, collapsible section below the
+//     timeline — never proliferating date sections, never duplicated between the two.
 //
 
 import SwiftUI
 import SwiftData
 
-private enum HomeSection: String, CaseIterable {
-    case upcoming = "Upcoming"
-    case active = "Active"
-    case completed = "Completed"
-}
-
 struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \KueEvent.startDate) private var events: [KueEvent]
-    @State private var isAddingEvent = false
-    @State private var isShowingTemplates = false
-    @State private var addEventType: EventType = .generic
-    // Kue 2.0 Phase 2 — search/filter/sort. Default values reproduce Home's original
-    // behavior exactly (requirement 7); see `isDefaultQueryState` below.
-    @State private var searchText = ""
-    @State private var filter: EventListQueryEngine.Filter = .default
-    @State private var sortOption: EventListQueryEngine.SortOption = .default
-    @State private var isShowingFilterSort = false
-    /// Set by `TemplatesView`'s selection, consumed once its sheet has fully dismissed —
-    /// see the `onDismiss` below. Presenting the Add sheet immediately (nesting it inside
-    /// the still-open Templates sheet instead) leaves Templates covering Home underneath
-    /// once Add itself dismisses, so the newly created event isn't reachable/tappable.
-    @State private var pendingTemplateEventType: EventType?
-    // Kue 2.0 Phase 4 — Import from Calendar (requirement 7/9/12/13). A single `.sheet(item:)`
-    // whose *content* switches between the picker and the prefilled form, rather than two
-    // separate `.sheet(isPresented:)` modifiers chained together — chaining a second sheet's
-    // presentation off the first's `onDismiss` (the `pendingTemplateEventType` pattern above)
-    // was observed to leave the second sheet presented but empty for this specific picker →
-    // form transition, so this flow instead keeps one continuous sheet presentation and only
-    // ever changes what's *inside* it.
-    private enum CalendarImportPhase: Identifiable {
-        case selecting
-        case editing(EventDraft)
-        var id: String {
-            switch self {
-            case .selecting: return "selecting"
-            case .editing: return "editing"
-            }
-        }
+    @State private var isCompletedExpanded = false
+    @State private var isLaterExpanded = false
+
+    private var visibleEvents: [KueEvent] {
+        events.filter { $0.status != .archived }
     }
-    @State private var calendarImportPhase: CalendarImportPhase?
-    // Kue 2.0 Phase 5 — Screenshot/OCR import (requirement 1/19/23). Same single-`.sheet(item:)`
-    // "one continuous presentation, content switches" shape as `CalendarImportPhase` above, for
-    // the same reason. `.editing` carries the ambiguities `NLParsingPipeline` produced
-    // alongside the draft — `CalendarImportPipeline` never produces any, so `CalendarImportPhase`
-    // above didn't need this, but a screenshot's recognized text is parsed the same way typed
-    // NL text is and can be just as ambiguous.
-    private enum OCRFlowPhase: Identifiable {
-        case scanning
-        case editing(EventDraft, [DraftAmbiguity])
-        var id: String {
-            switch self {
-            case .scanning: return "scanning"
-            case .editing: return "editing"
-            }
-        }
+
+    private var timelineSections: [HomeTimelineSection] {
+        HomeTimelineGrouping.sections(events: visibleEvents)
     }
-    @State private var ocrFlowPhase: OCRFlowPhase?
-    // Kue 2.0 Phase 6 — Voice input (requirement 1/23/35/36). Same single-`.sheet(item:)` shape
-    // as `OCRFlowPhase` above, for the same reason.
-    private enum VoiceFlowPhase: Identifiable {
-        case recording
-        case editing(EventDraft, [DraftAmbiguity])
-        var id: String {
-            switch self {
-            case .recording: return "recording"
-            case .editing: return "editing"
-            }
-        }
+
+    private var completedEvents: [KueEvent] {
+        visibleEvents.filter { !HomeTimelineGrouping.timelineEligible($0) }
     }
-    @State private var voiceFlowPhase: VoiceFlowPhase?
-    /// Requirement 9/52 — Voice's own recovery states offer "Enter Manually"/"Scan a
-    /// Screenshot Instead"; consumed once `voiceFlowPhase`'s sheet has fully dismissed, the
-    /// same `pendingTemplateEventType` "set a flag, act in `onDismiss`" shape Templates uses.
-    @State private var pendingManualEntryAfterVoice = false
-    @State private var pendingOCRAfterVoice = false
 
     var body: some View {
         NavigationStack {
             content
-                .navigationTitle("Kue")
+                // Requirement: no additional "Home" navigation title — `.principal` is the
+                // *only* toolbar content, so the system centers it against the full screen
+                // width, not just whatever space happens to be left between other items.
+                .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        NavigationLink {
-                            SettingsView()
-                        } label: {
-                            Label("Settings", systemImage: "gearshape")
-                        }
-                        .accessibilityIdentifier("settingsButton")
-                    }
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button {
-                            isShowingTemplates = true
-                        } label: {
-                            Label("Templates", systemImage: "doc.on.doc")
-                        }
-                        .accessibilityIdentifier("templatesButton")
-                    }
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button {
-                            isShowingFilterSort = true
-                        } label: {
-                            Label("Filter & Sort", systemImage: isDefaultFilterAndSort ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
-                        }
-                        .accessibilityIdentifier("filterSortButton")
-                    }
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        // Kue 2.0 Phase 6 — Calendar import (Phase 4), Scan Screenshot
-                        // (Phase 5), and Voice Input (Phase 6) collapsed into one menu once a
-                        // third trailing item pushed the trailing toolbar item count past what
-                        // this nav bar width can show without the system's own overflow "More"
-                        // button — which, empirically, silently hid `addEventButton` itself
-                        // behind it. Each item keeps its own pre-existing accessibility
-                        // identifier unchanged; only reaching it now needs one extra "open the
-                        // menu" tap first.
-                        Menu {
-                            Button {
-                                calendarImportPhase = .selecting
-                            } label: {
-                                Label("Import from Calendar", systemImage: "calendar.badge.plus")
-                            }
-                            .accessibilityIdentifier("importFromCalendarButton")
-
-                            Button {
-                                ocrFlowPhase = .scanning
-                            } label: {
-                                Label("Scan Screenshot", systemImage: "text.viewfinder")
-                            }
-                            .accessibilityIdentifier("scanScreenshotButton")
-
-                            Button {
-                                voiceFlowPhase = .recording
-                            } label: {
-                                Label("Voice Input", systemImage: "mic.fill")
-                            }
-                            .accessibilityIdentifier("voiceInputButton")
-                        } label: {
-                            Label("More Ways to Add", systemImage: "ellipsis.circle")
-                        }
-                        .accessibilityIdentifier("moreAddOptionsButton")
-                    }
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button {
-                            addEventType = .generic
-                            isAddingEvent = true
-                        } label: {
-                            Label("Add Event", systemImage: "plus")
-                        }
-                        .accessibilityIdentifier("addEventButton")
+                    ToolbarItem(placement: .principal) {
+                        KueWordmark()
                     }
                 }
-                .sheet(isPresented: $isAddingEvent) {
-                    EventFormView(mode: .add(initialEventType: addEventType))
-                }
-                .sheet(isPresented: $isShowingTemplates, onDismiss: presentAddForPendingTemplate) {
-                    TemplatesView { type in
-                        pendingTemplateEventType = type
-                        isShowingTemplates = false
-                    }
-                }
-                // Kue 2.0 Phase 4 — requirement 9/12/13: hands back an already-built, still
-                // fully editable `EventDraft`; never creates a `KueEvent` itself. One continuous
-                // sheet presentation whose content switches phase — see `CalendarImportPhase`'s
-                // own doc comment for why this isn't two chained `.sheet(isPresented:)`
-                // modifiers like Templates above.
-                .sheet(item: $calendarImportPhase) { phase in
-                    switch phase {
-                    case .selecting:
-                        CalendarImportListView { draft in
-                            calendarImportPhase = .editing(draft)
-                        }
-                    case .editing(let draft):
-                        EventFormView(prefilledDraft: draft, ambiguities: [], source: .calendarImport)
-                    }
-                }
-                // Kue 2.0 Phase 5 — requirement 19/23/31: hands back an already-parsed
-                // `EventDraft`/ambiguities pair, built by running the user-approved recognized
-                // text through the same `NLParsingPipeline` typed NL text uses; never creates a
-                // `KueEvent` itself. Same one-continuous-sheet shape as `CalendarImportPhase`.
-                .sheet(item: $ocrFlowPhase) { phase in
-                    switch phase {
-                    case .scanning:
-                        OCRImportView { draft, ambiguities in
-                            ocrFlowPhase = .editing(draft, ambiguities)
-                        }
-                    case .editing(let draft, let ambiguities):
-                        EventFormView(prefilledDraft: draft, ambiguities: ambiguities, source: .ocr)
-                    }
-                }
-                // Kue 2.0 Phase 6 — requirement 42/43/49/50: hands back an already-parsed
-                // `EventDraft`/ambiguities pair, built by running the user-approved transcript
-                // through the same `NLParsingPipeline`; never creates a `KueEvent` itself. Same
-                // one-continuous-sheet shape as `OCRFlowPhase`. Voice's own recovery states can
-                // switch to manual entry (`isAddingEvent`) or OCR (`ocrFlowPhase`) — both set
-                // only *after* `voiceFlowPhase` is cleared, mirroring the proven-safe
-                // dismiss-then-present sequencing `presentAddForPendingTemplate` already uses.
-                .sheet(item: $voiceFlowPhase, onDismiss: presentPendingFlowAfterVoiceDismissal) { phase in
-                    switch phase {
-                    case .recording:
-                        VoiceInputView(
-                            onContinue: { draft, ambiguities in
-                                voiceFlowPhase = .editing(draft, ambiguities)
-                            },
-                            onSwitchToManualEntry: {
-                                pendingManualEntryAfterVoice = true
-                                voiceFlowPhase = nil
-                            },
-                            onSwitchToOCR: {
-                                pendingOCRAfterVoice = true
-                                voiceFlowPhase = nil
-                            }
-                        )
-                    case .editing(let draft, let ambiguities):
-                        EventFormView(prefilledDraft: draft, ambiguities: ambiguities, source: .voice)
-                    }
-                }
-                .sheet(isPresented: $isShowingFilterSort) {
-                    EventFilterSortSheet(filter: $filter, sortOption: $sortOption)
-                }
-                // Requirement 6: the system search control, not a custom search bar — kept on
-                // the same List so it plays with Home's existing section-based layout.
-                .searchable(text: $searchText, prompt: "Search events")
         }
         .task { EventReconciliation.run(context: modelContext) }
         .onChange(of: scenePhase) { _, newPhase in
@@ -257,68 +78,6 @@ struct HomeView: View {
         }
     }
 
-    private func presentAddForPendingTemplate() {
-        guard let type = pendingTemplateEventType else { return }
-        pendingTemplateEventType = nil
-        addEventType = type
-        isAddingEvent = true
-    }
-
-    /// Kue 2.0 Phase 6 — mirrors `presentAddForPendingTemplate` above exactly.
-    private func presentPendingFlowAfterVoiceDismissal() {
-        if pendingManualEntryAfterVoice {
-            pendingManualEntryAfterVoice = false
-            addEventType = .generic
-            isAddingEvent = true
-        } else if pendingOCRAfterVoice {
-            pendingOCRAfterVoice = false
-            ocrFlowPhase = .scanning
-        }
-    }
-
-
-    private var visibleEvents: [KueEvent] {
-        events.filter { $0.status != .archived }
-    }
-
-    private func events(in section: HomeSection) -> [KueEvent] {
-        visibleEvents.filter { bucket(for: $0) == section }
-    }
-
-    private func bucket(for event: KueEvent) -> HomeSection {
-        switch EventStatusEngine.derive(for: event) {
-        case .active:
-            return .active
-        case .completed, .cancelled:
-            return .completed
-        default:
-            return .upcoming
-        }
-    }
-
-    // MARK: - Kue 2.0 Phase 2 — search/filter/sort
-
-    private var isDefaultFilterAndSort: Bool {
-        filter == .default && sortOption == .default
-    }
-
-    /// True exactly when Home should show its original three-section layout unmodified —
-    /// requirement 7: "preserve the normal Upcoming, Active, and Completed sections when
-    /// default filtering and sorting are active."
-    private var isDefaultQueryState: Bool {
-        searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && isDefaultFilterAndSort
-    }
-
-    private var queryResults: [KueEvent] {
-        EventListQueryEngine.query(events: events, searchText: searchText, filter: filter, sort: sortOption)
-    }
-
-    /// `events` (not `visibleEvents`) — requirement 8's "empty database" must reflect the
-    /// store's actual row count, not just what the current archived scope shows.
-    private var emptyReason: EventListQueryEngine.EmptyResultReason {
-        EventListQueryEngine.emptyReason(allEvents: events, searchText: searchText, filter: filter)
-    }
-
     @ViewBuilder
     private var content: some View {
         if events.isEmpty {
@@ -326,76 +85,101 @@ struct HomeView: View {
                 Label("No Events Yet", systemImage: "calendar.badge.clock")
             } description: {
                 Text("Add an interview, exam, deadline, or trip to get started.")
-            } actions: {
-                Button("New Event") {
-                    isAddingEvent = true
-                }
-                Button("Start from a Template") {
-                    isShowingTemplates = true
-                }
             }
             .accessibilityIdentifier("emptyDatabaseView")
-        } else if isDefaultQueryState {
-            defaultSectionedList
-        } else {
-            switch emptyReason {
-            case .noResultsForFilters:
-                ContentUnavailableView {
-                    Label("No Matching Events", systemImage: "line.3.horizontal.decrease.circle")
-                } description: {
-                    Text("No events match the selected filters.")
-                } actions: {
-                    Button("Reset Filters") { filter = .default }
-                }
-                .accessibilityIdentifier("noFilterResultsView")
-            case .noResultsForQuery:
-                ContentUnavailableView.search(text: searchText)
-                    .accessibilityIdentifier("noSearchResultsView")
-            case .emptyDatabase, .notEmpty:
-                resultsList
+        } else if timelineSections.isEmpty && completedEvents.isEmpty {
+            // Every visible event is archived — a real, if rare, state distinct from "no
+            // events at all."
+            ContentUnavailableView {
+                Label("Nothing To Show", systemImage: "calendar.badge.clock")
+            } description: {
+                Text("Everything here has been archived.")
             }
+        } else {
+            timeline
         }
     }
 
-    private var defaultSectionedList: some View {
+    /// Requirement: "Do not show a full-page empty state merely because Today has no events
+    /// when future events exist" — `timelineSections` already only ever contains sections
+    /// that actually have events (`HomeTimelineGrouping` never emits an empty one), so this
+    /// list simply starts at whichever section is soonest; no "Today" placeholder row needed.
+    private var timeline: some View {
         List {
-            ForEach(HomeSection.allCases, id: \.self) { section in
-                let sectionEvents = events(in: section)
-                if !sectionEvents.isEmpty {
-                    Section(section.rawValue) {
-                        ForEach(sectionEvents) { event in
+            ForEach(Array(timelineSections.enumerated()), id: \.element.id) { index, section in
+                if section.kind == .later {
+                    laterSection(section)
+                } else {
+                    Section(section.title) {
+                        ForEach(section.events) { event in
                             NavigationLink {
                                 EventDetailView(event: event)
                             } label: {
-                                EventRow(event: event)
+                                EventCard(event: event)
                             }
                         }
                     }
                 }
             }
+
+            if !completedEvents.isEmpty {
+                completedSection
+            }
         }
+        .accessibilityIdentifier("homeTimelineList")
     }
 
-    /// The flat, sorted view shown whenever search/filter/sort departs from the default —
-    /// deliberately not sectioned into Upcoming/Active/Completed, since a non-default sort
-    /// (priority, recently modified) has no meaningful relationship to those buckets.
-    private var resultsList: some View {
-        List {
-            Section("Results") {
-                ForEach(queryResults) { event in
+    /// Requirement: distant events "must remain discoverable and correctly ordered" —
+    /// collapsed by default (keeps the common case calm) but always present and expandable,
+    /// never hidden behind a separate screen.
+    private func laterSection(_ section: HomeTimelineSection) -> some View {
+        Section {
+            DisclosureGroup("Later (\(section.events.count))", isExpanded: $isLaterExpanded) {
+                ForEach(section.events) { event in
                     NavigationLink {
                         EventDetailView(event: event)
                     } label: {
-                        EventRow(event: event)
+                        EventCard(event: event)
                     }
                 }
             }
+            .accessibilityIdentifier("laterSectionDisclosure")
         }
-        .accessibilityIdentifier("searchResultsList")
+    }
+
+    /// Requirement: "a compact collapsible Completed section for Today, plus History access"
+    /// — collapsed by default so a long history never dominates the timeline; every completed
+    /// event is still reachable here (and via Search, which includes completed/archived scope
+    /// per its own filter), never duplicated into a date section above.
+    private var completedSection: some View {
+        Section {
+            DisclosureGroup("Completed (\(completedEvents.count))", isExpanded: $isCompletedExpanded) {
+                ForEach(completedEvents) { event in
+                    NavigationLink {
+                        EventDetailView(event: event)
+                    } label: {
+                        EventCard(event: event)
+                    }
+                }
+            }
+            .accessibilityIdentifier("completedSectionDisclosure")
+        }
     }
 }
 
-#Preview {
-    HomeView()
+#Preview("Home — Light") {
+    RootTabView()
         .modelContainer(ModelContainerFactory.makeInMemory())
+}
+
+#Preview("Home — Dark") {
+    RootTabView()
+        .modelContainer(ModelContainerFactory.makeInMemory())
+        .preferredColorScheme(.dark)
+}
+
+#Preview("Home — Large Dynamic Type") {
+    RootTabView()
+        .modelContainer(ModelContainerFactory.makeInMemory())
+        .environment(\.sizeCategory, .accessibilityExtraExtraExtraLarge)
 }

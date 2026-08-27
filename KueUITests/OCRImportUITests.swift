@@ -34,11 +34,9 @@ final class OCRImportUITests: XCTestCase {
     }
 
     private func openOCRFlow() {
-        // Kue 2.0 Phase 6 collapsed Import from Calendar / Scan Screenshot / Voice Input into
-        // one "More Ways to Add" menu once a third trailing toolbar item pushed the toolbar
-        // into the system's own overflow "More" button — see HomeView's own comment.
-        app.buttons["moreAddOptionsButton"].tap()
-        app.buttons["scanScreenshotButton"].tap()
+        // Kue 2.0 Phase 7 — Scan Screenshot is its own row on the Add tab's hub page now,
+        // no menu step.
+        app.openAddMethod("scanScreenshotButton")
     }
 
     private func chooseFixtureImage() {
@@ -148,7 +146,8 @@ final class OCRImportUITests: XCTestCase {
         openOCRFlow()
         XCTAssertTrue(app.buttons["Cancel"].waitForExistence(timeout: 5))
         app.buttons["Cancel"].tap()
-        XCTAssertTrue(app.buttons["addEventButton"].waitForExistence(timeout: 5))
+        // Kue 2.0 Phase 7 — dismisses back to the Add hub, not Home.
+        XCTAssertTrue(app.buttons["addMethodManual"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Fake OCR Screenshot Interview"].waitForExistence(timeout: 2))
     }
 
@@ -158,7 +157,7 @@ final class OCRImportUITests: XCTestCase {
         chooseFixtureImage()
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "ocrReviewingState").firstMatch.waitForExistence(timeout: 5))
         app.buttons["Cancel"].tap()
-        XCTAssertTrue(app.buttons["addEventButton"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["addMethodManual"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Fake OCR Screenshot Interview"].waitForExistence(timeout: 2))
     }
 
@@ -187,6 +186,9 @@ final class OCRImportUITests: XCTestCase {
         XCTAssertTrue(titleField.waitForExistence(timeout: 5))
         app.buttons["saveEventButton"].tap()
 
+        // Kue 2.0 Phase 7 — saving dismisses back to the Add tab, not Home.
+        app.selectTab("tab-home")
+        app.revealHomeEventIfInsideCollapsedCompletedSection(titled: "Fake OCR Screenshot Interview")
         XCTAssertTrue(app.staticTexts["Fake OCR Screenshot Interview"].waitForExistence(timeout: 5))
     }
 }

@@ -145,8 +145,8 @@ private struct ScheduleRuleRow: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(rule.taskTitle)
             Text(SchedulingEngine.offsetLabel(rule.offset))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(KueTypography.footnote)
+                .foregroundStyle(KueColor.secondaryText)
         }
     }
 }
