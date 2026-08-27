@@ -15,7 +15,9 @@ final class SearchAndOrganizationUITests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
+        UITestLaunchConfiguration.resetDeviceOrientation()
         app = XCUIApplication()
+        app.launchArguments = [UITestLaunchConfiguration.isolatedStoreArgument]
         app.launch()
     }
 
@@ -76,6 +78,15 @@ final class SearchAndOrganizationUITests: XCTestCase {
     }
 
     func testSearchingForANonexistentTitleShowsAnEmptyResultsState() {
+        // `EventListQueryEngine.emptyReason` returns `.emptyDatabase` (not `.noResultsForQuery`)
+        // when the store has zero rows at all — a real precedence, not a bug — so this test
+        // must not depend on some *other* test having already populated the store before it
+        // runs. Each test now launches against its own isolated, empty store (see
+        // `UITestLaunchConfiguration`), so this creates the one event itself that makes "no
+        // results for this query" the actually-correct case to assert, regardless of
+        // execution order.
+        createEvent(title: uniqueTitle("UI Test Empty Search Baseline"))
+
         XCTAssertTrue(searchField.waitForExistence(timeout: 5))
         searchField.tap()
         searchField.typeText(uniqueTitle("Definitely Not A Real Event Title"))

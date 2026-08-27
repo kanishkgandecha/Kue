@@ -26,7 +26,9 @@ final class EventManagementUITests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
+        UITestLaunchConfiguration.resetDeviceOrientation()
         app = XCUIApplication()
+        app.launchArguments = [UITestLaunchConfiguration.isolatedStoreArgument]
         app.launch()
     }
 

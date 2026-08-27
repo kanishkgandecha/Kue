@@ -18,6 +18,22 @@
 //  for `makeInMemory()`), so there is exactly one place all three production targets and
 //  every test get their schema/migration wiring from — requirement 4's "consistently."
 //
+//  Kue 2.0 Phase 3 post-implementation cleanup — UI-test store isolation. `KueUITests` drives
+//  the real app (`XCUIApplication`, not `@testable import Kue`), so it can't inject an
+//  in-memory container the way `KueTests` does; every UI test previously shared the same real
+//  on-disk App Group store across the whole combined suite, and data accumulated by one test
+//  class made events created by a *later* class hard to find (buried in Home's lazily-
+//  rendered list) — a real flakiness source, not a product defect. `isUITestIsolatedStore`/
+//  `uiTestStoreURL()`/`resetUITestStoreIfNeeded()` below fix that: when (and only when) the
+//  process was launched with `uiTestLaunchArgument` — set exclusively by each `KueUITests`
+//  case's own `XCUIApplication.launchArguments`, never by a normal launch — `storeURL()`
+//  resolves to a location entirely outside the App Group container, wiped clean at the start
+//  of every single launch. This is a structural safety property, not just a flag check: even
+//  if the flag were somehow set unexpectedly, the reset path can only ever delete files under
+//  that separate temporary location — it has no code path back to the real App Group store
+//  URL, so production data is unreachable from it by construction, not merely "supposed to
+//  be." See `AGENTS.md` "Build & test" for how the UI test target wires this in.
+//
 
 import SwiftData
 import Foundation
@@ -27,6 +43,19 @@ enum ModelContainerFactory {
     static let appGroupIdentifier = "group.com.kanishkgandecha.Kue"
 
     private static let storeFileName = "Kue.sqlite"
+
+    /// Set via `XCUIApplication.launchArguments` by every `KueUITests` case, and only there —
+    /// a normal app launch (user, widget extension, Share Extension) never passes this, so
+    /// `isUITestIsolatedStore` is always `false` outside of UI tests.
+    static let uiTestLaunchArgument = "-uiTestIsolatedStore"
+
+    /// `true` only inside a process launched by `XCUIApplication` with `uiTestLaunchArgument`
+    /// — i.e. only inside the "Kue" app process when driven by `KueUITests`. Checked once per
+    /// access rather than cached, so it stays correct even though `ModelContainerFactory` is a
+    /// stateless `enum`.
+    static var isUITestIsolatedStore: Bool {
+        ProcessInfo.processInfo.arguments.contains(uiTestLaunchArgument)
+    }
 
     /// Built from `KueSchemaV2` (Persistence/Migrations/) — the *current* schema version. Do
     /// **not** replace this with a bare `Schema([...])` literal again; that would silently
@@ -77,7 +106,16 @@ enum ModelContainerFactory {
 
     private static func makeDefaultThrowing() throws -> ModelContainer {
         let url = storeURL()
-        migrateLegacyStore(from: legacyApplicationSupportDirectory(), to: url)
+        if isUITestIsolatedStore {
+            // Requirement: "launch with a deterministic isolated test store" — wipe it before
+            // every single launch (not just once per suite) so each UI test method starts
+            // from a guaranteed-empty store, with no manual simulator erase needed between
+            // test classes and no dependence on execution order. `url` here can only ever be
+            // `uiTestStoreURL()` (see `storeURL()`), never the real App Group path.
+            resetUITestStore(at: url)
+        } else {
+            migrateLegacyStore(from: legacyApplicationSupportDirectory(), to: url)
+        }
         let configuration = ModelConfiguration(schema: schema, url: url)
         return try ModelContainer(for: schema, migrationPlan: migrationPlan, configurations: [configuration])
     }
@@ -103,10 +141,38 @@ enum ModelContainerFactory {
     /// container), which is exactly the "unavailable store" case `makeDefaultOrNil()`'s
     /// caller must handle gracefully.
     static func storeURL() -> URL {
+        if isUITestIsolatedStore {
+            return uiTestStoreURL()
+        }
         guard let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier) else {
             return legacyApplicationSupportDirectory().appendingPathComponent(storeFileName)
         }
         return containerURL.appendingPathComponent(storeFileName)
+    }
+
+    /// Entirely outside the App Group container — under the process's own temporary
+    /// directory, keyed by `uiTestLaunchArgument` so it can never collide with (or be
+    /// confused for) the real store path. A fixed name *within* that isolated location is
+    /// fine (not a fresh UUID per launch): `resetUITestStore(at:)` wipes it at the start of
+    /// every launch anyway, so nothing ever accumulates across runs, and a fixed, predictable
+    /// path keeps this trivially inspectable during development.
+    private static func uiTestStoreURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("KueUITestStore", isDirectory: true)
+            .appendingPathComponent(storeFileName)
+    }
+
+    /// Deletes the store (and its `-wal`/`-shm` sidecars) at `url` if present, then ensures
+    /// the containing directory exists — called only from `makeDefaultThrowing()`, only when
+    /// `isUITestIsolatedStore` is true, only ever on `uiTestStoreURL()`'s own result. Never
+    /// touches, and has no way to reach, the real App Group store.
+    private static func resetUITestStore(at url: URL) {
+        let fileManager = FileManager.default
+        let directory = url.deletingLastPathComponent()
+        for suffix in ["", "-wal", "-shm"] {
+            try? fileManager.removeItem(atPath: url.path + suffix)
+        }
+        try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
     /// Phase 1–3 stored data at SwiftData's own default location/filename (no explicit

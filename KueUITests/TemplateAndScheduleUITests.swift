@@ -25,7 +25,9 @@ final class TemplateAndScheduleUITests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
+        UITestLaunchConfiguration.resetDeviceOrientation()
         app = XCUIApplication()
+        app.launchArguments = [UITestLaunchConfiguration.isolatedStoreArgument]
         app.launch()
     }
 
