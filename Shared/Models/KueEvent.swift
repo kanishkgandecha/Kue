@@ -36,6 +36,10 @@ enum EventStatus: String, Codable, CaseIterable {
 /// docs/03-data-model.md "KueEvent" — which input path produced this event.
 enum EventSource: String, Codable, CaseIterable {
     case manual, naturalLanguage, shareSheet
+    /// Kue 2.0 Phase 4 — docs/18-calendar-integration.md. An explicit, user-confirmed
+    /// import from Apple Calendar via `CalendarImportPipeline`; never set by anything
+    /// running silently in the background.
+    case calendarImport
 }
 
 enum Priority: String, Codable, CaseIterable {
@@ -94,6 +98,30 @@ final class KueEvent {
     var isSkipped: Bool = false
     var skippedAt: Date?
 
+    // MARK: - Kue 2.0 Phase 4 (KueSchemaV3) — Apple Calendar linkage, see
+    // docs/18-calendar-integration.md. All nil for every event never exported/imported
+    // through Calendar. Kue remains the source of truth: these fields only ever record
+    // "what Calendar object this Kue event is explicitly linked to," never anything that
+    // drives Kue's own scheduling/status/recurrence logic.
+
+    /// `EKEvent.calendarItemExternalIdentifier` — stable across devices/re-syncs, unlike
+    /// `eventIdentifier`. Set on successful export or import-from-an-existing-EKEvent;
+    /// cleared by unlinking. Non-nil is exactly "this Kue event is linked to a Calendar event."
+    var externalCalendarEventIdentifier: String?
+    /// `EKCalendar.calendarIdentifier` of the calendar the linked event lives in (the
+    /// destination calendar chosen at export, or the source calendar at import time).
+    var externalCalendarIdentifier: String?
+    /// Cached display name of `externalCalendarIdentifier`'s calendar, so the UI can show
+    /// "Linked to Home" without re-fetching from EventKit just to render a label.
+    var externalCalendarTitle: String?
+    /// When Kue last successfully wrote to (exported or updated) the linked Calendar event.
+    var externalCalendarLastSyncedAt: Date?
+    /// `EKEvent.lastModifiedDate` as observed at that same successful write — the baseline
+    /// `CalendarExportService.status(for:)` compares a freshly-fetched `EKEvent` against to
+    /// detect an external change requiring an explicit conflict choice (never a silent
+    /// overwrite).
+    var externalCalendarLastKnownModifiedAt: Date?
+
     @Relationship(deleteRule: .cascade, inverse: \KueTask.event)
     var tasks: [KueTask]
 
@@ -134,6 +162,11 @@ final class KueEvent {
         isRecurrenceException: Bool = false,
         isSkipped: Bool = false,
         skippedAt: Date? = nil,
+        externalCalendarEventIdentifier: String? = nil,
+        externalCalendarIdentifier: String? = nil,
+        externalCalendarTitle: String? = nil,
+        externalCalendarLastSyncedAt: Date? = nil,
+        externalCalendarLastKnownModifiedAt: Date? = nil,
         tasks: [KueTask] = [],
         schedule: KueSchedule? = nil,
         widgetConfiguration: WidgetConfiguration? = nil,
@@ -165,6 +198,11 @@ final class KueEvent {
         self.isRecurrenceException = isRecurrenceException
         self.isSkipped = isSkipped
         self.skippedAt = skippedAt
+        self.externalCalendarEventIdentifier = externalCalendarEventIdentifier
+        self.externalCalendarIdentifier = externalCalendarIdentifier
+        self.externalCalendarTitle = externalCalendarTitle
+        self.externalCalendarLastSyncedAt = externalCalendarLastSyncedAt
+        self.externalCalendarLastKnownModifiedAt = externalCalendarLastKnownModifiedAt
         self.tasks = tasks
         self.schedule = schedule
         self.widgetConfiguration = widgetConfiguration

@@ -474,7 +474,14 @@ struct EventFormView: View {
                 location: draft.location.isEmpty ? nil : draft.location,
                 notes: draft.notes.isEmpty ? nil : draft.notes,
                 source: draftSource,
-                priority: draft.priority
+                priority: draft.priority,
+                // Kue 2.0 Phase 4 — nil for every non-Calendar-import draft; set only when
+                // this draft came from CalendarImportPipeline (requirement 16: reuse this
+                // exact save() path unchanged for the persistence side).
+                externalCalendarEventIdentifier: draft.externalCalendarEventIdentifier,
+                externalCalendarIdentifier: draft.externalCalendarIdentifier,
+                externalCalendarTitle: draft.externalCalendarTitle,
+                externalCalendarLastKnownModifiedAt: draft.externalCalendarLastKnownModifiedAt
             )
             EventStatusEngine.reconcile(event, now: now)
             modelContext.insert(event)

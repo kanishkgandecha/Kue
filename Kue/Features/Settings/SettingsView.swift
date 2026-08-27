@@ -19,9 +19,13 @@ import UserNotifications
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.calendarProvider) private var calendarProvider
     @State private var preference: UserPreference?
     @State private var authorizationStatus: UNAuthorizationStatus = .notDetermined
     @State private var isConfirmingDeleteEverything = false
+    // Kue 2.0 Phase 4 — Calendar section (docs/18-calendar-integration.md "Settings").
+    @State private var calendarAuthorizationState: CalendarAuthorizationState = .notDetermined
+    @State private var isRequestingCalendarAccess = false
 
     /// Injected for tests (requirement 10) — the live default is what KueApp effectively
     /// uses everywhere else.
@@ -78,6 +82,29 @@ struct SettingsView: View {
             }
 
             Section {
+                calendarStatusRow
+                if calendarAuthorizationState == .notDetermined {
+                    Button {
+                        Task { await requestCalendarAccess() }
+                    } label: {
+                        if isRequestingCalendarAccess {
+                            ProgressView()
+                        } else {
+                            Text("Allow Calendar Access")
+                        }
+                    }
+                    .accessibilityIdentifier("requestCalendarAccessButton")
+                    .disabled(isRequestingCalendarAccess)
+                }
+            } header: {
+                Text("Calendar")
+            } footer: {
+                if let explanation = calendarAuthorizationState.explanation {
+                    Text(explanation)
+                }
+            }
+
+            Section {
                 Button("Delete Everything", role: .destructive) {
                     isConfirmingDeleteEverything = true
                 }
@@ -93,6 +120,9 @@ struct SettingsView: View {
         .task {
             preference = UserPreferenceStore.current(context: modelContext)
             authorizationStatus = await scheduler.authorizationStatus()
+            // Requirement 6: a pure state *read*, never a request — `authorizationState()`
+            // itself never prompts.
+            calendarAuthorizationState = calendarProvider.authorizationState()
         }
         .confirmationDialog(
             "Delete all events and reset settings? This can't be undone.",
@@ -125,6 +155,46 @@ struct SettingsView: View {
             Label("Notifications are off", systemImage: "bell.slash")
                 .foregroundStyle(.secondary)
         }
+    }
+
+    /// Requirement 4 — every authorization state gets its own row, distinctly labeled and
+    /// accessibility-identified so a UI test can assert exactly which one is showing.
+    @ViewBuilder
+    private var calendarStatusRow: some View {
+        switch calendarAuthorizationState {
+        case .fullAccess:
+            Label("Calendar access is on", systemImage: "calendar.badge.checkmark")
+                .accessibilityIdentifier("calendarStatusFullAccess")
+        case .writeOnly:
+            Label("Calendar access is on (add-only)", systemImage: "calendar.badge.plus")
+                .accessibilityIdentifier("calendarStatusWriteOnly")
+        case .denied:
+            Label("Calendar access is off", systemImage: "calendar.badge.exclamationmark")
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("calendarStatusDenied")
+        case .restricted:
+            Label("Calendar access is restricted", systemImage: "lock")
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("calendarStatusRestricted")
+        case .notDetermined:
+            Label("Not yet requested", systemImage: "calendar")
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("calendarStatusNotDetermined")
+        case .unavailable:
+            Label("Calendar access is unavailable", systemImage: "calendar.badge.exclamationmark")
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("calendarStatusUnavailable")
+        case .unknown:
+            Label("Calendar access is unavailable", systemImage: "calendar.badge.exclamationmark")
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("calendarStatusUnknown")
+        }
+    }
+
+    private func requestCalendarAccess() async {
+        isRequestingCalendarAccess = true
+        calendarAuthorizationState = await calendarProvider.requestAccess()
+        isRequestingCalendarAccess = false
     }
 
     private func intensityDescription(_ intensity: NotificationIntensity) -> String {

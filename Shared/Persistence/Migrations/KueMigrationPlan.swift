@@ -16,17 +16,24 @@
 //  columns exist; the new fields are backfilled entirely from fixed defaults, not derived from
 //  any V1 data.
 //
+//  Kue 2.0 Phase 4 (docs/18-calendar-integration.md "Migration") added the second stage:
+//  `KueSchemaV2` → `KueSchemaV3`, backfilling the new Calendar-linkage fields. Every real V1.0
+//  and Phase-3 row was created before Calendar integration existed, so every one of them is
+//  unlinked by construction — `.custom` again, for the same "explicit and verifiable, not
+//  inferred" reasoning as the first stage, even though every new field here is already optional
+//  and would default to `nil` under `.lightweight` too.
+//
 
 import SwiftData
 import Foundation
 
 enum KueMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
-        [KueSchemaV1.self, KueSchemaV2.self]
+        [KueSchemaV1.self, KueSchemaV2.self, KueSchemaV3.self]
     }
 
     static var stages: [MigrationStage] {
-        [migrateV1toV2]
+        [migrateV1toV2, migrateV2toV3]
     }
 
     static let migrateV1toV2 = MigrationStage.custom(
@@ -34,7 +41,7 @@ enum KueMigrationPlan: SchemaMigrationPlan {
         toVersion: KueSchemaV2.self,
         willMigrate: nil,
         didMigrate: { context in
-            let events = try context.fetch(FetchDescriptor<KueEvent>())
+            let events = try context.fetch(FetchDescriptor<KueSchemaV2.KueEvent>())
             for event in events {
                 // Every real V1.0 row is non-recurring — explicit, verifiable defaults rather
                 // than relying on SwiftData's own inference for newly-added attributes.
@@ -43,6 +50,25 @@ enum KueMigrationPlan: SchemaMigrationPlan {
                 event.isRecurrenceException = false
                 event.isSkipped = false
                 event.skippedAt = nil
+            }
+            try context.save()
+        }
+    )
+
+    static let migrateV2toV3 = MigrationStage.custom(
+        fromVersion: KueSchemaV2.self,
+        toVersion: KueSchemaV3.self,
+        willMigrate: nil,
+        didMigrate: { context in
+            let events = try context.fetch(FetchDescriptor<KueEvent>())
+            for event in events {
+                // No V1.0 or Phase-3 row was ever linked to a Calendar event — Calendar
+                // integration didn't exist yet — so every migrated row is explicitly unlinked.
+                event.externalCalendarEventIdentifier = nil
+                event.externalCalendarIdentifier = nil
+                event.externalCalendarTitle = nil
+                event.externalCalendarLastSyncedAt = nil
+                event.externalCalendarLastKnownModifiedAt = nil
             }
             try context.save()
         }

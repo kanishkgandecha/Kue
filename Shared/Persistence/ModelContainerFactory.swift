@@ -57,15 +57,16 @@ enum ModelContainerFactory {
         ProcessInfo.processInfo.arguments.contains(uiTestLaunchArgument)
     }
 
-    /// Built from `KueSchemaV2` (Persistence/Migrations/) — the *current* schema version. Do
+    /// Built from `KueSchemaV3` (Persistence/Migrations/) — the *current* schema version. Do
     /// **not** replace this with a bare `Schema([...])` literal again; that would silently
     /// detach the schema this app opens stores with from the versioned/migratable one
-    /// `KueMigrationPlan` describes. Kue 2.0 Phase 3 added `KueSchemaV2` (recurrence fields) —
-    /// see docs/17-recurring-events.md "Migration" and `KueMigrationPlan`'s own header.
-    static let schema = Schema(versionedSchema: KueSchemaV2.self)
+    /// `KueMigrationPlan` describes. Kue 2.0 Phase 4 added `KueSchemaV3` (Calendar-linkage
+    /// fields) — see docs/18-calendar-integration.md "Migration" and `KueMigrationPlan`'s own
+    /// header.
+    static let schema = Schema(versionedSchema: KueSchemaV3.self)
 
-    /// `KueSchemaV1` → `KueSchemaV2` as of Kue 2.0 Phase 3 — see `KueMigrationPlan`'s own
-    /// header for what adding the *next* stage looks like.
+    /// `KueSchemaV1` → `KueSchemaV2` → `KueSchemaV3` as of Kue 2.0 Phase 4 — see
+    /// `KueMigrationPlan`'s own header for what adding the *next* stage looks like.
     static let migrationPlan: any SchemaMigrationPlan.Type = KueMigrationPlan.self
 
     /// The app's real, on-disk store — shared with both extensions via the App Group

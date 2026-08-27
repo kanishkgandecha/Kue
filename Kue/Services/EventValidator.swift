@@ -33,6 +33,19 @@ struct EventDraft {
     var recurrenceEndDate: Date = .now.addingTimeInterval(30 * 86_400)
     var recurrenceOccurrenceCount: Int = 10
 
+    // MARK: - Kue 2.0 Phase 4 — Calendar import linkage (docs/18-calendar-integration.md)
+
+    /// Set only by `CalendarImportPipeline` — carried through untouched to the new `KueEvent`
+    /// on save (`EventFormView.save()`'s `.add` case). Never validated: these three are plain
+    /// passthrough identifiers, not user-editable fields.
+    var externalCalendarEventIdentifier: String?
+    var externalCalendarIdentifier: String?
+    var externalCalendarTitle: String?
+    /// The source `EKEvent`'s `lastModifiedDate` at import time — the baseline
+    /// `CalendarExportService.status(for:)` needs so a freshly imported (never yet exported
+    /// again) event isn't immediately flagged as "externally changed."
+    var externalCalendarLastKnownModifiedAt: Date?
+
     /// `nil` unless `isRecurring` — the actual rule EventFormView.save() persists.
     var recurrenceRule: RecurrenceRule? {
         guard isRecurring else { return nil }

@@ -169,6 +169,40 @@ slot so replenishment never resurrects it) — the first real stage `KueMigratio
 carried. See `docs/17-recurring-events.md` for the full contract, the rolling-horizon
 constants and rationale, and the exact edit/delete-scope splitting rules.
 
+**Phase 3 post-implementation cleanup is done.** The combined `KueUITests` suite now passes in
+one `xcodebuild test` invocation with no manual simulator erase between classes:
+`ModelContainerFactory.uiTestLaunchArgument` (`"-uiTestIsolatedStore"`) — set exclusively via
+`XCUIApplication.launchArguments` by every `KueUITests` case — routes `storeURL()` to a location
+entirely outside the App Group container, wiped clean at the start of every single launch; this
+is a structural safety property (no code path back to the real store URL), not just a flag
+check, so it's unreachable in normal production execution. `KueUITests/
+UITestLaunchConfiguration.swift` holds the literal (must match the app-side constant exactly,
+since `KueUITests` drives the app externally and has no `@testable import Kue`) plus
+`resetDeviceOrientation()` (`XCUIDevice.shared.orientation = .portrait` in every test class's
+`setUpWithError`, fixing a real cross-launch device-state bug — the simulator's interface
+orientation is device-level, not app-scoped, so a rotation left over from one test class
+otherwise corrupts every later class's layout math in the same combined run).
+
+**Phase 4 ("Apple Calendar Integration") is done.** `Kue/Services/Calendar/` is the entire
+EventKit boundary — `CalendarProviding` (DI protocol), `SystemCalendarProvider` (the one file
+that imports `EventKit`), `FakeCalendarProvider` (in-memory, used by both `KueTests` and,
+launch-argument-gated exactly like `ModelContainerFactory.isUITestIsolatedStore`, by
+`KueUITests`), and `CalendarKitTypes.swift` (the Kue-owned vocabulary — `KueCalendarEvent`,
+`CalendarAuthorizationState`, etc. — everything else in the app reads). `CalendarImportPipeline`
+(`Kue/Services/Calendar/`) converts a selected Calendar event into an editable `EventDraft`
+through the same deterministic normalization every other input path uses; `CalendarExportService`
+(`Kue/Services/Calendar/`) is the entire export/update/link-status surface, and either updates
+exactly `KueEvent`'s five new linkage fields on success or leaves it completely untouched on
+failure — nothing in it ever touches tasks, recurrence, notifications, or the widget. Calendar
+integration is explicit and one-shot in both directions; there is no background sync or
+observation anywhere in this phase. This required `KueSchemaV3` (`Shared/Persistence/
+Migrations/`) — five new nil-defaulted `KueEvent` fields recording an explicit Calendar link —
+the second real migration stage `KueMigrationPlan` carries, using the same nested-subgraph
+pattern (`KueSchemaV2` now carries a frozen pre-Phase-4 `KueEvent` plus every type with a
+relationship to it) `KueSchemaV1` established in Phase 3. See `docs/18-calendar-integration.md`
+for the full contract, the authorization-state/import-mapping/export-conflict rules, and what
+this phase deliberately doesn't do.
+
 ## Project structure
 
 ```
@@ -397,6 +431,24 @@ Kue/                         App-target-only.
                              excludes a skip for free. `DuplicateDetectionService` gained an
                              `excludingSeriesID:` parameter so sibling occurrences of the same
                              series are never flagged against each other.
+
+                             Kue 2.0 Phase 4 added Calendar/ — the entire EventKit boundary.
+                             CalendarProviding.swift (the DI protocol every view/service reads
+                             via `\.calendarProvider`, CalendarEnvironment.swift), Calendar
+                             KitTypes.swift (Kue-owned vocabulary — `KueCalendarEvent`,
+                             `CalendarAuthorizationState`, etc. — nothing outside this folder
+                             ever names an EventKit type), SystemCalendarProvider.swift (the
+                             one file that imports `EventKit`), FakeCalendarProvider.swift
+                             (in-memory; used by `KueTests` and, launch-argument-gated exactly
+                             like `ModelContainerFactory.isUITestIsolatedStore`, installed by
+                             `KueApp` in place of the real provider for `KueUITests`),
+                             CalendarImportPipeline.swift ("convert → normalize → editable
+                             draft," the same shape NLParsingPipeline establishes, applied to a
+                             selected Calendar event), and CalendarExportService.swift (export/
+                             update/link-status — updates exactly `KueEvent`'s five new linkage
+                             fields on success, leaves it untouched on failure, never touches
+                             tasks/recurrence/notifications/widget). See docs/18-calendar-
+                             integration.md for the full contract.
   Features/<Screen>/        One SwiftUI view (+ its own small subviews) per screen. Views
                              stay thin — they call into Services/, they don't recompute
                              status, validate fields, or plan schedules themselves.
@@ -427,6 +479,25 @@ Kue/                         App-target-only.
                              "Deleting one occurrence"). All decision-making stays in
                              `OccurrenceReconciliationService`/`EventActions`; both views only
                              orchestrate which call to make and present the result.
+
+                             Kue 2.0 Phase 4 added CalendarImport/CalendarImportListView.swift
+                             (Home's "Import from Calendar" entry point — authorization-gated
+                             event list, occurrence-vs-series choice for a recurring selection,
+                             hands an already-built `EventDraft` back to `HomeView`, never
+                             creates a `KueEvent` itself) and Detail/
+                             CalendarDestinationPickerView.swift (destination-calendar picker
+                             for export, reached from EventDetailView's new "Add to Apple
+                             Calendar" action). `HomeView` presents the import flow as one
+                             continuous `.sheet(item:)` whose content switches between the
+                             picker and the prefilled form (`CalendarImportPhase`) rather than
+                             two chained `.sheet(isPresented:)` modifiers the way Templates'
+                             flow works — see that type's own doc comment for why. EventDetail
+                             View gained a Calendar-actions section (Add to Apple Calendar /
+                             Update Calendar Event / Unlink, a link-status row, and confirmation
+                             dialogs for the missing-event and externally-modified-conflict
+                             cases) and SettingsView gained a Calendar section (authorization
+                             state, explanation, "Allow Calendar Access" when not yet
+                             determined) mirroring the Notifications section's own shape.
                              Home/EventFilterSortSheet.swift — Kue 2.0 Phase 2's compact
                              filter/sort sheet (docs/16-search-and-organization.md). Pure
                              SwiftUI over `HomeView`'s own `@State` bindings, no business
@@ -574,7 +645,16 @@ KueTests/                   Swift Testing (`import Testing`) unit tests — `@te
                              `MigrationFixtures.swift` itself now builds its five fixture
                              events as `KueSchemaV1.KueEvent` (not the live `KueEvent`) since
                              that's the type a real V1-schema-only store actually holds — see
-                             `KueSchemaV1.swift`'s own header.
+                             `KueSchemaV1.swift`'s own header. Kue 2.0 Phase 4 added
+                             CalendarAuthorizationTests.swift, CalendarImportPipelineTests.swift,
+                             CalendarImportFlowTests.swift, CalendarExportServiceTests.swift
+                             (every authorization state, import mapping rule, explicit-
+                             confirmation/duplicate-detection integration, and export/update/
+                             missing/conflict/unlink/failure behavior — `FakeCalendarProvider`
+                             only, never `EKEventStore`) and Migrations/
+                             SchemaV3MigrationTests.swift (same reused fixtures/support, proving
+                             the five new Calendar-linkage fields nil-backfill and genuinely new
+                             linked data survives a further reopen).
 KueUITests/                  XCTest UI tests — Kue 2.0 Phase 2 added
                              SearchAndOrganizationUITests.swift (search, clearing search,
                              the filter/sort sheet, filtering to one event type, sorting,
@@ -593,7 +673,19 @@ KueUITests/                  XCTest UI tests — Kue 2.0 Phase 2 added
                              sectioned layout doesn't guarantee it's on-screen without
                              scrolling; and it identifies one exact occurrence among several
                              sharing the same title by each row's own title+date label, not
-                             the bare title alone.
+                             the bare title alone. Kue 2.0 Phase 4 added
+                             CalendarIntegrationUITests.swift (Settings/authorization
+                             presentation, contextual permission education, denied/restricted
+                             states, import selection, editable imported draft + explicit
+                             confirmation, export confirmation, update presentation, missing-
+                             event handling, conflict handling) — same isolated-store convention
+                             as every other class here, launched with an additional
+                             `fakeCalendarArgument` (plus, for specific states/fixtures, one of
+                             `UITestLaunchConfiguration`'s other `fakeCalendar*Argument`
+                             constants) that `KueApp` matches against
+                             `FakeCalendarProvider`'s own identical literals to install a fake
+                             provider instead of `SystemCalendarProvider` — never the real
+                             EventKit database.
 ```
 
 A `Utilities/` folder doesn't exist yet — it'll appear when something is actually generic
@@ -640,6 +732,13 @@ It mirrors KueWidget's `com.apple.product-type.app-extension` product type and
 `fileSystemSynchronizedGroups` entry on `Kue/` described in the KueShare/ project-structure
 entry above.
 
+Kue 2.0 Phase 4's `INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription`/
+`INFOPLIST_KEY_NSCalendarsWriteOnlyAccessUsageDescription` are set only on the **Kue app
+target's** Debug/Release configurations — never KueWidget's or KueShare's, which never touch
+Calendar and must not carry the capability. Calendar access needs no App-Group-style
+entitlement (just the Info.plist keys), so this was a pure `project.pbxproj` build-setting edit,
+same category of change as the KueShare target addition above.
+
 ## Build & test
 
 ```bash
@@ -651,6 +750,13 @@ xcodebuild build -project Kue.xcodeproj -scheme Kue \
 xcodebuild test -project Kue.xcodeproj -scheme Kue \
   -destination 'platform=iOS Simulator,name=iPhone 17' \
   -only-testing:KueTests
+
+# Combined UI tests (KueUITests target) — every class in one invocation, no manual simulator
+# erase needed between them; see ModelContainerFactory.isUITestIsolatedStore/
+# UITestLaunchConfiguration above for why this is safe.
+xcodebuild test -project Kue.xcodeproj -scheme Kue \
+  -destination 'platform=iOS Simulator,name=iPhone 17' \
+  -only-testing:KueUITests
 ```
 
 Fix every error and warning introduced by your own change before considering it done —

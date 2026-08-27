@@ -25,6 +25,7 @@ struct EventDetailView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.calendarProvider) private var calendarProvider
 
     @State private var tab: DetailTab = .info
     @State private var isEditing = false
@@ -32,6 +33,13 @@ struct EventDetailView: View {
     @State private var isCustomizingSchedule = false
     @State private var isDuplicating = false
     @State private var duplicationPresentation: DuplicationPresentation?
+
+    // MARK: Kue 2.0 Phase 4 — Calendar export/update (docs/18-calendar-integration.md).
+    @State private var calendarLinkStatus: CalendarLinkStatus = .notLinked
+    @State private var isChoosingExportCalendar = false
+    @State private var isConfirmingCalendarUpdate = false
+    @State private var isPerformingCalendarAction = false
+    @State private var calendarErrorMessage: String?
 
     /// Kue 2.0 Phase 2, requirement 9 — wraps what `EventDuplicationService.duplicate`
     /// returned so the sheet below can show the same duplicate-warning banner
@@ -130,6 +138,33 @@ struct EventDetailView: View {
             // for permission (docs/08-notifications.md "Permission handling").
             let intensity = UserPreferenceStore.current(context: modelContext).notificationIntensity
             await NotificationEngine.reschedule(context: modelContext, intensity: intensity, scheduler: SystemNotificationScheduler.shared)
+            // Kue 2.0 Phase 4 — a pure status read (requirement 26), never a network/EventKit
+            // side effect a user didn't ask for; re-derived every time this screen appears.
+            refreshCalendarStatus()
+        }
+        .sheet(isPresented: $isChoosingExportCalendar) {
+            CalendarDestinationPickerView(calendars: calendarProvider.writableCalendars()) { chosen in
+                isChoosingExportCalendar = false
+                exportToCalendar(chosen)
+            }
+        }
+        .confirmationDialog(
+            calendarActionDialogTitle,
+            isPresented: $isConfirmingCalendarUpdate,
+            titleVisibility: .visible
+        ) {
+            calendarActionDialogButtons
+        } message: {
+            if case .externallyModified(let live) = calendarLinkStatus {
+                // Requirement 28/29 — a real conflict summary, never a vague warning; the user
+                // must see what changed before choosing to overwrite it.
+                Text("The Calendar event changed outside Kue:\n\"\(live.title)\", \(live.startDate.formatted(date: .abbreviated, time: .shortened)).\nOverwriting replaces those changes with Kue's current details.")
+            }
+        }
+        .alert("Calendar Error", isPresented: Binding(get: { calendarErrorMessage != nil }, set: { if !$0 { calendarErrorMessage = nil } })) {
+            Button("OK") { calendarErrorMessage = nil }
+        } message: {
+            Text(calendarErrorMessage ?? "")
         }
     }
 
@@ -215,6 +250,8 @@ struct EventDetailView: View {
                     }
                     .accessibilityIdentifier("archiveEventButton")
                 }
+
+                calendarActionsSection
 
                 Button {
                     duplicateEvent()
@@ -421,6 +458,139 @@ struct EventDetailView: View {
             let outcome = await EventDuplicationService.duplicate(event, context: modelContext)
             isDuplicating = false
             duplicationPresentation = DuplicationPresentation(newEvent: outcome.newEvent, detectedDuplicate: outcome.detectedDuplicate)
+        }
+    }
+
+    // MARK: - Kue 2.0 Phase 4 — Calendar export/update (docs/18-calendar-integration.md)
+
+    /// Requirement 17/24 — "Add to Apple Calendar" only offered when not yet linked;
+    /// "Update Calendar Event" (plus a link-status row and Unlink) only once it is.
+    @ViewBuilder
+    private var calendarActionsSection: some View {
+        if event.externalCalendarEventIdentifier == nil {
+            Button {
+                isChoosingExportCalendar = true
+            } label: {
+                if isPerformingCalendarAction {
+                    ProgressView()
+                } else {
+                    Text("Add to Apple Calendar")
+                }
+            }
+            .accessibilityIdentifier("addToCalendarButton")
+            .disabled(isPerformingCalendarAction || !calendarProvider.authorizationState().canWriteEvents)
+        } else {
+            calendarLinkStatusRow
+
+            Button {
+                refreshCalendarStatus()
+                isConfirmingCalendarUpdate = true
+            } label: {
+                if isPerformingCalendarAction {
+                    ProgressView()
+                } else {
+                    Text("Update Calendar Event")
+                }
+            }
+            .accessibilityIdentifier("updateCalendarEventButton")
+            .disabled(isPerformingCalendarAction)
+
+            Button("Unlink from Calendar") {
+                CalendarExportService.unlink(event, context: modelContext)
+                calendarLinkStatus = .notLinked
+            }
+            .accessibilityIdentifier("unlinkCalendarEventButton")
+        }
+    }
+
+    @ViewBuilder
+    private var calendarLinkStatusRow: some View {
+        switch calendarLinkStatus {
+        case .notLinked:
+            EmptyView()
+        case .linked:
+            Label("Linked to \(event.externalCalendarTitle ?? "Calendar")", systemImage: "calendar.badge.checkmark")
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("calendarLinkStatusLinked")
+        case .missing:
+            Label("Calendar event can't be found", systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
+                .accessibilityIdentifier("calendarLinkStatusMissing")
+        case .externallyModified:
+            Label("Calendar event changed externally", systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
+                .accessibilityIdentifier("calendarLinkStatusExternallyModified")
+        }
+    }
+
+    private var calendarActionDialogTitle: String {
+        switch calendarLinkStatus {
+        case .missing:
+            return "The linked Calendar event can't be found. Recreate it, or unlink it from this Kue event?"
+        case .externallyModified:
+            return "This Calendar event changed outside Kue."
+        default:
+            return "Update the linked Calendar event with this event's current details?"
+        }
+    }
+
+    @ViewBuilder
+    private var calendarActionDialogButtons: some View {
+        switch calendarLinkStatus {
+        case .missing:
+            // Requirement 27 — exactly the three offered choices.
+            Button("Recreate Calendar Event") { recreateCalendarEvent() }
+                .accessibilityIdentifier("recreateCalendarEventButton")
+            Button("Unlink", role: .destructive) {
+                CalendarExportService.unlink(event, context: modelContext)
+                calendarLinkStatus = .notLinked
+            }
+            .accessibilityIdentifier("unlinkFromMissingDialogButton")
+        case .externallyModified:
+            // Requirement 28/29 — proceeding is always an explicit, named choice; there is no
+            // path that overwrites without this exact tap.
+            Button("Overwrite with Kue's Version", role: .destructive) { updateCalendarEvent() }
+                .accessibilityIdentifier("overwriteCalendarEventButton")
+        default:
+            Button("Update") { updateCalendarEvent() }
+                .accessibilityIdentifier("confirmUpdateCalendarEventButton")
+        }
+    }
+
+    private func refreshCalendarStatus() {
+        guard event.externalCalendarEventIdentifier != nil else { calendarLinkStatus = .notLinked; return }
+        calendarLinkStatus = CalendarExportService.status(for: event, provider: calendarProvider)
+    }
+
+    private func exportToCalendar(_ calendar: KueWritableCalendar) {
+        isPerformingCalendarAction = true
+        let result = CalendarExportService.export(event, to: calendar, provider: calendarProvider, context: modelContext)
+        isPerformingCalendarAction = false
+        handle(result)
+    }
+
+    private func updateCalendarEvent() {
+        isPerformingCalendarAction = true
+        let result = CalendarExportService.update(event, provider: calendarProvider, context: modelContext)
+        isPerformingCalendarAction = false
+        handle(result)
+    }
+
+    private func recreateCalendarEvent() {
+        isPerformingCalendarAction = true
+        let result = CalendarExportService.recreate(event, provider: calendarProvider, context: modelContext)
+        isPerformingCalendarAction = false
+        handle(result)
+    }
+
+    private func handle(_ result: Result<Void, CalendarOperationError>) {
+        switch result {
+        case .success:
+            refreshCalendarStatus()
+        case .failure(let error):
+            // Requirement: "Calendar failures must never damage Kue data" — nothing about
+            // `event` changed; this only surfaces the specific failure.
+            calendarErrorMessage = error.errorDescription
         }
     }
 }

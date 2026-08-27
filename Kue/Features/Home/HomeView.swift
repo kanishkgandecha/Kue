@@ -35,6 +35,24 @@ struct HomeView: View {
     /// the still-open Templates sheet instead) leaves Templates covering Home underneath
     /// once Add itself dismisses, so the newly created event isn't reachable/tappable.
     @State private var pendingTemplateEventType: EventType?
+    // Kue 2.0 Phase 4 — Import from Calendar (requirement 7/9/12/13). A single `.sheet(item:)`
+    // whose *content* switches between the picker and the prefilled form, rather than two
+    // separate `.sheet(isPresented:)` modifiers chained together — chaining a second sheet's
+    // presentation off the first's `onDismiss` (the `pendingTemplateEventType` pattern above)
+    // was observed to leave the second sheet presented but empty for this specific picker →
+    // form transition, so this flow instead keeps one continuous sheet presentation and only
+    // ever changes what's *inside* it.
+    private enum CalendarImportPhase: Identifiable {
+        case selecting
+        case editing(EventDraft)
+        var id: String {
+            switch self {
+            case .selecting: return "selecting"
+            case .editing: return "editing"
+            }
+        }
+    }
+    @State private var calendarImportPhase: CalendarImportPhase?
 
     var body: some View {
         NavigationStack {
@@ -47,6 +65,7 @@ struct HomeView: View {
                         } label: {
                             Label("Settings", systemImage: "gearshape")
                         }
+                        .accessibilityIdentifier("settingsButton")
                     }
                     ToolbarItem(placement: .navigationBarTrailing) {
                         Button {
@@ -66,6 +85,14 @@ struct HomeView: View {
                     }
                     ToolbarItem(placement: .navigationBarTrailing) {
                         Button {
+                            calendarImportPhase = .selecting
+                        } label: {
+                            Label("Import from Calendar", systemImage: "calendar.badge.plus")
+                        }
+                        .accessibilityIdentifier("importFromCalendarButton")
+                    }
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button {
                             addEventType = .generic
                             isAddingEvent = true
                         } label: {
@@ -81,6 +108,21 @@ struct HomeView: View {
                     TemplatesView { type in
                         pendingTemplateEventType = type
                         isShowingTemplates = false
+                    }
+                }
+                // Kue 2.0 Phase 4 — requirement 9/12/13: hands back an already-built, still
+                // fully editable `EventDraft`; never creates a `KueEvent` itself. One continuous
+                // sheet presentation whose content switches phase — see `CalendarImportPhase`'s
+                // own doc comment for why this isn't two chained `.sheet(isPresented:)`
+                // modifiers like Templates above.
+                .sheet(item: $calendarImportPhase) { phase in
+                    switch phase {
+                    case .selecting:
+                        CalendarImportListView { draft in
+                            calendarImportPhase = .editing(draft)
+                        }
+                    case .editing(let draft):
+                        EventFormView(prefilledDraft: draft, ambiguities: [], source: .calendarImport)
                     }
                 }
                 .sheet(isPresented: $isShowingFilterSort) {
@@ -118,6 +160,7 @@ struct HomeView: View {
         addEventType = type
         isAddingEvent = true
     }
+
 
     private var visibleEvents: [KueEvent] {
         events.filter { $0.status != .archived }

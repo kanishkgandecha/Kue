@@ -20,6 +20,24 @@ enum UITestLaunchConfiguration {
     /// Must match `ModelContainerFactory.uiTestLaunchArgument` exactly.
     static let isolatedStoreArgument = "-uiTestIsolatedStore"
 
+    /// Kue 2.0 Phase 4 — must match `FakeCalendarProvider.uiTestLaunchArgument` exactly.
+    /// `KueApp` installs a `FakeCalendarProvider` in place of `SystemCalendarProvider` when
+    /// present — the same "shared literal, same rationale" as `isolatedStoreArgument` above, so
+    /// Calendar UI tests never touch the real EventKit database (requirement 43/44).
+    static let fakeCalendarArgument = "-uiTestFakeCalendar"
+    /// Must match `FakeCalendarProvider.uiTestDeniedArgument`/`uiTestRestrictedArgument`/
+    /// `uiTestNotDeterminedArgument` exactly — selects which authorization state the fake
+    /// starts in (default, with just `fakeCalendarArgument` alone, is full access with fixture
+    /// events).
+    static let fakeCalendarDeniedArgument = "-uiTestFakeCalendarDenied"
+    static let fakeCalendarRestrictedArgument = "-uiTestFakeCalendarRestricted"
+    static let fakeCalendarNotDeterminedArgument = "-uiTestFakeCalendarNotDetermined"
+    /// Must match `FakeCalendarProvider.uiTestPreLinkedMissingArgument`/
+    /// `uiTestPreLinkedConflictArgument` exactly — `KueApp` seeds one already-linked `KueEvent`
+    /// into the isolated store at launch for requirement 42's missing-event/conflict tests.
+    static let fakeCalendarPreLinkedMissingArgument = "-uiTestFakeCalendarPreLinkedMissing"
+    static let fakeCalendarPreLinkedConflictArgument = "-uiTestFakeCalendarPreLinkedConflict"
+
     /// The simulator's interface orientation is a *device*-level property, not scoped to one
     /// app process — it doesn't reset just because a test relaunches the app. A stray rotation
     /// left over from an earlier test (or an earlier run against the same booted simulator)
