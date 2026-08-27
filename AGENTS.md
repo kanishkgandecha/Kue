@@ -51,10 +51,10 @@ tasks; no model call in that path.
 - **Phases build in order.** V1 (Phases 1–10 / M0–M9) is complete — see "Current
   implementation status" below. **Kue 2.0 has started** (see "Kue 2.0 has started" below):
   migration foundation, search/filter/sort/duplication, recurring events, Apple Calendar
-  integration, and screenshot/OCR input are all done. No other Kue 2.0 user-facing feature
-  (`docs/01-vision-and-scope.md` "What NOT to build in V1": Voice, a context engine, Live
-  Activities, large/Lock Screen widgets, user-defined templates, ...) has been built, and none
-  should be until the project owner explicitly says a specific one has started.
+  integration, screenshot/OCR input, and on-device voice input are all done. No other Kue 2.0
+  user-facing feature (`docs/01-vision-and-scope.md` "What NOT to build in V1": a context
+  engine, Live Activities, large/Lock Screen widgets, user-defined templates, ...) has been
+  built, and none should be until the project owner explicitly says a specific one has started.
 
 ## Current implementation status
 
@@ -225,11 +225,43 @@ exact transition). `EventSource` gained one new case, `.ocr` — a plain enum-ca
 Phase 4); `KueEvent.schemaVersion` (the separate *semantic* marker) wasn't bumped either, since
 no new OCR-specific stored field exists for it to gate — recognized text is never persisted,
 only the `EventDraft`/`KueEvent` fields every other input path already writes. `KueApp` also
-installs `FakeNLParser`/`FakeAIAvailabilityChecker` (`Kue/Services/FakeNLParser.swift`) alongside
-`FakeOCRTextRecognizer.uiTestLaunchArgument`, since Apple Intelligence isn't available in the iOS
-Simulator at all and a UI test needs to drive recognized text all the way through parsing
-deterministically. See `docs/19-screenshot-ocr-input.md` for the full contract, the documented
-image-safety limits, and what this phase deliberately doesn't do.
+installs `FakeNLParser`/`FakeAIAvailabilityChecker` (`Kue/Services/FakeNLParser.swift`) whenever
+either `FakeOCRTextRecognizer.uiTestLaunchArgument` or (Phase 6)
+`FakeVoiceSpeechRecognizer.uiTestLaunchArgument` is present, since Apple Intelligence isn't
+available in the iOS Simulator at all and a UI test needs to drive recognized/transcribed text
+all the way through parsing deterministically. See `docs/19-screenshot-ocr-input.md` for the
+full contract, the documented image-safety limits, and what this phase deliberately doesn't do.
+
+**Phase 6 ("On-Device Voice Input") is done.** `Kue/Services/Voice/` splits into five distinct,
+independently dependency-injected responsibilities (requirement 6):
+`VoiceAuthorizationChecking` (microphone/speech authorization, checked and requested
+independently), `VoiceAudioSessionManaging` (the one file that touches `AVAudioSession`
+directly — category/activation/interruption/route-change), `VoiceMicrophoneCapturing` (the one
+file that touches `AVAudioEngine` directly — produces raw `AVAudioPCMBuffer`s, has no idea a
+recognizer exists), `VoiceSpeechRecognizing` (the one file that imports `Speech` — sets
+`requiresOnDeviceRecognition = true` on every request, the structural on-device-only enforcement
+mechanism, not just a default Kue happens to leave alone), and `VoiceInputCoordinator`
+(`@Observable`, "voice-flow state management" as its own class separate from the view — the only
+place that wires the other three together). `VoiceKitTypes.swift` is the Kue-owned vocabulary
+(`VoiceAuthorizationState`, `VoiceRecognizerAvailability`, `VoiceRecordingPhase`,
+`VoiceTranscriptionUpdate`, `VoiceRequestGeneration`, `VoiceLimits`, etc.) — nothing outside this
+folder ever names an `AVAudioSession`/`AVAudioEngine`/`SFSpeechRecognizer` type. Silence
+(5s) and maximum-duration (60s) limits are enforced by `VoiceInputCoordinator.tick(now: Date)`, a
+pure function of the `now` it's given (exercised deterministically in `KueTests` with synthetic
+dates, matching every other time-sensitive engine's own `now: Date` parameter convention) —
+`VoiceInputView` drives it in real time via a cancellable sleep-loop `Task`. `VoiceInputView`
+(`Kue/Features/VoiceInput/`) is Home's "Voice Input" entry point — record, watch a live partial
+transcript, stop and review/edit, then "Continue" runs the transcript through the exact
+`NLParsingPipeline` typed NL/OCR text already use, handing the result to
+`HomeView.VoiceFlowPhase` (the same single-`.sheet(item:)` shape `OCRFlowPhase` uses). Adding a
+fifth trailing toolbar item pushed `HomeView`'s toolbar into iOS's own overflow "More" button,
+which silently hid `addEventButton` itself — Import from Calendar/Scan Screenshot/Voice Input
+are now one `Menu` ("More Ways to Add," `moreAddOptionsButton`); every affected `KueUITests`
+case (Phase 4's, Phase 5's, and Phase 6's own) now opens that menu first, same identifiers
+otherwise unchanged. `EventSource` gained one new case, `.voice` — no `@Model` shape change, no
+new schema version, no `schemaVersion` bump, same reasoning as `.ocr`/`.calendarImport`. See
+`docs/20-voice-input.md` for the full contract, the state-machine diagram, and what this phase
+deliberately doesn't do.
 
 ## Project structure
 
@@ -498,6 +530,34 @@ Kue/                         App-target-only.
                              Simulator at all. See docs/19-screenshot-ocr-input.md for the full
                              contract, the documented image-safety limits, and the downsampling
                              policy.
+
+                             Kue 2.0 Phase 6 added Voice/ — five separate DI-injected
+                             responsibilities (requirement 6). VoiceAuthorizationChecking.swift/
+                             VoiceAudioSessionManaging.swift/VoiceMicrophoneCapturing.swift/
+                             VoiceSpeechRecognizing.swift (protocols, read via
+                             `\.voiceAuthorizationChecker`/`\.voiceAudioSessionManager`/
+                             `\.voiceMicrophoneCapture`/`\.voiceSpeechRecognizer`,
+                             VoiceEnvironment.swift), VoiceKitTypes.swift (Kue-owned vocabulary —
+                             `VoiceAuthorizationState`, `VoiceRecognizerAvailability`,
+                             `VoiceRecordingPhase`, `VoiceTranscriptionUpdate`,
+                             `VoiceRequestGeneration`, `VoiceLimits` — nothing outside this
+                             folder ever names an `AVAudioSession`/`AVAudioEngine`/
+                             `SFSpeechRecognizer` type), SystemVoiceAuthorizationChecker.swift/
+                             SystemVoiceAudioSessionManager.swift/
+                             SystemVoiceMicrophoneCapture.swift/SystemVoiceSpeechRecognizer.swift
+                             (the one file each that touches its own real framework — the last
+                             one sets `requiresOnDeviceRecognition = true` on every request, the
+                             structural on-device-only enforcement mechanism), FakeVoiceServices.
+                             swift (all four fakes; same launch-argument-gated installation
+                             pattern as FakeCalendarProvider/FakeOCRTextRecognizer, all gated
+                             together under one argument since a UI test needs every one faked
+                             at once), and VoiceInputCoordinator.swift (`@Observable` —
+                             "voice-flow state management" as its own class, the only place the
+                             other four services are wired together; `tick(now: Date)` is a pure
+                             function of the `now` it's given, so silence/max-duration logic is
+                             exercised deterministically with synthetic dates). See
+                             docs/20-voice-input.md for the full contract, the state-machine
+                             diagram, and the duration/silence-limit rationale.
   Features/<Screen>/        One SwiftUI view (+ its own small subviews) per screen. Views
                              stay thin — they call into Services/, they don't recompute
                              status, validate fields, or plan schedules themselves.
@@ -559,6 +619,30 @@ Kue/                         App-target-only.
                              parser exists — and hands the draft to `HomeView.OCRFlowPhase`, the
                              same single-`.sheet(item:)`-content-switches-in-place shape
                              `CalendarImportPhase` uses, for the identical reason.
+
+                             Kue 2.0 Phase 6 added VoiceInput/VoiceInputView.swift — Home's
+                             "Voice Input" entry point: record, watch a live partial transcript
+                             (read-only while recording), stop and review/edit the final
+                             transcript, then "Continue" runs it through the exact same
+                             `NLParsingPipeline`. Its own five phases
+                             (idle/recording/finalizing/reviewing/noSpeechDetected/error) are
+                             `VoiceInputCoordinator`'s, not this view's own — the view only
+                             renders `coordinator.phase` and forwards taps to coordinator
+                             methods. Uses `\.openURL`, not `UIApplication.shared.open(_:)`, for
+                             its "Open Settings" recovery button — this file (like every other
+                             Kue/ file) is also synchronized into the KueShare extension target,
+                             where `UIApplication.shared` doesn't compile. Hands the draft to
+                             `HomeView.VoiceFlowPhase`, the same single-`.sheet(item:)` shape
+                             `OCRFlowPhase` uses; its own recovery states can hand off to manual
+                             entry or Scan Screenshot via the same dismiss-then-present-in-
+                             `onDismiss` sequencing `presentAddForPendingTemplate` already uses.
+                             `HomeView`'s toolbar collapsed Import from Calendar/Scan Screenshot/
+                             Voice Input into one `Menu` ("More Ways to Add",
+                             `moreAddOptionsButton`) once this fifth trailing item pushed the
+                             toolbar into iOS's own overflow "More" button, which silently hid
+                             `addEventButton` itself — confirmed via a UI test failure, not
+                             assumed; every affected `KueUITests` case across Phases 4/5/6 now
+                             opens that menu first.
                              Home/EventFilterSortSheet.swift — Kue 2.0 Phase 2's compact
                              filter/sort sheet (docs/16-search-and-organization.md). Pure
                              SwiftUI over `HomeView`'s own `@State` bindings, no business
@@ -728,7 +812,22 @@ KueTests/                   Swift Testing (`import Testing`) unit tests — `@te
                              handling, duplicate detection, explicit confirmation,
                              `EventSource.ocr`, no persistence before confirmation,
                              notification/widget side effects after a confirmed OCR-sourced
-                             event) — all `FakeOCRTextRecognizer`-only, never `Vision`.
+                             event) — all `FakeOCRTextRecognizer`-only, never `Vision`. Kue 2.0
+                             Phase 6 added VoiceAuthorizationTests.swift (every authorization-
+                             state combination, no permission request before contextual
+                             education, on-device availability, a structural proof there is no
+                             recognizer-availability case that permits recording without
+                             on-device support), VoiceRecognitionTests.swift (confidence
+                             aggregation, ordering, stale-result suppression via
+                             `VoiceRequestGeneration`, user-edit preservation, no-speech/failure
+                             outcomes), and VoiceCoordinatorTests.swift (start/stop/cancel/retry,
+                             silence/max-duration via synthetic `tick(now:)` dates, interruption,
+                             route change, duplicate-session prevention, audio-session cleanup,
+                             parser routing, ambiguity, duplicate detection, explicit
+                             confirmation, `EventSource.voice`, no persistence before
+                             confirmation, cleanup after every termination path, notification/
+                             widget effects after confirmed creation) — all four Fake* Voice
+                             services only, never real `AVAudioSession`/`AVAudioEngine`/`Speech`.
 KueUITests/                  XCTest UI tests — Kue 2.0 Phase 2 added
                              SearchAndOrganizationUITests.swift (search, clearing search,
                              the filter/sort sheet, filtering to one event type, sorting,
@@ -770,7 +869,21 @@ KueUITests/                  XCTest UI tests — Kue 2.0 Phase 2 added
                              `\.ocrUsesFixtureImageSource` swaps `OCRImportView`'s real
                              `PhotosPicker` for a deterministic "Choose Test Image" button under
                              that same argument — never the owner's real Photos library or
-                             uncontrolled Vision output.
+                             uncontrolled Vision output. Kue 2.0 Phase 6 added
+                             VoiceInputUITests.swift (opening Voice input, contextual microphone/
+                             speech permission education, the privacy disclosure, denied/
+                             restricted states, on-device-unavailable, starting recording, live
+                             partial transcription, the visible recording state and duration,
+                             stopping/finalizing, editing transcription, silence — a real ~5–8s
+                             wall-clock wait for `VoiceLimits.silenceTimeout`, deliberately
+                             slower than the rest of this file — interruption via
+                             `FakeVoiceAudioSessionManager.simulateInterruptionAfterNanoseconds`,
+                             retry, cancelling, continuing through parsing, confirming the final
+                             event) — launched with `fakeVoiceArgument` (plus, for specific
+                             states, one of `UITestLaunchConfiguration`'s other
+                             `fakeVoice*Argument` constants); `KueApp` installs all four fake
+                             Voice services together under that one argument — never the
+                             simulator's or owner's real microphone.
 ```
 
 A `Utilities/` folder doesn't exist yet — it'll appear when something is actually generic
@@ -823,6 +936,14 @@ target's** Debug/Release configurations — never KueWidget's or KueShare's, whi
 Calendar and must not carry the capability. Calendar access needs no App-Group-style
 entitlement (just the Info.plist keys), so this was a pure `project.pbxproj` build-setting edit,
 same category of change as the KueShare target addition above.
+
+Kue 2.0 Phase 6's `INFOPLIST_KEY_NSMicrophoneUsageDescription`/
+`INFOPLIST_KEY_NSSpeechRecognitionUsageDescription` are, likewise, set only on the Kue app
+target's Debug/Release configurations. `Kue/Services/Voice/`/`Kue/Features/VoiceInput/` still
+*compile into* KueShare (the whole `Kue/` folder is synchronized to it), but KueShare's own
+Info.plist never declares either capability and its runtime never calls into either API — same
+"code present, capability not declared, never actually invoked" pattern Calendar/Photos code in
+KueShare already established in Phases 4/5.
 
 ## Build & test
 

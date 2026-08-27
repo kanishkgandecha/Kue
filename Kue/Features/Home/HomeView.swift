@@ -70,6 +70,24 @@ struct HomeView: View {
         }
     }
     @State private var ocrFlowPhase: OCRFlowPhase?
+    // Kue 2.0 Phase 6 — Voice input (requirement 1/23/35/36). Same single-`.sheet(item:)` shape
+    // as `OCRFlowPhase` above, for the same reason.
+    private enum VoiceFlowPhase: Identifiable {
+        case recording
+        case editing(EventDraft, [DraftAmbiguity])
+        var id: String {
+            switch self {
+            case .recording: return "recording"
+            case .editing: return "editing"
+            }
+        }
+    }
+    @State private var voiceFlowPhase: VoiceFlowPhase?
+    /// Requirement 9/52 — Voice's own recovery states offer "Enter Manually"/"Scan a
+    /// Screenshot Instead"; consumed once `voiceFlowPhase`'s sheet has fully dismissed, the
+    /// same `pendingTemplateEventType` "set a flag, act in `onDismiss`" shape Templates uses.
+    @State private var pendingManualEntryAfterVoice = false
+    @State private var pendingOCRAfterVoice = false
 
     var body: some View {
         NavigationStack {
@@ -101,20 +119,39 @@ struct HomeView: View {
                         .accessibilityIdentifier("filterSortButton")
                     }
                     ToolbarItem(placement: .navigationBarTrailing) {
-                        Button {
-                            calendarImportPhase = .selecting
+                        // Kue 2.0 Phase 6 — Calendar import (Phase 4), Scan Screenshot
+                        // (Phase 5), and Voice Input (Phase 6) collapsed into one menu once a
+                        // third trailing item pushed the trailing toolbar item count past what
+                        // this nav bar width can show without the system's own overflow "More"
+                        // button — which, empirically, silently hid `addEventButton` itself
+                        // behind it. Each item keeps its own pre-existing accessibility
+                        // identifier unchanged; only reaching it now needs one extra "open the
+                        // menu" tap first.
+                        Menu {
+                            Button {
+                                calendarImportPhase = .selecting
+                            } label: {
+                                Label("Import from Calendar", systemImage: "calendar.badge.plus")
+                            }
+                            .accessibilityIdentifier("importFromCalendarButton")
+
+                            Button {
+                                ocrFlowPhase = .scanning
+                            } label: {
+                                Label("Scan Screenshot", systemImage: "text.viewfinder")
+                            }
+                            .accessibilityIdentifier("scanScreenshotButton")
+
+                            Button {
+                                voiceFlowPhase = .recording
+                            } label: {
+                                Label("Voice Input", systemImage: "mic.fill")
+                            }
+                            .accessibilityIdentifier("voiceInputButton")
                         } label: {
-                            Label("Import from Calendar", systemImage: "calendar.badge.plus")
+                            Label("More Ways to Add", systemImage: "ellipsis.circle")
                         }
-                        .accessibilityIdentifier("importFromCalendarButton")
-                    }
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button {
-                            ocrFlowPhase = .scanning
-                        } label: {
-                            Label("Scan Screenshot", systemImage: "text.viewfinder")
-                        }
-                        .accessibilityIdentifier("scanScreenshotButton")
+                        .accessibilityIdentifier("moreAddOptionsButton")
                     }
                     ToolbarItem(placement: .navigationBarTrailing) {
                         Button {
@@ -164,6 +201,33 @@ struct HomeView: View {
                         EventFormView(prefilledDraft: draft, ambiguities: ambiguities, source: .ocr)
                     }
                 }
+                // Kue 2.0 Phase 6 — requirement 42/43/49/50: hands back an already-parsed
+                // `EventDraft`/ambiguities pair, built by running the user-approved transcript
+                // through the same `NLParsingPipeline`; never creates a `KueEvent` itself. Same
+                // one-continuous-sheet shape as `OCRFlowPhase`. Voice's own recovery states can
+                // switch to manual entry (`isAddingEvent`) or OCR (`ocrFlowPhase`) — both set
+                // only *after* `voiceFlowPhase` is cleared, mirroring the proven-safe
+                // dismiss-then-present sequencing `presentAddForPendingTemplate` already uses.
+                .sheet(item: $voiceFlowPhase, onDismiss: presentPendingFlowAfterVoiceDismissal) { phase in
+                    switch phase {
+                    case .recording:
+                        VoiceInputView(
+                            onContinue: { draft, ambiguities in
+                                voiceFlowPhase = .editing(draft, ambiguities)
+                            },
+                            onSwitchToManualEntry: {
+                                pendingManualEntryAfterVoice = true
+                                voiceFlowPhase = nil
+                            },
+                            onSwitchToOCR: {
+                                pendingOCRAfterVoice = true
+                                voiceFlowPhase = nil
+                            }
+                        )
+                    case .editing(let draft, let ambiguities):
+                        EventFormView(prefilledDraft: draft, ambiguities: ambiguities, source: .voice)
+                    }
+                }
                 .sheet(isPresented: $isShowingFilterSort) {
                     EventFilterSortSheet(filter: $filter, sortOption: $sortOption)
                 }
@@ -198,6 +262,18 @@ struct HomeView: View {
         pendingTemplateEventType = nil
         addEventType = type
         isAddingEvent = true
+    }
+
+    /// Kue 2.0 Phase 6 — mirrors `presentAddForPendingTemplate` above exactly.
+    private func presentPendingFlowAfterVoiceDismissal() {
+        if pendingManualEntryAfterVoice {
+            pendingManualEntryAfterVoice = false
+            addEventType = .generic
+            isAddingEvent = true
+        } else if pendingOCRAfterVoice {
+            pendingOCRAfterVoice = false
+            ocrFlowPhase = .scanning
+        }
     }
 
 

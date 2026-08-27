@@ -88,6 +88,15 @@ struct KueApp: App {
                     // the owner's real Photos library in a UI test.
                     .environment(\.ocrTextRecognizer, Self.makeOCRTextRecognizer())
                     .environment(\.ocrUsesFixtureImageSource, ProcessInfo.processInfo.arguments.contains(FakeOCRTextRecognizer.uiTestLaunchArgument))
+                    // Kue 2.0 Phase 6 — real AVAudioSession/AVAudioEngine/Speech-backed access
+                    // everywhere else in the app reads only through these four environment
+                    // values (VoiceEnvironment.swift). All four are launch-argument-gated
+                    // together under `FakeVoiceSpeechRecognizer.uiTestLaunchArgument` —
+                    // requirement 63: never the real microphone in a UI test.
+                    .environment(\.voiceAuthorizationChecker, Self.makeVoiceAuthorizationChecker())
+                    .environment(\.voiceAudioSessionManager, Self.makeVoiceAudioSessionManager())
+                    .environment(\.voiceMicrophoneCapture, Self.makeVoiceMicrophoneCapture())
+                    .environment(\.voiceSpeechRecognizer, Self.makeVoiceSpeechRecognizer())
                     .modelContainer(container)
             case .failure(let diagnostic):
                 StoreOpenFailureView(diagnostic: diagnostic) {
@@ -98,13 +107,14 @@ struct KueApp: App {
     }
 
     /// Kue 2.0 Phase 5 — Apple Intelligence isn't available in the iOS Simulator at all, so a
-    /// `KueUITests` case that needs to drive OCR-recognized text through to a real, deterministic
-    /// parsed draft (requirement 47) needs a fake here too — installed only alongside
-    /// `FakeOCRTextRecognizer.uiTestLaunchArgument`, since every OCR UI test that reaches
-    /// "Continue" already passes that argument; see `FakeNLParser.swift`'s own header.
+    /// `KueUITests` case that needs to drive OCR-recognized (or, Phase 6, voice-transcribed)
+    /// text through to a real, deterministic parsed draft needs a fake here too — installed
+    /// alongside either `FakeOCRTextRecognizer.uiTestLaunchArgument` or
+    /// `FakeVoiceSpeechRecognizer.uiTestLaunchArgument`, since every OCR/Voice UI test that
+    /// reaches "Continue" already passes one of those; see `FakeNLParser.swift`'s own header.
     @MainActor
     private static func makeNLParser() -> NLParsing {
-        if #available(iOS 26.0, *), ProcessInfo.processInfo.arguments.contains(FakeOCRTextRecognizer.uiTestLaunchArgument) {
+        if #available(iOS 26.0, *), Self.usesFakeAIServices {
             return FakeNLParser()
         }
         return FoundationModelsParser()
@@ -112,10 +122,16 @@ struct KueApp: App {
 
     @MainActor
     private static func makeAIAvailabilityChecker() -> AIAvailabilityChecking {
-        if ProcessInfo.processInfo.arguments.contains(FakeOCRTextRecognizer.uiTestLaunchArgument) {
+        if Self.usesFakeAIServices {
             return FakeAIAvailabilityChecker(stateToReturn: .available)
         }
         return SystemAIAvailabilityChecker()
+    }
+
+    private static var usesFakeAIServices: Bool {
+        let arguments = ProcessInfo.processInfo.arguments
+        return arguments.contains(FakeOCRTextRecognizer.uiTestLaunchArgument)
+            || arguments.contains(FakeVoiceSpeechRecognizer.uiTestLaunchArgument)
     }
 
     /// Kue 2.0 Phase 4 — same "launch-argument-gated fake" shape as
@@ -131,6 +147,47 @@ struct KueApp: App {
     @MainActor
     private static func makeOCRTextRecognizer() -> OCRTextRecognizing {
         FakeOCRTextRecognizer.makeFromLaunchArguments() ?? SystemOCRTextRecognizer()
+    }
+
+    /// Kue 2.0 Phase 6 — all four Voice services are gated together by the *same* launch
+    /// argument (`FakeVoiceSpeechRecognizer.uiTestLaunchArgument`), since a `KueUITests` case
+    /// exercising voice input needs every one of them faked at once — a real audio session or
+    /// microphone tap with a fake recognizer behind it would still touch real hardware.
+    @MainActor
+    private static func makeVoiceAuthorizationChecker() -> VoiceAuthorizationChecking {
+        guard ProcessInfo.processInfo.arguments.contains(FakeVoiceSpeechRecognizer.uiTestLaunchArgument) else {
+            return SystemVoiceAuthorizationChecker()
+        }
+        let denied = ProcessInfo.processInfo.arguments.contains(FakeVoiceAuthorizationChecker.uiTestMicrophoneDeniedArgument)
+        let restricted = ProcessInfo.processInfo.arguments.contains(FakeVoiceAuthorizationChecker.uiTestSpeechRestrictedArgument)
+        let fake = FakeVoiceAuthorizationChecker()
+        fake.microphoneStateToReturn = denied ? .denied : .authorized
+        fake.speechStateToReturn = restricted ? .restricted : .authorized
+        return fake
+    }
+
+    @MainActor
+    private static func makeVoiceAudioSessionManager() -> VoiceAudioSessionManaging {
+        guard ProcessInfo.processInfo.arguments.contains(FakeVoiceSpeechRecognizer.uiTestLaunchArgument) else {
+            return SystemVoiceAudioSessionManager()
+        }
+        let fake = FakeVoiceAudioSessionManager()
+        if ProcessInfo.processInfo.arguments.contains(FakeVoiceAudioSessionManager.uiTestSimulateInterruptionArgument) {
+            fake.simulateInterruptionAfterNanoseconds = 1_500_000_000
+        }
+        return fake
+    }
+
+    @MainActor
+    private static func makeVoiceMicrophoneCapture() -> VoiceMicrophoneCapturing {
+        ProcessInfo.processInfo.arguments.contains(FakeVoiceSpeechRecognizer.uiTestLaunchArgument)
+            ? FakeVoiceMicrophoneCapture()
+            : SystemVoiceMicrophoneCapture()
+    }
+
+    @MainActor
+    private static func makeVoiceSpeechRecognizer() -> VoiceSpeechRecognizing {
+        FakeVoiceSpeechRecognizer.makeFromLaunchArguments() ?? SystemVoiceSpeechRecognizer()
     }
 
     /// Kue 2.0 Phase 4 — see the call site's own comment above for the full gating argument.

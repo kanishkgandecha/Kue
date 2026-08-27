@@ -34,6 +34,10 @@ final class OCRImportUITests: XCTestCase {
     }
 
     private func openOCRFlow() {
+        // Kue 2.0 Phase 6 collapsed Import from Calendar / Scan Screenshot / Voice Input into
+        // one "More Ways to Add" menu once a third trailing toolbar item pushed the toolbar
+        // into the system's own overflow "More" button — see HomeView's own comment.
+        app.buttons["moreAddOptionsButton"].tap()
         app.buttons["scanScreenshotButton"].tap()
     }
 

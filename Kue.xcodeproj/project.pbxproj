@@ -612,6 +612,8 @@
 				INFOPLIST_FILE = Kue/Info.plist;
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Kue uses Calendar access to let you import existing events into editable Kue events, and to add or update Kue events you explicitly choose to export.";
 				INFOPLIST_KEY_NSCalendarsWriteOnlyAccessUsageDescription = "Kue uses Calendar access to add or update events you explicitly export from Kue.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Kue uses the microphone so you can dictate event details. Audio is processed on-device and is never uploaded or kept after transcription.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Kue uses on-device speech recognition to turn what you say into event details. Kue never sends your voice to a server.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -650,6 +652,8 @@
 				INFOPLIST_FILE = Kue/Info.plist;
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Kue uses Calendar access to let you import existing events into editable Kue events, and to add or update Kue events you explicitly choose to export.";
 				INFOPLIST_KEY_NSCalendarsWriteOnlyAccessUsageDescription = "Kue uses Calendar access to add or update events you explicitly export from Kue.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Kue uses the microphone so you can dictate event details. Audio is processed on-device and is never uploaded or kept after transcription.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Kue uses on-device speech recognition to turn what you say into event details. Kue never sends your voice to a server.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

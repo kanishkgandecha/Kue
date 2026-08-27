@@ -45,6 +45,10 @@ enum EventSource: String, Codable, CaseIterable {
     /// `NLParsingPipeline` typed natural-language text uses — not a separate OCR-specific
     /// parser (requirement 24).
     case ocr
+    /// Kue 2.0 Phase 6 — docs/20-voice-input.md. Text transcribed on-device from spoken audio,
+    /// reviewed/edited by the user, then routed through the exact same `NLParsingPipeline`
+    /// typed natural-language text uses — not a separate voice-specific parser (requirement 43).
+    case voice
 }
 
 enum Priority: String, Codable, CaseIterable {

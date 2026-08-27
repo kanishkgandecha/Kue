@@ -52,6 +52,23 @@ enum UITestLaunchConfiguration {
     static let fakeOCRFailureArgument = "-uiTestFakeOCRFailure"
     static let fakeOCRUnavailableArgument = "-uiTestFakeOCRUnavailable"
 
+    /// Kue 2.0 Phase 6 — must match `FakeVoiceSpeechRecognizer.uiTestLaunchArgument` exactly.
+    /// `KueApp` installs the fake authorization/audio-session/microphone-capture/speech-
+    /// recognizer quartet together when present — requirement 63: never the simulator's or
+    /// owner's real microphone in a UI test.
+    static let fakeVoiceArgument = "-uiTestFakeVoice"
+    /// Must match `FakeVoiceSpeechRecognizer`'s equivalents exactly.
+    static let fakeVoiceOnDeviceUnsupportedArgument = "-uiTestFakeVoiceOnDeviceUnsupported"
+    static let fakeVoiceUnavailableArgument = "-uiTestFakeVoiceUnavailable"
+    static let fakeVoiceNoSpeechArgument = "-uiTestFakeVoiceNoSpeech"
+    static let fakeVoiceFailureArgument = "-uiTestFakeVoiceFailure"
+    static let fakeVoiceLowConfidenceArgument = "-uiTestFakeVoiceLowConfidence"
+    /// Must match `FakeVoiceAuthorizationChecker`'s equivalents exactly.
+    static let fakeVoiceMicrophoneDeniedArgument = "-uiTestFakeVoiceMicrophoneDenied"
+    static let fakeVoiceSpeechRestrictedArgument = "-uiTestFakeVoiceSpeechRestricted"
+    /// Must match `FakeVoiceAudioSessionManager.uiTestSimulateInterruptionArgument` exactly.
+    static let fakeVoiceInterruptionArgument = "-uiTestFakeVoiceInterruption"
+
     /// The simulator's interface orientation is a *device*-level property, not scoped to one
     /// app process — it doesn't reset just because a test relaunches the app. A stray rotation
     /// left over from an earlier test (or an earlier run against the same booted simulator)

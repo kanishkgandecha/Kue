@@ -61,6 +61,7 @@ final class CalendarIntegrationUITests: XCTestCase {
 
     func testImportSheetShowsPermissionEducationBeforeRequestingAccessWhenNotDetermined() {
         launch(extraArguments: [UITestLaunchConfiguration.fakeCalendarNotDeterminedArgument])
+        app.buttons["moreAddOptionsButton"].tap()
         app.buttons["importFromCalendarButton"].tap()
         // The button's own presence is itself proof this state (not denied/restricted/
         // unavailable/full-access) is what's showing.
@@ -81,6 +82,7 @@ final class CalendarIntegrationUITests: XCTestCase {
 
     func testImportSheetShowsUnavailableStateWhenDenied() {
         launch(extraArguments: [UITestLaunchConfiguration.fakeCalendarDeniedArgument])
+        app.buttons["moreAddOptionsButton"].tap()
         app.buttons["importFromCalendarButton"].tap()
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "calendarImportUnavailableState").firstMatch.waitForExistence(timeout: 5))
     }
@@ -95,6 +97,7 @@ final class CalendarIntegrationUITests: XCTestCase {
 
     func testImportListShowsFixtureCalendarEvents() {
         launch()
+        app.buttons["moreAddOptionsButton"].tap()
         app.buttons["importFromCalendarButton"].tap()
         XCTAssertTrue(app.staticTexts["Fake Calendar Meeting"].waitForExistence(timeout: 5))
     }
@@ -103,6 +106,7 @@ final class CalendarIntegrationUITests: XCTestCase {
 
     func testSelectingAnEventPresentsAnEditableDraftAndOnlySavesOnExplicitConfirmation() {
         launch()
+        app.buttons["moreAddOptionsButton"].tap()
         app.buttons["importFromCalendarButton"].tap()
         XCTAssertTrue(app.staticTexts["Fake Calendar Meeting"].waitForExistence(timeout: 5))
         app.staticTexts["Fake Calendar Meeting"].tap()
@@ -122,6 +126,7 @@ final class CalendarIntegrationUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Fake Calendar Meeting"].waitForExistence(timeout: 2))
 
         // Re-import, edit the still-open draft, and only now explicitly confirm.
+        app.buttons["moreAddOptionsButton"].tap()
         app.buttons["importFromCalendarButton"].tap()
         XCTAssertTrue(app.staticTexts["Fake Calendar Meeting"].waitForExistence(timeout: 5))
         app.staticTexts["Fake Calendar Meeting"].tap()
