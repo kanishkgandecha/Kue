@@ -48,11 +48,6 @@ enum MigrationTestSupport {
     /// one call that actually exercises "does the shipped v1.0 store open without loss
     /// through a real migration plan."
     static func reopenThroughCurrentMigrationPlan(at url: URL) throws -> ModelContainer {
-        let configuration = ModelConfiguration(schema: ModelContainerFactory.schema, url: url)
-        return try ModelContainer(
-            for: ModelContainerFactory.schema,
-            migrationPlan: ModelContainerFactory.migrationPlan,
-            configurations: [configuration]
-        )
+        try ModelContainerFactory.openThroughMigrationPlan(at: url)
     }
 }

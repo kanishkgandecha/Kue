@@ -42,7 +42,10 @@ struct SchemaV2MigrationTests {
             let event = try #require(try context.fetch(FetchDescriptor<KueEvent>(predicate: #Predicate { $0.id == id })).first)
             // Every real V1.0 row is non-recurring — explicit, verifiable defaults (this is
             // the `.custom` migration stage's own `didMigrate` backfill, not SwiftData
-            // inference).
+            // inference). `recurrence` is included here deliberately: it's genuinely new as of
+            // this schema version (real V1.0 rows have no `ZRECURRENCE` column at all — see
+            // `KueSchemaV1.swift`'s header), not a pre-existing field being re-checked.
+            #expect(event.recurrence == nil)
             #expect(event.seriesID == nil)
             #expect(event.recurrenceAnchorDate == nil)
             #expect(event.isRecurrenceException == false)

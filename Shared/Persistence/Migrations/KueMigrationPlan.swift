@@ -16,6 +16,13 @@
 //  columns exist; the new fields are backfilled entirely from fixed defaults, not derived from
 //  any V1 data.
 //
+//  Correction (2026-08-27): `event.recurrence` is now explicitly backfilled to `nil` in
+//  `migrateV1toV2` too. It was originally left out of this stage entirely because
+//  `KueSchemaV1.KueEvent` was mistakenly believed to already declare it — see
+//  `KueSchemaV1.swift`'s header for the real-App-Group-store incident (NSCocoaErrorDomain
+//  134504) this was found from. `recurrence` is genuinely new as of `KueSchemaV2`, exactly
+//  like the other five fields already backfilled here.
+//
 //  Kue 2.0 Phase 4 (docs/18-calendar-integration.md "Migration") added the second stage:
 //  `KueSchemaV2` → `KueSchemaV3`, backfilling the new Calendar-linkage fields. Every real V1.0
 //  and Phase-3 row was created before Calendar integration existed, so every one of them is
@@ -45,6 +52,9 @@ enum KueMigrationPlan: SchemaMigrationPlan {
             for event in events {
                 // Every real V1.0 row is non-recurring — explicit, verifiable defaults rather
                 // than relying on SwiftData's own inference for newly-added attributes.
+                // `recurrence` included: it's genuinely new here, not carried over from V1 —
+                // see this file's header.
+                event.recurrence = nil
                 event.seriesID = nil
                 event.recurrenceAnchorDate = nil
                 event.isRecurrenceException = false

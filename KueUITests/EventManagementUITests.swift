@@ -19,6 +19,21 @@ private extension XCUIElement {
         }
         typeText(text)
     }
+
+    /// Info's "Actions" section (Cancel/Complete/Skip-if-recurring/Archive/Calendar/
+    /// Duplicate/Delete) is long enough that its last row — Delete — isn't always already
+    /// materialized/on-screen the instant the detail view appears, unlike every earlier row
+    /// in that same section. Swipes `app` up, a bounded number of times, until `self` actually
+    /// exists and is hittable — doesn't assume whether SwiftUI's `Form` renders as a
+    /// `UITableView` or `UICollectionView` under the hood (that's changed across iOS
+    /// versions), and never assumes a fixed scroll distance.
+    func scrollUpUntilHittable(in app: XCUIApplication, maxSwipes: Int = 6) {
+        var attempts = 0
+        while !(exists && isHittable) && attempts < maxSwipes {
+            app.swipeUp()
+            attempts += 1
+        }
+    }
 }
 
 final class EventManagementUITests: XCTestCase {
@@ -86,7 +101,9 @@ final class EventManagementUITests: XCTestCase {
         createEvent(title: title)
 
         app.staticTexts[title].tap()
-        app.buttons["deleteEventButton"].tap()
+        let deleteButton = app.buttons["deleteEventButton"]
+        deleteButton.scrollUpUntilHittable(in: app)
+        deleteButton.tap()
         // `.confirmationDialog` duplicates its action button in the accessibility tree
         // (a SwiftUI quirk, not app behavior) — `.firstMatch` avoids an ambiguous-match error.
         app.buttons["confirmDeleteButton"].firstMatch.tap()

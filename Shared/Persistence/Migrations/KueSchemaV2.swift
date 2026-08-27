@@ -5,10 +5,16 @@
 //  Kue 2.0 Phase 3 — Recurring Events. See docs/17-recurring-events.md "Migration" and
 //  docs/15-schema-migrations.md "How to add a schema version."
 //
-//  `KueEvent` gained five new stored properties this phase (`seriesID`,
+//  `KueEvent` gained six new stored properties this phase (`recurrence`, `seriesID`,
 //  `recurrenceAnchorDate`, `isRecurrenceException`, `isSkipped`, `skippedAt` — see
 //  Shared/Models/KueEvent.swift) and a new model, `RecurrenceExclusion`, was added to the
 //  schema entirely.
+//
+//  Correction (2026-08-27): `recurrence` was originally believed to already exist in V1.0 (a
+//  "reserved, always nil" field) and so wasn't in this list. It never actually shipped in
+//  V1.0 — see `KueSchemaV1.swift`'s header for the real-store incident this was found from —
+//  so it genuinely belongs here, backfilled to `nil` by `KueMigrationPlan.migrateV1toV2`
+//  alongside the other five.
 //
 //  Kue 2.0 Phase 4 update (docs/18-calendar-integration.md "Migration"): Phase 4 changed
 //  `KueEvent`'s shape *again* (five new Calendar-linkage fields), which means the live

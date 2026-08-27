@@ -37,14 +37,22 @@
 //  docs/15-schema-migrations.md step 2's "only types that actually changed [or are connected to
 //  a changed type] need a new, version-suffixed type."
 //
-//  One residual, deliberately-accepted subtlety: `KueSchemaV1.KueEvent.recurrence`'s type is
-//  `RecurrenceRule?`, and `RecurrenceRule` (a plain Codable struct, not a `@Model`, so it has no
-//  version-nested copy of its own — see docs/15-schema-migrations.md "What does *not* count") now
-//  refers to Phase 3's real struct rather than V1's original empty one. This is safe in practice:
-//  every real V1.0 row has `recurrence == nil` (no V1 code ever wrote to it — see this type's own
-//  original doc comment, preserved below), and decoding `nil` never invokes `RecurrenceRule`'s
-//  `Decodable` conformance at all, so this never actually exercises the new struct's decoding
-//  against real historical data.
+//  PRODUCTION INCIDENT (2026-08-27) — corrected here: the paragraph above (and the original
+//  version of this file) assumed `KueEvent.recurrence` was already part of V1.0 — "reserved,
+//  always nil" — and so carried a `var recurrence: RecurrenceRule?` into this nested snapshot
+//  type. That assumption was never actually verified against a real V1.0 store, and it was
+//  wrong: opening a genuine pre-migration App Group store (`NSStoreModelVersionIdentifiers ==
+//  ["1.0.0"]`) failed with NSCocoaErrorDomain 134504, "Cannot use staged migration with an
+//  unknown model version." Direct inspection of that store's SQLite schema
+//  (`ZKUEEVENT`'s column list) proved its `KueEvent` entity has **no `ZRECURRENCE` column at
+//  all** — every other attribute, relationship, and entity across all seven modeled types
+//  matched this file exactly (cross-checked column-by-column against `Z_PRIMARYKEY`/
+//  `.schema`), so `recurrence` being present here was the one and only discrepancy producing
+//  the version-hash mismatch. `recurrence` is genuinely new as of `KueSchemaV2` (see that
+//  file's header) — removed from this type below, and backfilled explicitly by
+//  `KueMigrationPlan.migrateV1toV2`, exactly like the five other Phase-3 fields already were.
+//  `KueTests/Migrations/RealV1SchemaRegressionTests.swift` pins this entity's exact property
+//  set going forward so this can't silently regress again.
 //
 //  `versionIdentifier = Schema.Version(1, 0, 0)` is not an arbitrary choice: it's SwiftData's
 //  own default (`Schema.init(_:version:)`'s `version` parameter defaults to `Version(1, 0,
@@ -221,7 +229,6 @@ enum KueSchemaV1: VersionedSchema {
         var cancelledAt: Date?
         var isManuallyCompleted: Bool
         var manuallyCompletedAt: Date?
-        var recurrence: RecurrenceRule?
         var schemaVersion: Int
 
         @Relationship(deleteRule: .cascade, inverse: \KueTask.event)
@@ -257,7 +264,6 @@ enum KueSchemaV1: VersionedSchema {
             cancelledAt: Date? = nil,
             isManuallyCompleted: Bool = false,
             manuallyCompletedAt: Date? = nil,
-            recurrence: RecurrenceRule? = nil,
             schemaVersion: Int = 1,
             tasks: [KueTask] = [],
             schedule: KueSchedule? = nil,
@@ -283,7 +289,6 @@ enum KueSchemaV1: VersionedSchema {
             self.cancelledAt = cancelledAt
             self.isManuallyCompleted = isManuallyCompleted
             self.manuallyCompletedAt = manuallyCompletedAt
-            self.recurrence = recurrence
             self.schemaVersion = schemaVersion
             self.tasks = tasks
             self.schedule = schedule

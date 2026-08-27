@@ -137,14 +137,6 @@ enum MigrationFixtures {
             source: .manual,
             priority: .low,
             status: .upcoming,
-            // `recurrence` intentionally left at its default `nil` — real V1.0 data never
-            // sets it (the field is "post-V1: always nil in V1, field reserved" per
-            // KueEvent's own doc comment; no product code ever writes to it). A fixture run
-            // with a non-nil `RecurrenceRule()` surfaced what looks like a genuine SwiftData
-            // quirk with a *zero-property* Codable struct as an optional attribute (it comes
-            // back nil after a reopen) — since that's not a shape real production data can
-            // ever be in, it isn't this phase's concern to chase; noted for whenever
-            // `recurrence` actually gets a real, non-empty shape in a future phase.
             schemaVersion: 1
         )
         context.insert(generic)
@@ -338,6 +330,12 @@ enum MigrationFixtures {
     /// Kue 2.0 Phase 3 — the fixtures themselves are `KueSchemaV1.KueEvent` (see file header),
     /// but its fields are identical to live `KueEvent`'s V1-era fields, so this overload is a
     /// plain mechanical copy of the one below it.
+    ///
+    /// `hasRecurrence` is hardcoded `false`: `KueSchemaV1.KueEvent` doesn't declare
+    /// `recurrence` at all (real V1.0 rows have no `ZRECURRENCE` column — see
+    /// `KueSchemaV1.swift`'s header), so there's nothing to read here. `verifyEvents` below
+    /// still checks the *migrated* event's `recurrence == nil` against this, proving the
+    /// V1→V2 backfill actually ran.
     private static func snapshot(_ event: KueSchemaV1.KueEvent) -> EventSnapshot {
         EventSnapshot(
             id: event.id, title: event.title, eventType: event.eventType, startDate: event.startDate,
@@ -345,7 +343,7 @@ enum MigrationFixtures {
             timeZoneIdentifier: event.timeZoneIdentifier, location: event.location, notes: event.notes,
             source: event.source, priority: event.priority, status: event.status, isCancelled: event.isCancelled,
             cancelledAt: event.cancelledAt, isManuallyCompleted: event.isManuallyCompleted,
-            manuallyCompletedAt: event.manuallyCompletedAt, hasRecurrence: event.recurrence != nil,
+            manuallyCompletedAt: event.manuallyCompletedAt, hasRecurrence: false,
             schemaVersion: event.schemaVersion, createdAt: event.createdAt, updatedAt: event.updatedAt,
             taskIDs: event.tasks.map(\.id).sorted(), scheduleID: event.schedule?.id,
             widgetConfigurationID: event.widgetConfiguration?.id, widgetStateID: event.widgetState?.id
