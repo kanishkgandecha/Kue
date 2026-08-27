@@ -71,8 +71,8 @@ struct KueApp: App {
                     // through the `NLParsing`/`AIAvailabilityChecking` environment seam
                     // (AIEnvironment.swift), so KueTests can swap in fixture-backed fakes and
                     // never reach this line.
-                    .environment(\.nlParser, FoundationModelsParser())
-                    .environment(\.aiAvailabilityChecker, SystemAIAvailabilityChecker())
+                    .environment(\.nlParser, Self.makeNLParser())
+                    .environment(\.aiAvailabilityChecker, Self.makeAIAvailabilityChecker())
                     // Kue 2.0 Phase 4 — real EventKit-backed access everywhere else in the
                     // app reads only through `\.calendarProvider` (CalendarEnvironment.swift),
                     // same DI seam as the AI environment above. Launched with
@@ -80,6 +80,14 @@ struct KueApp: App {
                     // `KueUITests`), a deterministic in-memory fixture is installed instead —
                     // requirement 43/44: never the real EventKit database in a UI test.
                     .environment(\.calendarProvider, Self.makeCalendarProvider())
+                    // Kue 2.0 Phase 5 — real Vision-backed recognition everywhere else in the
+                    // app reads only through `\.ocrTextRecognizer` (OCREnvironment.swift), same
+                    // DI seam as Calendar above. `\.ocrUsesFixtureImageSource` swaps
+                    // `OCRImportView`'s real `PhotosPicker` for a deterministic in-process
+                    // fixture image under the same launch argument — requirement 45/48: never
+                    // the owner's real Photos library in a UI test.
+                    .environment(\.ocrTextRecognizer, Self.makeOCRTextRecognizer())
+                    .environment(\.ocrUsesFixtureImageSource, ProcessInfo.processInfo.arguments.contains(FakeOCRTextRecognizer.uiTestLaunchArgument))
                     .modelContainer(container)
             case .failure(let diagnostic):
                 StoreOpenFailureView(diagnostic: diagnostic) {
@@ -89,6 +97,27 @@ struct KueApp: App {
         }
     }
 
+    /// Kue 2.0 Phase 5 — Apple Intelligence isn't available in the iOS Simulator at all, so a
+    /// `KueUITests` case that needs to drive OCR-recognized text through to a real, deterministic
+    /// parsed draft (requirement 47) needs a fake here too — installed only alongside
+    /// `FakeOCRTextRecognizer.uiTestLaunchArgument`, since every OCR UI test that reaches
+    /// "Continue" already passes that argument; see `FakeNLParser.swift`'s own header.
+    @MainActor
+    private static func makeNLParser() -> NLParsing {
+        if #available(iOS 26.0, *), ProcessInfo.processInfo.arguments.contains(FakeOCRTextRecognizer.uiTestLaunchArgument) {
+            return FakeNLParser()
+        }
+        return FoundationModelsParser()
+    }
+
+    @MainActor
+    private static func makeAIAvailabilityChecker() -> AIAvailabilityChecking {
+        if ProcessInfo.processInfo.arguments.contains(FakeOCRTextRecognizer.uiTestLaunchArgument) {
+            return FakeAIAvailabilityChecker(stateToReturn: .available)
+        }
+        return SystemAIAvailabilityChecker()
+    }
+
     /// Kue 2.0 Phase 4 — same "launch-argument-gated fake" shape as
     /// `ModelContainerFactory.isUITestIsolatedStore`, one seam over. `MainActor`-isolated (both
     /// conformers require it), so this is called from `body` rather than stored as a stashed
@@ -96,6 +125,12 @@ struct KueApp: App {
     @MainActor
     private static func makeCalendarProvider() -> CalendarProviding {
         FakeCalendarProvider.makeFromLaunchArguments() ?? SystemCalendarProvider()
+    }
+
+    /// Kue 2.0 Phase 5 — same "launch-argument-gated fake" shape as `makeCalendarProvider()`.
+    @MainActor
+    private static func makeOCRTextRecognizer() -> OCRTextRecognizing {
+        FakeOCRTextRecognizer.makeFromLaunchArguments() ?? SystemOCRTextRecognizer()
     }
 
     /// Kue 2.0 Phase 4 — see the call site's own comment above for the full gating argument.
