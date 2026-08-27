@@ -53,6 +53,23 @@ struct HomeView: View {
         }
     }
     @State private var calendarImportPhase: CalendarImportPhase?
+    // Kue 2.0 Phase 5 — Screenshot/OCR import (requirement 1/19/23). Same single-`.sheet(item:)`
+    // "one continuous presentation, content switches" shape as `CalendarImportPhase` above, for
+    // the same reason. `.editing` carries the ambiguities `NLParsingPipeline` produced
+    // alongside the draft — `CalendarImportPipeline` never produces any, so `CalendarImportPhase`
+    // above didn't need this, but a screenshot's recognized text is parsed the same way typed
+    // NL text is and can be just as ambiguous.
+    private enum OCRFlowPhase: Identifiable {
+        case scanning
+        case editing(EventDraft, [DraftAmbiguity])
+        var id: String {
+            switch self {
+            case .scanning: return "scanning"
+            case .editing: return "editing"
+            }
+        }
+    }
+    @State private var ocrFlowPhase: OCRFlowPhase?
 
     var body: some View {
         NavigationStack {
@@ -93,6 +110,14 @@ struct HomeView: View {
                     }
                     ToolbarItem(placement: .navigationBarTrailing) {
                         Button {
+                            ocrFlowPhase = .scanning
+                        } label: {
+                            Label("Scan Screenshot", systemImage: "text.viewfinder")
+                        }
+                        .accessibilityIdentifier("scanScreenshotButton")
+                    }
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button {
                             addEventType = .generic
                             isAddingEvent = true
                         } label: {
@@ -123,6 +148,20 @@ struct HomeView: View {
                         }
                     case .editing(let draft):
                         EventFormView(prefilledDraft: draft, ambiguities: [], source: .calendarImport)
+                    }
+                }
+                // Kue 2.0 Phase 5 — requirement 19/23/31: hands back an already-parsed
+                // `EventDraft`/ambiguities pair, built by running the user-approved recognized
+                // text through the same `NLParsingPipeline` typed NL text uses; never creates a
+                // `KueEvent` itself. Same one-continuous-sheet shape as `CalendarImportPhase`.
+                .sheet(item: $ocrFlowPhase) { phase in
+                    switch phase {
+                    case .scanning:
+                        OCRImportView { draft, ambiguities in
+                            ocrFlowPhase = .editing(draft, ambiguities)
+                        }
+                    case .editing(let draft, let ambiguities):
+                        EventFormView(prefilledDraft: draft, ambiguities: ambiguities, source: .ocr)
                     }
                 }
                 .sheet(isPresented: $isShowingFilterSort) {

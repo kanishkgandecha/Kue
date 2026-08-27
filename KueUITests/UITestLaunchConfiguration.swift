@@ -38,6 +38,20 @@ enum UITestLaunchConfiguration {
     static let fakeCalendarPreLinkedMissingArgument = "-uiTestFakeCalendarPreLinkedMissing"
     static let fakeCalendarPreLinkedConflictArgument = "-uiTestFakeCalendarPreLinkedConflict"
 
+    /// Kue 2.0 Phase 5 — must match `FakeOCRTextRecognizer.uiTestLaunchArgument` exactly.
+    /// `KueApp` installs a `FakeOCRTextRecognizer` in place of `SystemOCRTextRecognizer` when
+    /// present, and `OCRImportView` swaps its real `PhotosPicker` for a deterministic
+    /// in-process fixture image — requirement 45/48: never the owner's real Photos library or
+    /// uncontrolled Vision recognition in a UI test.
+    static let fakeOCRArgument = "-uiTestFakeOCR"
+    /// Must match `FakeOCRTextRecognizer`'s equivalents exactly — selects which recognition
+    /// outcome the fake returns (default, with just `fakeOCRArgument` alone, is a clear,
+    /// high-confidence fixture result).
+    static let fakeOCRLowConfidenceArgument = "-uiTestFakeOCRLowConfidence"
+    static let fakeOCRNoTextArgument = "-uiTestFakeOCRNoText"
+    static let fakeOCRFailureArgument = "-uiTestFakeOCRFailure"
+    static let fakeOCRUnavailableArgument = "-uiTestFakeOCRUnavailable"
+
     /// The simulator's interface orientation is a *device*-level property, not scoped to one
     /// app process — it doesn't reset just because a test relaunches the app. A stray rotation
     /// left over from an earlier test (or an earlier run against the same booted simulator)

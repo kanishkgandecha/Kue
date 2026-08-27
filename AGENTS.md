@@ -50,11 +50,11 @@ tasks; no model call in that path.
   `WidgetConfiguration` or `UserPreference`. See `docs/03-data-model.md` "WidgetConfiguration."
 - **Phases build in order.** V1 (Phases 1–10 / M0–M9) is complete — see "Current
   implementation status" below. **Kue 2.0 has started** (see "Kue 2.0 has started" below):
-  Phase 1 (migration foundation) and Phase 2 (search/filter/sort/duplication) are both done.
-  No other Kue 2.0 user-facing feature (`docs/01-vision-and-scope.md` "What NOT to build in
-  V1": OCR, Voice, calendar integration, context engine, Live Activities, large/Lock Screen
-  widgets, user-defined templates, ...) has been built, and none should be until the project
-  owner explicitly says a specific one has started.
+  migration foundation, search/filter/sort/duplication, recurring events, Apple Calendar
+  integration, and screenshot/OCR input are all done. No other Kue 2.0 user-facing feature
+  (`docs/01-vision-and-scope.md` "What NOT to build in V1": Voice, a context engine, Live
+  Activities, large/Lock Screen widgets, user-defined templates, ...) has been built, and none
+  should be until the project owner explicitly says a specific one has started.
 
 ## Current implementation status
 
@@ -202,6 +202,34 @@ pattern (`KueSchemaV2` now carries a frozen pre-Phase-4 `KueEvent` plus every ty
 relationship to it) `KueSchemaV1` established in Phase 3. See `docs/18-calendar-integration.md`
 for the full contract, the authorization-state/import-mapping/export-conflict rules, and what
 this phase deliberately doesn't do.
+
+**Phase 5 ("Screenshot and OCR Input") is done.** `Kue/Services/OCR/` mirrors `Services/
+Calendar/`'s own shape: `OCRTextRecognizing` (DI protocol), `SystemOCRTextRecognizer` (the one
+file that imports `Vision`), `FakeOCRTextRecognizer` (in-memory, launch-argument-gated for
+`KueUITests` exactly like `FakeCalendarProvider`), `OCRKitTypes.swift` (Kue-owned vocabulary —
+`OCRRecognitionResult`, `OCRConfidence`, `OCRImageLimits`, `OCRRequestGeneration`, etc.), and
+`OCRImagePreprocessor.swift` (pure, synchronous validation — encoded size, format, and
+dimensions/pixel-count all checked from `CGImageSource` properties *before* any pixel decode,
+then one bounded `CGImageSourceCreateThumbnailAtIndex` call that both downsamples and corrects
+EXIF orientation). `OCRImportView` (`Kue/Features/OCRImport/`) is Home's "Scan Screenshot" entry
+point — `PhotosPicker` (no Photo Library usage description needed; it only ever grants the one
+item the user picks), a persistent on-device-disclosure, an editable recognized-text review
+screen with a non-color-only low-confidence warning, and explicit retry/choose-another/cancel
+actions. Its "Continue" button runs the reviewed text through the *exact* `NLParsingPipeline`
+typed NL text already uses — no OCR-specific parser exists anywhere — and hands the resulting
+draft to `HomeView.OCRFlowPhase`, the same single-`.sheet(item:)`-content-switches-in-place
+shape `CalendarImportPhase` established in Phase 4 (chaining two `.sheet(isPresented:)`
+modifiers instead was observed, again, to leave the second sheet presented but empty for this
+exact transition). `EventSource` gained one new case, `.ocr` — a plain enum-case addition, no
+`@Model` shape change, so **no new schema version was needed** (same as `.calendarImport` in
+Phase 4); `KueEvent.schemaVersion` (the separate *semantic* marker) wasn't bumped either, since
+no new OCR-specific stored field exists for it to gate — recognized text is never persisted,
+only the `EventDraft`/`KueEvent` fields every other input path already writes. `KueApp` also
+installs `FakeNLParser`/`FakeAIAvailabilityChecker` (`Kue/Services/FakeNLParser.swift`) alongside
+`FakeOCRTextRecognizer.uiTestLaunchArgument`, since Apple Intelligence isn't available in the iOS
+Simulator at all and a UI test needs to drive recognized text all the way through parsing
+deterministically. See `docs/19-screenshot-ocr-input.md` for the full contract, the documented
+image-safety limits, and what this phase deliberately doesn't do.
 
 ## Project structure
 
@@ -449,6 +477,27 @@ Kue/                         App-target-only.
                              fields on success, leaves it untouched on failure, never touches
                              tasks/recurrence/notifications/widget). See docs/18-calendar-
                              integration.md for the full contract.
+
+                             Kue 2.0 Phase 5 added OCR/ — the same shape as Calendar/ above,
+                             for Vision. OCRTextRecognizing.swift (DI protocol, read via
+                             `\.ocrTextRecognizer`, OCREnvironment.swift), OCRKitTypes.swift
+                             (Kue-owned vocabulary — `OCRRecognitionResult`, `OCRConfidence`,
+                             `OCRImageLimits`, `OCRRequestGeneration` — nothing outside this
+                             folder ever names a Vision type), SystemOCRTextRecognizer.swift
+                             (the one file that imports `Vision`), FakeOCRTextRecognizer.swift
+                             (in-memory; same launch-argument-gated installation pattern as
+                             FakeCalendarProvider), and OCRImagePreprocessor.swift (pure,
+                             synchronous — encoded size/format/dimensions/pixel-count all
+                             checked from `CGImageSource` properties before any pixel decode,
+                             then one bounded `CGImageSourceCreateThumbnailAtIndex` call that
+                             both downsamples and corrects EXIF orientation). FakeNLParser.swift
+                             (Services/, not Services/OCR/ — it fakes the *existing*
+                             `NLParsing`/`AIAvailabilityChecking` seam, not a new one) is
+                             installed by `KueApp` alongside `FakeOCRTextRecognizer.uiTest
+                             LaunchArgument` since Apple Intelligence isn't available in the iOS
+                             Simulator at all. See docs/19-screenshot-ocr-input.md for the full
+                             contract, the documented image-safety limits, and the downsampling
+                             policy.
   Features/<Screen>/        One SwiftUI view (+ its own small subviews) per screen. Views
                              stay thin — they call into Services/, they don't recompute
                              status, validate fields, or plan schedules themselves.
@@ -498,6 +547,18 @@ Kue/                         App-target-only.
                              cases) and SettingsView gained a Calendar section (authorization
                              state, explanation, "Allow Calendar Access" when not yet
                              determined) mirroring the Notifications section's own shape.
+
+                             Kue 2.0 Phase 5 added OCRImport/OCRImportView.swift — Home's "Scan
+                             Screenshot" entry point: `PhotosPicker` (no Photo Library usage
+                             description needed — it only ever grants the one item picked),
+                             a persistent on-device-processing disclosure, an editable
+                             recognized-text review screen with a non-color-only low-confidence
+                             warning, and explicit retry/choose-another/cancel actions. Its
+                             "Continue" button runs the reviewed text through the exact
+                             `NLParsingPipeline` typed NL text already uses — no OCR-specific
+                             parser exists — and hands the draft to `HomeView.OCRFlowPhase`, the
+                             same single-`.sheet(item:)`-content-switches-in-place shape
+                             `CalendarImportPhase` uses, for the identical reason.
                              Home/EventFilterSortSheet.swift — Kue 2.0 Phase 2's compact
                              filter/sort sheet (docs/16-search-and-organization.md). Pure
                              SwiftUI over `HomeView`'s own `@State` bindings, no business
@@ -654,7 +715,20 @@ KueTests/                   Swift Testing (`import Testing`) unit tests — `@te
                              only, never `EKEventStore`) and Migrations/
                              SchemaV3MigrationTests.swift (same reused fixtures/support, proving
                              the five new Calendar-linkage fields nil-backfill and genuinely new
-                             linked data survives a further reopen).
+                             linked data survives a further reopen). Kue 2.0 Phase 5 added
+                             OCRImageValidationTests.swift (formats, corrupt/malformed/oversized
+                             data, dimension/pixel-count limits, downsampling decisions, EXIF
+                             orientation correction — every fixture image generated at test time
+                             via Core Graphics, never a bundled binary asset), OCRRecognition
+                             Tests.swift (confidence aggregation, low-confidence/no-text
+                             behavior, text normalization/line ordering, the
+                             `OCRTextRecognizing` seam itself), and OCRFlowTests.swift
+                             (`OCRRequestGeneration` cancellation/stale-result/retry semantics,
+                             parser routing through the real `NLParsingPipeline`, ambiguity
+                             handling, duplicate detection, explicit confirmation,
+                             `EventSource.ocr`, no persistence before confirmation,
+                             notification/widget side effects after a confirmed OCR-sourced
+                             event) — all `FakeOCRTextRecognizer`-only, never `Vision`.
 KueUITests/                  XCTest UI tests — Kue 2.0 Phase 2 added
                              SearchAndOrganizationUITests.swift (search, clearing search,
                              the filter/sort sheet, filtering to one event type, sorting,
@@ -685,7 +759,18 @@ KueUITests/                  XCTest UI tests — Kue 2.0 Phase 2 added
                              constants) that `KueApp` matches against
                              `FakeCalendarProvider`'s own identical literals to install a fake
                              provider instead of `SystemCalendarProvider` — never the real
-                             EventKit database.
+                             EventKit database. Kue 2.0 Phase 5 added OCRImportUITests.swift
+                             (opening the flow, the on-device privacy disclosure, the loading
+                             state, successful recognized-text review, editing recognized text,
+                             the low-confidence warning, the no-text state, failure and retry,
+                             choosing another image, cancelling, continuing into parsing/
+                             confirmation, confirming the final event) — same convention,
+                             launched with `fakeOCRArgument` (plus, for specific results, one of
+                             `UITestLaunchConfiguration`'s other `fakeOCR*Argument` constants);
+                             `\.ocrUsesFixtureImageSource` swaps `OCRImportView`'s real
+                             `PhotosPicker` for a deterministic "Choose Test Image" button under
+                             that same argument — never the owner's real Photos library or
+                             uncontrolled Vision output.
 ```
 
 A `Utilities/` folder doesn't exist yet — it'll appear when something is actually generic

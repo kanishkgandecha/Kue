@@ -40,6 +40,11 @@ enum EventSource: String, Codable, CaseIterable {
     /// import from Apple Calendar via `CalendarImportPipeline`; never set by anything
     /// running silently in the background.
     case calendarImport
+    /// Kue 2.0 Phase 5 — docs/19-screenshot-ocr-input.md. Text recognized on-device from a
+    /// user-selected image, reviewed/edited by the user, then routed through the exact same
+    /// `NLParsingPipeline` typed natural-language text uses — not a separate OCR-specific
+    /// parser (requirement 24).
+    case ocr
 }
 
 enum Priority: String, Codable, CaseIterable {
