@@ -178,6 +178,16 @@ struct WidgetLifecycleTests {
         #expect(WidgetContentService.nextUpEvent(from: [event], now: now) == nil)
     }
 
+    /// Kue 2.0 Phase 3 — a skip reuses `.cancelled` as its derived status (see
+    /// EventStatusEngine.derive), so it's excluded from "Next Up" the same way a cancelled
+    /// event already is, with no change to `nextUpEvent` itself.
+    @Test func nextUpExcludesASkippedOccurrenceEvenIfStillUpcomingByDate() {
+        let now = Date(timeIntervalSince1970: 1_000_000_000)
+        let event = makeEvent(startDate: now.addingTimeInterval(10 * 86_400))
+        event.isSkipped = true
+        #expect(WidgetContentService.nextUpEvent(from: [event], now: now) == nil)
+    }
+
     // MARK: - Reconciliation hooks (requirement 6)
 
     private func makeContext() -> ModelContext {

@@ -97,15 +97,30 @@ struct EventDetailView: View {
             }
         }
         .confirmationDialog(
-            "Delete \"\(event.title)\"? This removes its tasks, schedule, and widget settings too.",
+            deleteConfirmationTitle,
             isPresented: $isConfirmingDelete,
             titleVisibility: .visible
         ) {
-            Button("Delete", role: .destructive) {
-                EventActions.delete(event, context: modelContext)
-                dismiss()
+            if event.seriesID != nil {
+                // Kue 2.0 Phase 3 — destructive series actions must clearly state their scope
+                // (requirement 16): each option names exactly what it deletes.
+                Button("Delete This Occurrence", role: .destructive) {
+                    OccurrenceReconciliationService.deleteOccurrence(event, scope: .thisOccurrence, context: modelContext)
+                    dismiss()
+                }
+                .accessibilityIdentifier("confirmDeleteOccurrenceButton")
+                Button("Delete This and Future Occurrences", role: .destructive) {
+                    OccurrenceReconciliationService.deleteOccurrence(event, scope: .thisAndFuture, context: modelContext)
+                    dismiss()
+                }
+                .accessibilityIdentifier("confirmDeleteThisAndFutureButton")
+            } else {
+                Button("Delete", role: .destructive) {
+                    EventActions.delete(event, context: modelContext)
+                    dismiss()
+                }
+                .accessibilityIdentifier("confirmDeleteButton")
             }
-            .accessibilityIdentifier("confirmDeleteButton")
         }
         .task {
             // Idempotent — lazily seeds/refreshes a schedule for events that predate this
@@ -135,6 +150,11 @@ struct EventDetailView: View {
                 }
                 LabeledContent("Priority", value: event.priority.rawValue.capitalized)
                 LabeledContent("Timezone", value: event.timeZoneIdentifier)
+                // Kue 2.0 Phase 3 — a plain, read-only summary of the series this occurrence
+                // belongs to (docs/17-recurring-events.md "UI").
+                if let rule = event.recurrence {
+                    LabeledContent("Repeats", value: rule.summary(startDate: event.recurrenceAnchorDate ?? event.startDate))
+                }
             }
 
             if let notes = event.notes, !notes.isEmpty {
@@ -170,6 +190,24 @@ struct EventDetailView: View {
                             EventActions.complete(event, context: modelContext)
                         }
                         .accessibilityIdentifier("completeEventButton")
+                    }
+
+                    // Kue 2.0 Phase 3 — skip is a recurrence-only action: only meaningful for
+                    // a materialized occurrence (docs/17-recurring-events.md "Occurrence
+                    // actions"); a non-recurring event has no "the series continues" to skip
+                    // to.
+                    if event.seriesID != nil {
+                        if event.isSkipped {
+                            Button("Un-skip") {
+                                Task { await EventActions.unskip(event, context: modelContext) }
+                            }
+                            .accessibilityIdentifier("unskipOccurrenceButton")
+                        } else {
+                            Button("Skip This Occurrence") {
+                                EventActions.skip(event, context: modelContext)
+                            }
+                            .accessibilityIdentifier("skipOccurrenceButton")
+                        }
                     }
 
                     Button("Archive") {
@@ -214,6 +252,15 @@ struct EventDetailView: View {
 
     private var dateStyle: Date.FormatStyle {
         event.isAllDay ? .dateTime.month().day().year() : .dateTime.month().day().year().hour().minute()
+    }
+
+    /// Kue 2.0 Phase 3, requirement 16 — states scope up front, before the dialog's own
+    /// per-button scope labels, for a series occurrence.
+    private var deleteConfirmationTitle: String {
+        guard event.seriesID != nil else {
+            return "Delete \"\(event.title)\"? This removes its tasks, schedule, and widget settings too."
+        }
+        return "Delete \"\(event.title)\"? Choose whether this removes just this occurrence or this and every future occurrence in the series."
     }
 
     // MARK: - Timeline / Tasks (Phase 3) / Notifications (still a later phase)

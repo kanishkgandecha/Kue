@@ -97,6 +97,65 @@ struct EventCRUDTests {
         #expect(event.status == .completed)
     }
 
+    // MARK: - Kue 2.0 Phase 3 — skip (docs/17-recurring-events.md "Occurrence actions")
+
+    @Test func skipReusesCancelledAsItsDerivedStatusButSetsItsOwnField() throws {
+        let context = makeContext()
+        let event = KueEvent(title: "E", eventType: .generic, startDate: .distantFuture, estimatedDurationMinutes: 0, source: .manual)
+        context.insert(event)
+        try context.save()
+
+        EventActions.skip(event, context: context)
+        #expect(event.isSkipped)
+        #expect(event.skippedAt != nil)
+        #expect(event.status == .cancelled)
+        #expect(event.isCancelled == false)
+        #expect(event.isManuallyCompleted == false)
+    }
+
+    @Test func skipClearsCancelAndManualCompletion() throws {
+        let context = makeContext()
+        let event = KueEvent(title: "E", eventType: .generic, startDate: .distantFuture, estimatedDurationMinutes: 0, source: .manual)
+        context.insert(event)
+        try context.save()
+
+        EventActions.complete(event, context: context)
+        #expect(event.isManuallyCompleted)
+
+        EventActions.skip(event, context: context)
+        #expect(event.isSkipped)
+        #expect(event.isManuallyCompleted == false)
+    }
+
+    @Test func cancelWinsOverSkipWhenBothAreSomehowSet() throws {
+        let context = makeContext()
+        let event = KueEvent(title: "E", eventType: .generic, startDate: .distantFuture, estimatedDurationMinutes: 0, source: .manual)
+        context.insert(event)
+        try context.save()
+
+        EventActions.skip(event, context: context)
+        EventActions.cancel(event, context: context)
+        // `cancel` doesn't itself clear `isSkipped` (only `skip`/`complete`/`cancel` clear each
+        // OTHER's field), but derive()'s precedence still resolves to cancelled either way —
+        // this documents the precedence rather than depending on cancel clearing skip.
+        #expect(EventStatusEngine.derive(for: event) == .cancelled)
+    }
+
+    @Test func unskipRestoresDerivedStatus() async throws {
+        let context = makeContext()
+        let event = KueEvent(title: "E", eventType: .generic, startDate: .distantFuture, estimatedDurationMinutes: 0, source: .manual)
+        context.insert(event)
+        try context.save()
+        #expect(event.status == .upcoming)
+
+        EventActions.skip(event, context: context)
+        #expect(event.status == .cancelled)
+
+        await EventActions.unskip(event, context: context)
+        #expect(event.isSkipped == false)
+        #expect(event.status == .upcoming)
+    }
+
     // MARK: - Archive / unarchive
 
     @Test func archiveThenUnarchiveRestoresDerivedStatus() async throws {

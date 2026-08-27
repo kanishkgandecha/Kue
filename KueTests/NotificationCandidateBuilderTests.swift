@@ -51,6 +51,14 @@ struct NotificationCandidateBuilderTests {
         #expect(candidates.first { $0.kind == .today }?.fireDate == plan[.today])
     }
 
+    // MARK: - Kue 2.0 Phase 3 — skip (docs/17-recurring-events.md "Occurrence actions")
+
+    @Test func skippedOccurrenceProducesNoCandidates() {
+        let event = makeEvent(startDate: now.addingTimeInterval(10 * 86_400))
+        event.isSkipped = true
+        #expect(NotificationCandidateBuilder.candidates(for: event, now: now).isEmpty)
+    }
+
     @Test func taskDueCandidateDateMatchesTheTasksOwnDueDate() {
         let event = makeEvent(startDate: now.addingTimeInterval(10 * 86_400))
         let task = KueTask(event: event, title: "Review", dueDate: now.addingTimeInterval(5 * 86_400), offsetLabel: "5 days before")

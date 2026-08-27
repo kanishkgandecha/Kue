@@ -30,6 +30,13 @@ enum EventStatusEngine {
     /// date-derived (see `reconcile(_:now:)` for archive handling).
     static func derive(for event: KueEvent, now: Date = .now) -> EventStatus {
         if event.isCancelled { return .cancelled }
+        // Kue 2.0 Phase 3 — docs/17-recurring-events.md "Occurrence actions": skip reuses
+        // `.cancelled` as its derived status (every existing consumer that already excludes
+        // cancelled events excludes a skip for free); `isSkipped` remains the real field UI
+        // reads to show "Skipped" instead of "Cancelled" copy. Precedence: cancel > skip >
+        // manual-complete, extending the existing documented cancel-wins-over-manual-complete
+        // rule by one more case.
+        if event.isSkipped { return .cancelled }
         if event.isManuallyCompleted { return .completed }
 
         let end = event.effectiveEndDate
@@ -99,6 +106,8 @@ enum EventStatusEngine {
         let referenceDate: Date
         if event.isCancelled {
             referenceDate = event.cancelledAt ?? .distantFuture
+        } else if event.isSkipped {
+            referenceDate = event.skippedAt ?? .distantFuture
         } else if event.isManuallyCompleted {
             referenceDate = event.manuallyCompletedAt ?? .distantFuture
         } else {

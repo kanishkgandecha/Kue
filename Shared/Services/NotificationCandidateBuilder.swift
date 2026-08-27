@@ -17,7 +17,9 @@ enum NotificationCandidateBuilder {
     /// itself only guards `.archived` (a widget-engine concern this file doesn't alter), so
     /// this guard is stricter on purpose.
     static func candidates(for event: KueEvent, now: Date = .now) -> [NotificationCandidate] {
-        guard event.status != .archived, !event.isCancelled, !event.isManuallyCompleted else { return [] }
+        // Kue 2.0 Phase 3: a skipped occurrence shouldn't still fire its reminders, same as a
+        // cancelled/completed one — see docs/17-recurring-events.md "Occurrence actions".
+        guard event.status != .archived, !event.isCancelled, !event.isManuallyCompleted, !event.isSkipped else { return [] }
 
         var result: [NotificationCandidate] = []
         for (date, phase) in WidgetContentService.transitionPlan(for: event, now: now) {

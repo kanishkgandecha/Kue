@@ -65,7 +65,14 @@ enum EventDuplicationService {
             notes: event.notes,
             source: .manual,
             priority: event.priority,
-            recurrence: event.recurrence,
+            // Kue 2.0 Phase 3: deliberately NOT `event.recurrence` — a duplicate is always a
+            // plain, independent, non-recurring copy (no seriesID/recurrenceAnchorDate is
+            // generated for it either), matching "duplication is itself a fresh manual action"
+            // for the same reason `source` is reset rather than copied. Copying the rule
+            // without also spinning up a whole new materialized series would leave the
+            // duplicate in an inconsistent "recurring but seriesID == nil" state; see
+            // docs/17-recurring-events.md.
+            recurrence: nil,
             createdAt: now,
             updatedAt: now
         )

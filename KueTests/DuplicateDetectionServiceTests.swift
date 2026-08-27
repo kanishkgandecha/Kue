@@ -85,6 +85,42 @@ struct DuplicateDetectionServiceTests {
         #expect(duplicate == nil)
     }
 
+    // MARK: - Kue 2.0 Phase 3 — recurring series exclusion (docs/17-recurring-events.md
+    // "Duplicate detection")
+
+    @Test func sameSeriesOccurrencesAreNeverFlaggedAgainstEachOther() {
+        let day = Date(timeIntervalSince1970: 1_000_000_000)
+        let seriesID = UUID()
+        let sibling = KueEvent(
+            title: "Team Sync", eventType: .generic, startDate: day, estimatedDurationMinutes: 0,
+            source: .manual, seriesID: seriesID, recurrenceAnchorDate: day
+        )
+        let duplicate = DuplicateDetectionService.findDuplicate(
+            title: "Team Sync",
+            startDate: day,
+            timeZoneIdentifier: "UTC",
+            excludingSeriesID: seriesID,
+            in: [sibling]
+        )
+        #expect(duplicate == nil)
+    }
+
+    @Test func differentSeriesOnTheSameDayIsStillFlagged() {
+        let day = Date(timeIntervalSince1970: 1_000_000_000)
+        let existing = KueEvent(
+            title: "Team Sync", eventType: .generic, startDate: day, estimatedDurationMinutes: 0,
+            source: .manual, seriesID: UUID(), recurrenceAnchorDate: day
+        )
+        let duplicate = DuplicateDetectionService.findDuplicate(
+            title: "Team Sync",
+            startDate: day,
+            timeZoneIdentifier: "UTC",
+            excludingSeriesID: UUID(), // a different series than `existing`'s
+            in: [existing]
+        )
+        #expect(duplicate?.id == existing.id)
+    }
+
     @Test func matchIsCaseSensitiveAndWhitespaceTrimmed() {
         let day = Date(timeIntervalSince1970: 1_000_000_000)
         let existing = makeEvent(title: "OS Exam", startDate: day)

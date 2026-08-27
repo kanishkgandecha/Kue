@@ -28,14 +28,15 @@ enum ModelContainerFactory {
 
     private static let storeFileName = "Kue.sqlite"
 
-    /// Built from `KueSchemaV1` (Persistence/Migrations/) — the exact, frozen shape every
-    /// real V1.0 store already on-disk was written against. Do **not** replace this with a
-    /// bare `Schema([...])` literal again; that would silently detach the schema this app
-    /// opens stores with from the versioned/migratable one `KueMigrationPlan` describes.
-    static let schema = Schema(versionedSchema: KueSchemaV1.self)
+    /// Built from `KueSchemaV2` (Persistence/Migrations/) — the *current* schema version. Do
+    /// **not** replace this with a bare `Schema([...])` literal again; that would silently
+    /// detach the schema this app opens stores with from the versioned/migratable one
+    /// `KueMigrationPlan` describes. Kue 2.0 Phase 3 added `KueSchemaV2` (recurrence fields) —
+    /// see docs/17-recurring-events.md "Migration" and `KueMigrationPlan`'s own header.
+    static let schema = Schema(versionedSchema: KueSchemaV2.self)
 
-    /// Currently a single version with zero migration stages (nothing has changed shape
-    /// yet) — see `KueMigrationPlan`'s own header for what adding a real stage looks like.
+    /// `KueSchemaV1` → `KueSchemaV2` as of Kue 2.0 Phase 3 — see `KueMigrationPlan`'s own
+    /// header for what adding the *next* stage looks like.
     static let migrationPlan: any SchemaMigrationPlan.Type = KueMigrationPlan.self
 
     /// The app's real, on-disk store — shared with both extensions via the App Group

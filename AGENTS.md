@@ -49,12 +49,12 @@ tasks; no model call in that path.
   per placed Home Screen instance — don't reintroduce a `size` field on
   `WidgetConfiguration` or `UserPreference`. See `docs/03-data-model.md` "WidgetConfiguration."
 - **Phases build in order.** V1 (Phases 1–10 / M0–M9) is complete — see "Current
-  implementation status" below. **Kue 2.0 has started** (see "Kue 2.0 has started" below),
-  but so far *only* its Phase 1 migration foundation — no Kue 2.0 user-facing feature
-  (`docs/01-vision-and-scope.md` "What NOT to build in V1": OCR, Voice, calendar integration,
-  context engine, Live Activities, large/Lock Screen widgets, user-defined templates, ...) has
-  been built, and none should be until the project owner explicitly says a specific one has
-  started.
+  implementation status" below. **Kue 2.0 has started** (see "Kue 2.0 has started" below):
+  Phase 1 (migration foundation) and Phase 2 (search/filter/sort/duplication) are both done.
+  No other Kue 2.0 user-facing feature (`docs/01-vision-and-scope.md` "What NOT to build in
+  V1": OCR, Voice, calendar integration, context engine, Live Activities, large/Lock Screen
+  widgets, user-defined templates, ...) has been built, and none should be until the project
+  owner explicitly says a specific one has started.
 
 ## Current implementation status
 
@@ -120,8 +120,15 @@ requires a new `VersionedSchema`, a real `MigrationStage` in `KueMigrationPlan`,
 passing migration test with a representative fixture covering the changed shape — before it
 ships, not after.** Do not edit `Shared/Models/*.swift` for a shape change without first
 reading `docs/15-schema-migrations.md`'s "How to add a schema version." `KueSchemaV1.swift`
-itself must never be edited again once written — it's a historical snapshot of what real
-devices already have on disk, not a moving target.
+represents a historical snapshot of what real devices already have on disk, not a moving
+target — it must never be edited to change what it *represents*. Phase 3 needed one
+structural exception: once a later phase actually changes a type's live shape, `KueSchemaV1`
+can no longer name that type by its bare (now-repointed) symbol and stay correct, so the
+*file* gains a frozen nested copy of exactly the pre-change shape (and, empirically, of every
+other `@Model` type with a relationship *to* it — see that file's own header for why the
+whole connected subgraph needs this, not just the one type that changed). This is the one
+kind of edit `KueSchemaV1.swift` should ever receive: a byte-for-byte nested copy added to
+keep the frozen shape nameable, never a semantic change to what V1.0 actually shipped with.
 
 **Physical-device deployment is deferred until final Kue 2.0 sign-off.** Every Kue 2.0 phase
 — this one included — is built, migrated, and tested entirely in the iOS Simulator
@@ -130,6 +137,37 @@ installation and its data on the project owner's iPhone must stay untouched, and
 should run `xcodebuild` against a physical-device destination, alter device
 provisioning/signing/registration, or otherwise install/launch a build there, until the
 project owner explicitly signs off on the finished Kue 2.0 work and says it's time to deploy.
+
+**Phase 2 ("Search and Event Organization") is done.** `EventListQueryEngine`
+(`Shared/Services/`) adds case-/diacritic-insensitive local search (title, location, notes,
+event-type display name), independent type/status/archived-scope filters, three sort options
+with deterministic tie-breaking, and the three-way empty-database/no-query-results/
+no-filter-results distinction; `HomeView` uses the system search control plus a compact
+`EventFilterSortSheet`, falling back to the original Upcoming/Active/Completed sections
+whenever search/filter/sort are all still at their defaults. `EventDuplicationService`
+(`Kue/Services/`) adds "Duplicate Event" from Event Detail — fresh identifiers, regenerated
+(never copied) tasks, no carried-over archived/cancelled/manually-completed state, real
+duplicate detection, and the same notification-reschedule/widget-reload sequence
+`EventFormView.save()` uses for a new event. No stored-property change, no new schema
+version — see `docs/16-search-and-organization.md` for the full policy this phase implements.
+
+**Phase 3 ("Recurring Events") is done.** `RecurrenceRule` (`Shared/Models/`) is now a real
+Codable contract (frequency, interval, and a mutually-exclusive-by-construction `End`
+enum — never/onDate/afterOccurrences); `RecurrenceEngine` (`Shared/Services/`) is the pure
+date-math half (anchor-date generation, month-end/leap-year clamping, DST-correct stepping,
+the bounded rolling-horizon generator) and `OccurrenceReconciliationService`
+(`Kue/Services/`) is the SwiftData-touching half (series creation, idempotent replenishment,
+the This Occurrence / This and Future Occurrences edit-and-delete split). A recurring series
+is not a new kind of record — it's a set of ordinary `KueEvent` rows (one per materialized
+occurrence, each with its own tasks/schedule/widget configuration exactly like a
+non-recurring event) sharing a `seriesID`, so every existing per-event mechanism
+(notifications, "Next Up," duplicate detection, archival) needed no changes of its own, only
+new call sites. This required `KueSchemaV2` (`Shared/Persistence/Migrations/`) — five new
+`KueEvent` fields (`seriesID`, `recurrenceAnchorDate`, `isRecurrenceException`, `isSkipped`,
+`skippedAt`) and the new `RecurrenceExclusion` model (records a deleted single occurrence's
+slot so replenishment never resurrects it) — the first real stage `KueMigrationPlan` has ever
+carried. See `docs/17-recurring-events.md` for the full contract, the rolling-horizon
+constants and rationale, and the exact edit/delete-scope splitting rules.
 
 ## Project structure
 
@@ -144,11 +182,19 @@ Shared/                     Claimed by BOTH the "Kue" app target and the "KueWid
                              `StoreOpenDiagnostic` (Kue 2.0 Phase 1 — `makeDefaultOrDiagnostic()`'s
                              recoverable-failure result type; see that file's own doc comments).
     Migrations/             Kue 2.0 Phase 1. KueSchemaV1.swift (the frozen, exact V1.0 model
-                             shape — never edit once written) and KueMigrationPlan.swift
-                             (currently one schema, zero stages — see docs/15-schema-
-                             migrations.md for how a future version adds one). Both read by
+                             shape) and KueMigrationPlan.swift. Both read by
                              `ModelContainerFactory.schema`/`.migrationPlan`, which every
                              production target and `makeInMemory()` build from.
+
+                             Kue 2.0 Phase 3 added KueSchemaV2.swift (five new `KueEvent`
+                             recurrence fields + the new `RecurrenceExclusion` model — see
+                             docs/17-recurring-events.md) and `KueMigrationPlan`'s first real
+                             `.custom` stage. This is also the phase that forced
+                             `KueSchemaV1.swift` to gain nested, frozen copies of `KueEvent`
+                             *and* every type with a relationship to it (`KueTask`,
+                             `KueSchedule`, `WidgetConfiguration`, `WidgetState`) — see that
+                             file's own header for why the whole connected subgraph needed
+                             nesting, not just the one type whose shape actually changed.
   Services/                 EventStatusEngine (status derivation + reconciliation sweep,
                              incl. `archiveThreshold`/`isPastAutoArchiveWindow` — the
                              date-driven auto-archive math both the sweep and the read-only
@@ -216,6 +262,20 @@ Shared/                     Claimed by BOTH the "Kue" app target and the "KueWid
                              (not KueShare/) because the Share Extension target also
                              synchronizes `Shared/` — see "Three targets" below — and KueTests
                              needs to reach them too.
+
+                             Kue 2.0 Phase 2 added EventListQueryEngine.swift (search
+                             normalization, filter/sort/tie-break/empty-reason logic — pure,
+                             no SwiftData — see docs/16-search-and-organization.md). Lives in
+                             Shared/, not Kue/, on the same "the widget extension might one
+                             day need its own filtered list surface too" grounds
+                             WidgetContentService already does, even though only `HomeView`
+                             (Kue/) uses it today.
+
+                             Kue 2.0 Phase 3 added RecurrenceEngine.swift — pure recurrence
+                             date math (anchor-date generation, month-end/leap-year clamping,
+                             DST-correct calendar stepping, the bounded rolling-horizon
+                             generator) with no SwiftData, same split SchedulingEngine's own
+                             `plan(...)` establishes. See docs/17-recurring-events.md.
 Kue/                         App-target-only.
   KueApp.swift              App entry point — builds the ModelContainer, sets HomeView as
                              root, sweeps status on scenePhase → .active, and (Phase 8)
@@ -310,6 +370,33 @@ Kue/                         App-target-only.
                              every other trigger (foreground, background refresh, the
                              idempotent per-event schedule seed) passes `false` and only acts
                              if permission is already decided.
+
+                             Kue 2.0 Phase 2 added EventDuplicationService.swift
+                             ("Duplicate Event," docs/16-search-and-organization.md) — copies
+                             user-editable fields + schedule rules + widget-configuration
+                             settings onto a brand-new `KueEvent`, never a source's identity
+                             or cancelled/completed/archived flags; regenerates tasks through
+                             `SchedulingEngine` rather than copying `KueTask` rows; runs
+                             `DuplicateDetectionService`; reschedules notifications and
+                             reloads the widget timeline the same way `EventFormView.save()`
+                             does for a new event. App-only for the same reason `EventActions`
+                             is — it needs `NotificationEngine`'s full reschedule pass, which
+                             no widget-extension App Intent does.
+
+                             Kue 2.0 Phase 3 added OccurrenceReconciliationService.swift — the
+                             SwiftData-touching half of docs/17-recurring-events.md: series
+                             creation, idempotent/bounded replenishment (called from
+                             `EventReconciliation.run` alongside `EventStatusEngine.sweep`),
+                             and the This Occurrence / This and Future Occurrences edit-and-
+                             delete split. App-only because it takes an `EventDraft`
+                             (app-only) and nothing outside the app target ever creates or
+                             edits a recurring series. `EventActions` gained `skip`/`unskip` —
+                             a third mutually-exclusive user-forceable state alongside cancel/
+                             manual-complete, reusing `.cancelled` as its derived `EventStatus`
+                             so every existing consumer that already excludes cancelled events
+                             excludes a skip for free. `DuplicateDetectionService` gained an
+                             `excludingSeriesID:` parameter so sibling occurrences of the same
+                             series are never flagged against each other.
   Features/<Screen>/        One SwiftUI view (+ its own small subviews) per screen. Views
                              stay thin — they call into Services/, they don't recompute
                              status, validate fields, or plan schedules themselves.
@@ -328,6 +415,27 @@ Kue/                         App-target-only.
                              Extension's entry point into this same confirmation UI, still
                              `.add` mode under the hood (identical `save()`/duplicate-check
                              path); see that init's own doc comment.
+
+                             Kue 2.0 Phase 3 added a "Repeat" section to EventFormView
+                             (frequency/interval/end controls, a live human-readable summary,
+                             and — when editing an occurrence already in a series — a required
+                             This Occurrence / This and Future Occurrences scope picker routed
+                             through `OccurrenceReconciliationService.applyEdit`) and, to
+                             EventDetailView, Skip/Un-skip actions and a two-scope delete
+                             confirmation for a series occurrence (each button states its own
+                             scope, per docs/17-recurring-events.md "Occurrence actions" /
+                             "Deleting one occurrence"). All decision-making stays in
+                             `OccurrenceReconciliationService`/`EventActions`; both views only
+                             orchestrate which call to make and present the result.
+                             Home/EventFilterSortSheet.swift — Kue 2.0 Phase 2's compact
+                             filter/sort sheet (docs/16-search-and-organization.md). Pure
+                             SwiftUI over `HomeView`'s own `@State` bindings, no business
+                             logic — every predicate/ordering decision lives in
+                             `EventListQueryEngine` (Shared/). `HomeView` itself gained
+                             `.searchable` (the system search control) and switches between
+                             its original three-section layout and a flat sorted results list
+                             depending on whether search/filter/sort are all still default.
+
                              StoreRecovery/StoreOpenFailureView.swift — Kue 2.0 Phase 1,
                              requirement 9's "recoverable diagnostic path": shown by KueApp
                              instead of HomeView when `ModelContainerFactory.
@@ -412,6 +520,36 @@ KueTests/                   Swift Testing (`import Testing`) unit tests — `@te
                              is a manual-device check — Share Extensions have no launchable
                              icon of their own for `XCUIApplication` to drive, a platform
                              limitation, not a shortcut taken here.
+                             Kue 2.0 Phase 2 added EventListQueryEngineTests.swift (search
+                             normalization, every filter alone/combined, every sort option,
+                             tie-breaking stability, all four empty-reason outcomes — plain
+                             in-memory `KueEvent` fixtures, no ModelContext) and
+                             EventDuplicationServiceTests.swift (every event type, fresh
+                             identifiers, independent relationships, regenerated-not-copied
+                             tasks, custom-schedule-rule preservation, no carried-over
+                             archived/cancelled/manually-completed state, duplicate detection,
+                             notification/widget invocation via the same
+                             FakeNotificationScheduler/FakeWidgetReloader
+                             NotificationTestSupport.swift already provides).
+
+                             Kue 2.0 Phase 3 added RecurrenceEngineTests.swift (every
+                             frequency, intervals > 1, both end kinds, validation failures,
+                             month-end/leap-year clamping, DST spring-forward/fall-back,
+                             nonexistent/repeated local times, timezone pinning, the bounded
+                             rolling-horizon generator's minimum/maximum/idempotency behavior,
+                             and the human-readable summary — pure, no ModelContext) and
+                             OccurrenceReconciliationServiceTests.swift (series/occurrence
+                             identity, deterministic per-occurrence task generation through
+                             `SchedulingEngine`, idempotent/duplicate-free replenishment,
+                             explicit exceptions surviving reconciliation, This Occurrence and
+                             This and Future edits, and deletion with `RecurrenceExclusion`).
+                             DuplicateDetectionServiceTests.swift, NotificationCandidate
+                             BuilderTests.swift, WidgetLifecycleTests.swift, and
+                             EventCRUDTests.swift each gained a small addition for the
+                             recurrence-specific case they cover (series exclusion, skip
+                             excluded from candidates, skip excluded from "Next Up", skip/
+                             unskip action behavior) rather than new files, since each already
+                             held the exact fixture/assertion style that case needed.
     Migrations/             Kue 2.0 Phase 1 — reusable migration-test infrastructure, not a
                              one-off. MigrationTestSupport.swift (real, on-disk stores at a
                              throwaway temp URL — *never* the production App Group path;
@@ -427,8 +565,35 @@ KueTests/                   Swift Testing (`import Testing`) unit tests — `@te
                              *new* model instances, not the ones inserted), SchemaV1Migration
                              Tests.swift (the actual proof — see docs/15-schema-migrations.md).
                              Reuse these three files' patterns for every future schema
-                             version's own migration test.
-KueUITests/                  XCTest UI tests
+                             version's own migration test. Kue 2.0 Phase 3 added
+                             SchemaV2MigrationTests.swift — reuses the same fixtures, proving
+                             every migrated V1 row gets non-recurring defaults for the five new
+                             fields, `RecurrenceExclusion` is part of the migrated schema, and
+                             genuinely new (post-migration) recurring data — a series, an
+                             exception, an exclusion — round-trips through a further reopen.
+                             `MigrationFixtures.swift` itself now builds its five fixture
+                             events as `KueSchemaV1.KueEvent` (not the live `KueEvent`) since
+                             that's the type a real V1-schema-only store actually holds — see
+                             `KueSchemaV1.swift`'s own header.
+KueUITests/                  XCTest UI tests — Kue 2.0 Phase 2 added
+                             SearchAndOrganizationUITests.swift (search, clearing search,
+                             the filter/sort sheet, filtering to one event type, sorting,
+                             an unmatched-search empty state, duplication) — same unique-
+                             per-run-title convention as EventManagementUITests/
+                             TemplateAndScheduleUITests, since the app's real on-disk store
+                             persists across UI test runs. Kue 2.0 Phase 3 added
+                             RecurringEventsUITests.swift (creating each recurrence type, the
+                             recurrence summary, validation errors, This Occurrence / This and
+                             Future Occurrences editing, skip, complete, delete with its scope
+                             confirmation) — same convention, plus two Phase-3-specific ones:
+                             it searches for a just-created event by its own unique title
+                             (Home's `.searchable`) rather than assuming it's immediately
+                             visible, since a fresh zero-duration event is often already
+                             `.completed` by the time `save()` runs and Home's default
+                             sectioned layout doesn't guarantee it's on-screen without
+                             scrolling; and it identifies one exact occurrence among several
+                             sharing the same title by each row's own title+date label, not
+                             the bare title alone.
 ```
 
 A `Utilities/` folder doesn't exist yet — it'll appear when something is actually generic

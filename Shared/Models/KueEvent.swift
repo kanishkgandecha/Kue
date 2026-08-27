@@ -70,11 +70,29 @@ final class KueEvent {
     /// User-forceable "mark complete" — see "Manual completion"; false by default.
     var isManuallyCompleted: Bool
     var manuallyCompletedAt: Date?
-    /// Post-V1: always nil in V1, field reserved. See RecurrenceRule.swift.
+    /// Kue 2.0 Phase 3 — real as of `KueSchemaV2`. Set identically on every occurrence sharing
+    /// `seriesID`; nil for a non-recurring event. See docs/17-recurring-events.md.
     var recurrence: RecurrenceRule?
     /// Semantic payload marker, starts at 1 — see "Schema versioning". Distinct from SwiftData's
     /// own VersionedSchema/SchemaMigrationPlan, which govern the @Model shape itself.
     var schemaVersion: Int
+
+    // MARK: - Kue 2.0 Phase 3 (KueSchemaV2) — recurrence occurrence identity, see
+    // docs/17-recurring-events.md. Nil/false for every non-recurring event.
+
+    /// Shared across every occurrence produced by one recurrence rule segment. Nil for a
+    /// non-recurring event.
+    var seriesID: UUID?
+    /// This occurrence's slot per the rule, independent of `startDate` — the replenishment
+    /// dedup key, and what a "This Occurrence" edit that moves `startDate` leaves untouched.
+    var recurrenceAnchorDate: Date?
+    /// True once this occurrence's fields were edited independently of the rule (a "This
+    /// Occurrence" edit, or a skip) — reconciliation never regenerates or overwrites this row.
+    var isRecurrenceException: Bool = false
+    /// The third mutually-exclusive user-forceable state, alongside `isCancelled`/
+    /// `isManuallyCompleted` — "this occurrence doesn't happen, the series continues."
+    var isSkipped: Bool = false
+    var skippedAt: Date?
 
     @Relationship(deleteRule: .cascade, inverse: \KueTask.event)
     var tasks: [KueTask]
@@ -111,6 +129,11 @@ final class KueEvent {
         manuallyCompletedAt: Date? = nil,
         recurrence: RecurrenceRule? = nil,
         schemaVersion: Int = 1,
+        seriesID: UUID? = nil,
+        recurrenceAnchorDate: Date? = nil,
+        isRecurrenceException: Bool = false,
+        isSkipped: Bool = false,
+        skippedAt: Date? = nil,
         tasks: [KueTask] = [],
         schedule: KueSchedule? = nil,
         widgetConfiguration: WidgetConfiguration? = nil,
@@ -137,6 +160,11 @@ final class KueEvent {
         self.manuallyCompletedAt = manuallyCompletedAt
         self.recurrence = recurrence
         self.schemaVersion = schemaVersion
+        self.seriesID = seriesID
+        self.recurrenceAnchorDate = recurrenceAnchorDate
+        self.isRecurrenceException = isRecurrenceException
+        self.isSkipped = isSkipped
+        self.skippedAt = skippedAt
         self.tasks = tasks
         self.schedule = schedule
         self.widgetConfiguration = widgetConfiguration

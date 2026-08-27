@@ -5,14 +5,20 @@
 //  Kue 2.0 Phase 1 — SwiftData Migration Foundation, requirement 8: fixtures covering every
 //  event type, all-day and timed events, completed tasks, custom schedules, widget
 //  configuration, notification preferences, cancellation, manual completion, and archived
-//  records. Reusable — `KueSchemaV2MigrationTests` (whenever it exists) should insert these
-//  same fixtures into a V1 store and assert them against the *new* shape after migrating,
-//  rather than inventing a second fixture set.
+//  records. Reusable — Kue 2.0 Phase 3's `SchemaV2MigrationTests` reuses these same fixtures,
+//  asserted against the *new* shape after migrating, rather than inventing a second fixture set.
 //
 //  Snapshot-based, not object-identity-based: after reopening a store, SwiftData hands back
 //  *new* model instances, not the ones inserted — every field this file cares about is
 //  captured into a plain, `Equatable`-friendly `Snapshot` at insert time, and the test
 //  refetches by stable `id: UUID` from the reopened container to compare against it.
+//
+//  Kue 2.0 Phase 3 update: the five fixture events are now built as `KueSchemaV1.KueEvent` —
+//  not the live `KueEvent` — because `MigrationTestSupport.makeV1Store` opens a store whose
+//  schema only knows `KueSchemaV1.KueEvent` (see that type's own header for why V1 needed its
+//  own frozen nested copy once Phase 3 changed the live `KueEvent`'s shape). Inserting a live
+//  `KueEvent` into a V1-schema-only context has no matching entity descriptor and crashes —
+//  this is the type every *real* V1.0 row on disk actually is, so fixtures must match it.
 //
 
 import Foundation
@@ -119,7 +125,7 @@ enum MigrationFixtures {
         let referenceDate = Date(timeIntervalSince1970: 1_700_000_000)
 
         // MARK: Generic — timed, upcoming, custom schedule, one completed + one open task.
-        let generic = KueEvent(
+        let generic = KueSchemaV1.KueEvent(
             title: "Generic Reminder",
             eventType: .generic,
             startDate: referenceDate.addingTimeInterval(10 * 86_400),
@@ -143,12 +149,12 @@ enum MigrationFixtures {
         )
         context.insert(generic)
 
-        let genericTaskDone = KueTask(
+        let genericTaskDone = KueSchemaV1.KueTask(
             event: generic, title: "Prep A", dueDate: referenceDate.addingTimeInterval(3 * 86_400),
             isCompleted: true, completedAt: referenceDate.addingTimeInterval(3 * 86_400 + 3_600),
             offsetLabel: "7 days before", sortOrder: 0
         )
-        let genericTaskOpen = KueTask(
+        let genericTaskOpen = KueSchemaV1.KueTask(
             event: generic, title: "Prep B", dueDate: referenceDate.addingTimeInterval(9 * 86_400),
             isCompleted: false, offsetLabel: "1 day before", sortOrder: 1
         )
@@ -156,7 +162,7 @@ enum MigrationFixtures {
         context.insert(genericTaskOpen)
         generic.tasks = [genericTaskDone, genericTaskOpen]
 
-        let genericSchedule = KueSchedule(
+        let genericSchedule = KueSchemaV1.KueSchedule(
             event: generic,
             templateType: .custom,
             rules: [
@@ -169,12 +175,12 @@ enum MigrationFixtures {
         context.insert(genericSchedule)
         generic.schedule = genericSchedule
 
-        let genericWidget = WidgetConfiguration(event: generic, widgetType: .countdown, showLocation: false, isEnabled: true)
+        let genericWidget = KueSchemaV1.WidgetConfiguration(event: generic, widgetType: .countdown, showLocation: false, isEnabled: true)
         context.insert(genericWidget)
         generic.widgetConfiguration = genericWidget
 
         // MARK: Deadline — all-day, cancelled.
-        let deadline = KueEvent(
+        let deadline = KueSchemaV1.KueEvent(
             title: "Tax Filing",
             eventType: .deadline,
             startDate: referenceDate.addingTimeInterval(20 * 86_400),
@@ -190,14 +196,14 @@ enum MigrationFixtures {
         )
         context.insert(deadline)
 
-        let deadlineTask = KueTask(
+        let deadlineTask = KueSchemaV1.KueTask(
             event: deadline, title: "Gather documents", dueDate: referenceDate.addingTimeInterval(13 * 86_400),
             isCompleted: false, offsetLabel: "7 days before", sortOrder: 0
         )
         context.insert(deadlineTask)
         deadline.tasks = [deadlineTask]
 
-        let deadlineSchedule = KueSchedule(
+        let deadlineSchedule = KueSchemaV1.KueSchedule(
             event: deadline, templateType: .deadline,
             rules: [ScheduleRule(offset: DateComponents(day: 7), taskTitle: "Gather documents", isTimeSensitive: false)],
             isCustom: false, generatedAt: referenceDate
@@ -205,12 +211,12 @@ enum MigrationFixtures {
         context.insert(deadlineSchedule)
         deadline.schedule = deadlineSchedule
 
-        let deadlineWidget = WidgetConfiguration(event: deadline, widgetType: .preparation)
+        let deadlineWidget = KueSchemaV1.WidgetConfiguration(event: deadline, widgetType: .preparation)
         context.insert(deadlineWidget)
         deadline.widgetConfiguration = deadlineWidget
 
         // MARK: Exam — timed, manually completed, three tasks with distinct sort order.
-        let exam = KueEvent(
+        let exam = KueSchemaV1.KueEvent(
             title: "OS Final",
             eventType: .exam,
             startDate: referenceDate.addingTimeInterval(5 * 86_400),
@@ -227,19 +233,19 @@ enum MigrationFixtures {
         context.insert(exam)
 
         let examTasks = [
-            KueTask(event: exam, title: "Chapter 1-3", dueDate: referenceDate.addingTimeInterval(1 * 86_400), isCompleted: true, completedAt: referenceDate, offsetLabel: "14 days before", sortOrder: 0),
-            KueTask(event: exam, title: "Chapter 4-6", dueDate: referenceDate.addingTimeInterval(2 * 86_400), isCompleted: true, completedAt: referenceDate, offsetLabel: "7 days before", sortOrder: 1),
-            KueTask(event: exam, title: "Revision", dueDate: referenceDate.addingTimeInterval(4 * 86_400), isCompleted: false, offsetLabel: "1 day before", sortOrder: 2),
+            KueSchemaV1.KueTask(event: exam, title: "Chapter 1-3", dueDate: referenceDate.addingTimeInterval(1 * 86_400), isCompleted: true, completedAt: referenceDate, offsetLabel: "14 days before", sortOrder: 0),
+            KueSchemaV1.KueTask(event: exam, title: "Chapter 4-6", dueDate: referenceDate.addingTimeInterval(2 * 86_400), isCompleted: true, completedAt: referenceDate, offsetLabel: "7 days before", sortOrder: 1),
+            KueSchemaV1.KueTask(event: exam, title: "Revision", dueDate: referenceDate.addingTimeInterval(4 * 86_400), isCompleted: false, offsetLabel: "1 day before", sortOrder: 2),
         ]
         for task in examTasks { context.insert(task) }
         exam.tasks = examTasks
 
-        let examWidget = WidgetConfiguration(event: exam, widgetType: .progress, showLocation: true, isEnabled: true)
+        let examWidget = KueSchemaV1.WidgetConfiguration(event: exam, widgetType: .progress, showLocation: true, isEnabled: true)
         context.insert(examWidget)
         exam.widgetConfiguration = examWidget
 
         // MARK: Interview — timed, archived, widget disabled, WidgetState populated.
-        let interview = KueEvent(
+        let interview = KueSchemaV1.KueEvent(
             title: "Salesforce Interview",
             eventType: .interview,
             startDate: referenceDate.addingTimeInterval(-2 * 86_400),
@@ -254,11 +260,11 @@ enum MigrationFixtures {
         )
         context.insert(interview)
 
-        let interviewWidget = WidgetConfiguration(event: interview, widgetType: .checklist, isEnabled: false)
+        let interviewWidget = KueSchemaV1.WidgetConfiguration(event: interview, widgetType: .checklist, isEnabled: false)
         context.insert(interviewWidget)
         interview.widgetConfiguration = interviewWidget
 
-        let interviewWidgetState = WidgetState(
+        let interviewWidgetState = KueSchemaV1.WidgetState(
             event: interview, currentPhase: .completed, headline: "Salesforce Interview",
             subline: "Completed", progress: 0.5, nextTransitionDate: referenceDate.addingTimeInterval(86_400)
         )
@@ -266,7 +272,7 @@ enum MigrationFixtures {
         interview.widgetState = interviewWidgetState
 
         // MARK: Trip — timed, has endDate, time-sensitive rule (DateComponents round trip).
-        let trip = KueEvent(
+        let trip = KueSchemaV1.KueEvent(
             title: "Tokyo Trip",
             eventType: .trip,
             startDate: referenceDate.addingTimeInterval(30 * 86_400),
@@ -283,7 +289,7 @@ enum MigrationFixtures {
         )
         context.insert(trip)
 
-        let tripSchedule = KueSchedule(
+        let tripSchedule = KueSchemaV1.KueSchedule(
             event: trip, templateType: .trip,
             rules: [
                 ScheduleRule(offset: DateComponents(day: 7), taskTitle: "Countdown start", isTimeSensitive: false),
@@ -294,7 +300,7 @@ enum MigrationFixtures {
         context.insert(tripSchedule)
         trip.schedule = tripSchedule
 
-        let tripWidget = WidgetConfiguration(event: trip, widgetType: .timeline)
+        let tripWidget = KueSchemaV1.WidgetConfiguration(event: trip, widgetType: .timeline)
         context.insert(tripWidget)
         trip.widgetConfiguration = tripWidget
 
@@ -329,7 +335,10 @@ enum MigrationFixtures {
 
     // MARK: - Snapshot builders
 
-    private static func snapshot(_ event: KueEvent) -> EventSnapshot {
+    /// Kue 2.0 Phase 3 — the fixtures themselves are `KueSchemaV1.KueEvent` (see file header),
+    /// but its fields are identical to live `KueEvent`'s V1-era fields, so this overload is a
+    /// plain mechanical copy of the one below it.
+    private static func snapshot(_ event: KueSchemaV1.KueEvent) -> EventSnapshot {
         EventSnapshot(
             id: event.id, title: event.title, eventType: event.eventType, startDate: event.startDate,
             endDate: event.endDate, estimatedDurationMinutes: event.estimatedDurationMinutes, isAllDay: event.isAllDay,
@@ -343,7 +352,7 @@ enum MigrationFixtures {
         )
     }
 
-    private static func snapshot(_ task: KueTask) -> TaskSnapshot {
+    private static func snapshot(_ task: KueSchemaV1.KueTask) -> TaskSnapshot {
         TaskSnapshot(
             id: task.id, eventID: task.event?.id, title: task.title, dueDate: task.dueDate,
             isCompleted: task.isCompleted, completedAt: task.completedAt, offsetLabel: task.offsetLabel,
@@ -351,21 +360,21 @@ enum MigrationFixtures {
         )
     }
 
-    private static func snapshot(_ schedule: KueSchedule) -> ScheduleSnapshot {
+    private static func snapshot(_ schedule: KueSchemaV1.KueSchedule) -> ScheduleSnapshot {
         ScheduleSnapshot(
             id: schedule.id, eventID: schedule.event?.id, templateType: schedule.templateType,
             rules: schedule.rules, isCustom: schedule.isCustom, generatedAt: schedule.generatedAt
         )
     }
 
-    private static func snapshot(_ configuration: WidgetConfiguration) -> WidgetConfigurationSnapshot {
+    private static func snapshot(_ configuration: KueSchemaV1.WidgetConfiguration) -> WidgetConfigurationSnapshot {
         WidgetConfigurationSnapshot(
             id: configuration.id, eventID: configuration.event?.id, widgetType: configuration.widgetType,
             showLocation: configuration.showLocation, isEnabled: configuration.isEnabled
         )
     }
 
-    private static func snapshot(_ state: WidgetState) -> WidgetStateSnapshot {
+    private static func snapshot(_ state: KueSchemaV1.WidgetState) -> WidgetStateSnapshot {
         WidgetStateSnapshot(
             id: state.id, eventID: state.event?.id, currentPhase: state.currentPhase, headline: state.headline,
             subline: state.subline, progress: state.progress, nextTransitionDate: state.nextTransitionDate

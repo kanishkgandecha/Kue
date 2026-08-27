@@ -23,6 +23,66 @@ struct EventDraft {
     var notes: String = ""
     var priority: Priority = .medium
     var timeZoneIdentifier: String = TimeZone.current.identifier
+
+    // MARK: - Kue 2.0 Phase 3 — Recurrence (docs/17-recurring-events.md "UI")
+
+    var isRecurring: Bool = false
+    var recurrenceFrequency: RecurrenceRule.Frequency = .weekly
+    var recurrenceInterval: Int = 1
+    var recurrenceEndKind: RecurrenceEndKind = .never
+    var recurrenceEndDate: Date = .now.addingTimeInterval(30 * 86_400)
+    var recurrenceOccurrenceCount: Int = 10
+
+    /// `nil` unless `isRecurring` — the actual rule EventFormView.save() persists.
+    var recurrenceRule: RecurrenceRule? {
+        guard isRecurring else { return nil }
+        let end: RecurrenceRule.End
+        switch recurrenceEndKind {
+        case .never: end = .never
+        case .onDate: end = .onDate(recurrenceEndDate)
+        case .afterCount: end = .afterOccurrences(recurrenceOccurrenceCount)
+        }
+        return RecurrenceRule(frequency: recurrenceFrequency, interval: max(recurrenceInterval, 1), end: end)
+    }
+
+    /// Reverse of `recurrenceRule` — populates the draft's recurrence controls from an
+    /// existing rule (editing a series occurrence under "This and Future").
+    mutating func applyRecurrenceRule(_ rule: RecurrenceRule?) {
+        guard let rule else {
+            isRecurring = false
+            return
+        }
+        isRecurring = true
+        recurrenceFrequency = rule.frequency
+        recurrenceInterval = rule.interval
+        switch rule.end {
+        case .never:
+            recurrenceEndKind = .never
+        case .onDate(let date):
+            recurrenceEndKind = .onDate
+            recurrenceEndDate = date
+        case .afterOccurrences(let count):
+            recurrenceEndKind = .afterCount
+            recurrenceOccurrenceCount = count
+        }
+    }
+}
+
+/// UI-facing projection of `RecurrenceRule.End` — a plain `Codable` enum with an associated
+/// value can't drive a SwiftUI `Picker`'s `selection` as cleanly as three flat cases plus the
+/// separate `recurrenceEndDate`/`recurrenceOccurrenceCount` fields above.
+enum RecurrenceEndKind: String, CaseIterable, Identifiable {
+    case never, onDate, afterCount
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .never: return "Never"
+        case .onDate: return "On Date"
+        case .afterCount: return "After"
+        }
+    }
 }
 
 enum EventValidationError: LocalizedError, Equatable, Identifiable {
@@ -56,6 +116,14 @@ enum EventValidator {
         }
 
         return errors
+    }
+
+    /// Kue 2.0 Phase 3 — separate from `validate(_:)` above so every existing call site (and
+    /// EventDraft consumers with no recurrence UI, e.g. the Share Extension's prefilled path)
+    /// is unaffected; EventFormView merges both error lists into one validation-errors section.
+    static func validateRecurrence(_ draft: EventDraft) -> [RecurrenceValidationError] {
+        guard let rule = draft.recurrenceRule else { return [] }
+        return RecurrenceEngine.validate(rule, startDate: draft.startDate)
     }
 }
 

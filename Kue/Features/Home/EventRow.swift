@@ -34,7 +34,14 @@ struct EventRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            if status == .cancelled {
+            // Kue 2.0 Phase 3: a skip derives the same `.cancelled` status (see
+            // EventStatusEngine.derive) — check the real `isSkipped` field first so the label
+            // doesn't misleadingly say "Cancelled" for a skipped occurrence.
+            if event.isSkipped {
+                Text("Skipped")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if status == .cancelled {
                 Text("Cancelled")
                     .font(.caption)
                     .foregroundStyle(.secondary)
