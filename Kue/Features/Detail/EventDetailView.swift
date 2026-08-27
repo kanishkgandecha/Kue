@@ -30,6 +30,18 @@ struct EventDetailView: View {
     @State private var isEditing = false
     @State private var isConfirmingDelete = false
     @State private var isCustomizingSchedule = false
+    @State private var isDuplicating = false
+    @State private var duplicationPresentation: DuplicationPresentation?
+
+    /// Kue 2.0 Phase 2, requirement 9 — wraps what `EventDuplicationService.duplicate`
+    /// returned so the sheet below can show the same duplicate-warning banner
+    /// `EventFormView` shows, without threading extra optionals through `EventDetailView`
+    /// itself (keeps this view thin — requirement 11).
+    private struct DuplicationPresentation: Identifiable {
+        let id = UUID()
+        let newEvent: KueEvent
+        let detectedDuplicate: KueEvent?
+    }
 
     /// Reconciliation rule 1 (docs/04-event-types.md): always recompute status on a
     /// single-event read rather than trusting the persisted value — except archive, which is
@@ -65,6 +77,24 @@ struct EventDetailView: View {
         }
         .sheet(isPresented: $isEditing) {
             EventFormView(mode: .edit(event))
+        }
+        .sheet(item: $duplicationPresentation) { presentation in
+            NavigationStack {
+                VStack(spacing: 0) {
+                    if let duplicate = presentation.detectedDuplicate {
+                        Label("You already have \"\(duplicate.title)\" on this date.", systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.orange)
+                            .padding()
+                            .accessibilityIdentifier("duplicateWarning")
+                    }
+                    EventDetailView(event: presentation.newEvent)
+                }
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close") { duplicationPresentation = nil }
+                    }
+                }
+            }
         }
         .confirmationDialog(
             "Delete \"\(event.title)\"? This removes its tasks, schedule, and widget settings too.",
@@ -147,6 +177,18 @@ struct EventDetailView: View {
                     }
                     .accessibilityIdentifier("archiveEventButton")
                 }
+
+                Button {
+                    duplicateEvent()
+                } label: {
+                    if isDuplicating {
+                        ProgressView()
+                    } else {
+                        Text("Duplicate Event")
+                    }
+                }
+                .accessibilityIdentifier("duplicateEventButton")
+                .disabled(isDuplicating)
 
                 Button("Delete Event", role: .destructive) {
                     isConfirmingDelete = true
@@ -321,6 +363,18 @@ struct EventDetailView: View {
     private func saveAndReloadWidget() {
         try? modelContext.save()
         EventActions.reloadWidget()
+    }
+
+    /// Kue 2.0 Phase 2, requirement 9 — all the actual decision-making (what's copied vs.
+    /// reset, duplicate detection, notification/widget side effects) lives in
+    /// `EventDuplicationService`; this view only presents whatever it returns.
+    private func duplicateEvent() {
+        isDuplicating = true
+        Task {
+            let outcome = await EventDuplicationService.duplicate(event, context: modelContext)
+            isDuplicating = false
+            duplicationPresentation = DuplicationPresentation(newEvent: outcome.newEvent, detectedDuplicate: outcome.detectedDuplicate)
+        }
     }
 }
 

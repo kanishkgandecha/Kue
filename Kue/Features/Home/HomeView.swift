@@ -24,6 +24,12 @@ struct HomeView: View {
     @State private var isAddingEvent = false
     @State private var isShowingTemplates = false
     @State private var addEventType: EventType = .generic
+    // Kue 2.0 Phase 2 — search/filter/sort. Default values reproduce Home's original
+    // behavior exactly (requirement 7); see `isDefaultQueryState` below.
+    @State private var searchText = ""
+    @State private var filter: EventListQueryEngine.Filter = .default
+    @State private var sortOption: EventListQueryEngine.SortOption = .default
+    @State private var isShowingFilterSort = false
     /// Set by `TemplatesView`'s selection, consumed once its sheet has fully dismissed —
     /// see the `onDismiss` below. Presenting the Add sheet immediately (nesting it inside
     /// the still-open Templates sheet instead) leaves Templates covering Home underneath
@@ -52,6 +58,14 @@ struct HomeView: View {
                     }
                     ToolbarItem(placement: .navigationBarTrailing) {
                         Button {
+                            isShowingFilterSort = true
+                        } label: {
+                            Label("Filter & Sort", systemImage: isDefaultFilterAndSort ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                        }
+                        .accessibilityIdentifier("filterSortButton")
+                    }
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button {
                             addEventType = .generic
                             isAddingEvent = true
                         } label: {
@@ -69,6 +83,12 @@ struct HomeView: View {
                         isShowingTemplates = false
                     }
                 }
+                .sheet(isPresented: $isShowingFilterSort) {
+                    EventFilterSortSheet(filter: $filter, sortOption: $sortOption)
+                }
+                // Requirement 6: the system search control, not a custom search bar — kept on
+                // the same List so it plays with Home's existing section-based layout.
+                .searchable(text: $searchText, prompt: "Search events")
         }
         .task { EventReconciliation.run(context: modelContext) }
         .onChange(of: scenePhase) { _, newPhase in
@@ -118,9 +138,32 @@ struct HomeView: View {
         }
     }
 
+    // MARK: - Kue 2.0 Phase 2 — search/filter/sort
+
+    private var isDefaultFilterAndSort: Bool {
+        filter == .default && sortOption == .default
+    }
+
+    /// True exactly when Home should show its original three-section layout unmodified —
+    /// requirement 7: "preserve the normal Upcoming, Active, and Completed sections when
+    /// default filtering and sorting are active."
+    private var isDefaultQueryState: Bool {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && isDefaultFilterAndSort
+    }
+
+    private var queryResults: [KueEvent] {
+        EventListQueryEngine.query(events: events, searchText: searchText, filter: filter, sort: sortOption)
+    }
+
+    /// `events` (not `visibleEvents`) — requirement 8's "empty database" must reflect the
+    /// store's actual row count, not just what the current archived scope shows.
+    private var emptyReason: EventListQueryEngine.EmptyResultReason {
+        EventListQueryEngine.emptyReason(allEvents: events, searchText: searchText, filter: filter)
+    }
+
     @ViewBuilder
     private var content: some View {
-        if visibleEvents.isEmpty {
+        if events.isEmpty {
             ContentUnavailableView {
                 Label("No Events Yet", systemImage: "calendar.badge.clock")
             } description: {
@@ -133,24 +176,64 @@ struct HomeView: View {
                     isShowingTemplates = true
                 }
             }
+            .accessibilityIdentifier("emptyDatabaseView")
+        } else if isDefaultQueryState {
+            defaultSectionedList
         } else {
-            List {
-                ForEach(HomeSection.allCases, id: \.self) { section in
-                    let sectionEvents = events(in: section)
-                    if !sectionEvents.isEmpty {
-                        Section(section.rawValue) {
-                            ForEach(sectionEvents) { event in
-                                NavigationLink {
-                                    EventDetailView(event: event)
-                                } label: {
-                                    EventRow(event: event)
-                                }
+            switch emptyReason {
+            case .noResultsForFilters:
+                ContentUnavailableView {
+                    Label("No Matching Events", systemImage: "line.3.horizontal.decrease.circle")
+                } description: {
+                    Text("No events match the selected filters.")
+                } actions: {
+                    Button("Reset Filters") { filter = .default }
+                }
+                .accessibilityIdentifier("noFilterResultsView")
+            case .noResultsForQuery:
+                ContentUnavailableView.search(text: searchText)
+                    .accessibilityIdentifier("noSearchResultsView")
+            case .emptyDatabase, .notEmpty:
+                resultsList
+            }
+        }
+    }
+
+    private var defaultSectionedList: some View {
+        List {
+            ForEach(HomeSection.allCases, id: \.self) { section in
+                let sectionEvents = events(in: section)
+                if !sectionEvents.isEmpty {
+                    Section(section.rawValue) {
+                        ForEach(sectionEvents) { event in
+                            NavigationLink {
+                                EventDetailView(event: event)
+                            } label: {
+                                EventRow(event: event)
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    /// The flat, sorted view shown whenever search/filter/sort departs from the default —
+    /// deliberately not sectioned into Upcoming/Active/Completed, since a non-default sort
+    /// (priority, recently modified) has no meaningful relationship to those buckets.
+    private var resultsList: some View {
+        List {
+            Section("Results") {
+                ForEach(queryResults) { event in
+                    NavigationLink {
+                        EventDetailView(event: event)
+                    } label: {
+                        EventRow(event: event)
+                    }
+                }
+            }
+        }
+        .accessibilityIdentifier("searchResultsList")
     }
 }
 

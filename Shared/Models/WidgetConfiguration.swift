@@ -15,6 +15,18 @@ import SwiftData
 /// treatment applied on top of one of these, never a type itself (docs/07-widget-engine.md).
 enum WidgetType: String, Codable, CaseIterable {
     case countdown, preparation, timeline, progress, checklist
+
+    /// docs/07-widget-engine.md "Widget types (V1)" default-per-event-type mapping. Was
+    /// private to `EventFormView.save()`; moved here (Kue 2.0 Phase 2) so
+    /// `EventDuplicationService` — which needs the exact same default when a duplicated
+    /// event's source somehow lacks a `WidgetConfiguration` — doesn't re-derive it.
+    static func defaultType(for eventType: EventType) -> WidgetType {
+        switch eventType {
+        case .interview, .exam, .deadline: return .preparation
+        case .trip: return .timeline
+        case .generic: return .countdown
+        }
+    }
 }
 
 @Model
