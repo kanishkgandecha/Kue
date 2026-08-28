@@ -68,6 +68,18 @@ enum EventStatusEngine {
     /// this function never reverts (an archived event stays archived until an explicit
     /// `EventActions.unarchive`). Applies the auto-archive threshold on top of the derived
     /// status. Returns whether `status` actually changed.
+    ///
+    /// Kue 2.0 Phase 11 — docs/26 "H./I.": deliberately does *not* touch `event.updatedAt`.
+    /// `status` here is a cached, purely time-derived value (docs/04 "Status transition
+    /// rules": "purely a performance/query optimization"), not a fact CloudKit's conflict
+    /// resolver should ever treat as a competing explicit edit — a passive reconciliation
+    /// sweep on one device must never let its `status` cache flip outrank a genuine explicit
+    /// mutation made on another device merely because it ran more recently. `updatedAt` is
+    /// reserved for the six `EventActions` mutations (and their `WidgetIntentActions`
+    /// equivalents) that represent actual user intent. This was a real pre-Phase-11 bug
+    /// (found during the sync audit, fixed here) even before CloudKit existed: it silently
+    /// bumped `updatedAt` — read by `EventListQueryEngine`'s "recently updated" sort — merely
+    /// because a background sweep noticed time had passed.
     @discardableResult
     static func reconcile(_ event: KueEvent, now: Date = .now) -> Bool {
         guard event.status != .archived else { return false }
@@ -77,7 +89,6 @@ enum EventStatusEngine {
 
         guard newStatus != event.status else { return false }
         event.status = newStatus
-        event.updatedAt = now
         return true
     }
 

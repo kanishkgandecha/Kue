@@ -52,6 +52,11 @@ enum EventCreationService {
         startSeriesIfNeeded(for: event, draft: draft, context: context, now: now)
 
         try? context.save()
+        // Kue 2.0 Phase 11 — docs/26 "E.": the one shared creation path (`EventFormView`'s
+        // `.add` case and every creation `AppIntent` all route through this function), so
+        // marking here covers app UI, Siri/Shortcuts, and Control-driven creation uniformly —
+        // never a per-call-site duplicate of this line.
+        SyncOutbox.markEventDirty(event.id)
         EventActions.reloadWidget()
 
         return event

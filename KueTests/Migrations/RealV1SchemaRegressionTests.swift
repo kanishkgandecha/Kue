@@ -172,7 +172,7 @@ struct RealV1SchemaRegressionTests {
 
         do {
             let schema = Schema(versionedSchema: LegacyV1WithAnUnknownExtraField.self)
-            let configuration = ModelConfiguration(schema: schema, url: url)
+            let configuration = ModelConfiguration(schema: schema, url: url, cloudKitDatabase: .none)
             let container = try ModelContainer(for: schema, configurations: [configuration])
             let event = LegacyV1WithAnUnknownExtraField.KueEvent(
                 title: "Legacy Shape Fixture", eventType: .deadline,

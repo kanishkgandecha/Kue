@@ -79,6 +79,12 @@ enum UITestLaunchConfiguration {
     /// present — the real on-device Core Spotlight index never runs under `KueUITests`.
     static let fakeSpotlightArgument = "-uiTestFakeSpotlight"
 
+    /// Kue 2.0 Phase 11 — must match `SyncCoordinator.uiTestLaunchArgument` exactly. `KueApp`
+    /// installs a fully fake-backed `SyncCoordinator` (in-memory transport/account/state
+    /// store, sync pre-enabled) in place of the real `CKSyncEngine`-backed one when present —
+    /// real CloudKit never runs under `KueUITests`.
+    static let fakeSyncArgument = "-uiTestFakeSync"
+
     /// The simulator's interface orientation is a *device*-level property, not scoped to one
     /// app process — it doesn't reset just because a test relaunches the app. A stray rotation
     /// left over from an earlier test (or an earlier run against the same booted simulator)

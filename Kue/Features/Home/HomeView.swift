@@ -72,6 +72,12 @@ struct HomeView: View {
                 }
         }
         .task { await EventReconciliation.run(context: modelContext) }
+        .task {
+            // Kue 2.0 Phase 11 — docs/26 "M.": launch is one of the sync-trigger points, same
+            // reasoning as the reconciliation `.task` immediately above — never blocks first
+            // frame (this runs after `body` is already on screen), never polls afterward.
+            await SyncCoordinator.shared.sync(context: modelContext)
+        }
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {
             case .active:
@@ -83,6 +89,10 @@ struct HomeView: View {
                     let intensity = UserPreferenceStore.current(context: modelContext).notificationIntensity
                     await NotificationEngine.reschedule(context: modelContext, intensity: intensity, scheduler: SystemNotificationScheduler.shared)
                 }
+                // Kue 2.0 Phase 11 — docs/26 "M.": scene activation is another documented
+                // sync-trigger point (alongside launch, manual Sync Now, outbox changes, and
+                // network/account recovery) — never continuous polling.
+                Task { await SyncCoordinator.shared.sync(context: modelContext) }
             case .background:
                 // Standard BGAppRefreshTask pattern — schedule the next best-effort
                 // opportunity as we leave the foreground.
@@ -121,6 +131,22 @@ struct HomeView: View {
     /// list simply starts at whichever section is soonest; no "Today" placeholder row needed.
     private var timeline: some View {
         List {
+            // Kue 2.0 Phase 11 — docs/26 "L.": Home shows a small, nonblocking banner only
+            // for the two actionable-persistent sync states (account changed, an unresolved
+            // conflict) — never a spinner for an ordinary sync pass. Settings remains the
+            // detailed source of truth (`syncStatusRow` there covers every other state).
+            if SyncCoordinator.shared.status.warrantsHomeBanner {
+                Section {
+                    NavigationLink {
+                        SettingsView()
+                    } label: {
+                        Label(SyncCoordinator.shared.status.displayText, systemImage: "exclamationmark.icloud")
+                            .foregroundStyle(KueColor.warning)
+                    }
+                    .accessibilityIdentifier("syncHomeBanner")
+                }
+            }
+
             // Kue 2.0 Phase 10.1 — docs/25 "D.": "near the top of Home, after any truly active
             // event but before ordinary future sections." Active events only ever appear
             // inside the Today section, so placing this immediately after Today (when Today

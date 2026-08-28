@@ -67,6 +67,13 @@ struct KueApp: App {
             UNUserNotificationCenter.current().delegate = NotificationActionDelegate.shared
         }
 
+        // Kue 2.0 Phase 11 — docs/26 "R.": real CloudKit never runs under `KueUITests`, same
+        // seam every other Fake-under-UITests service uses. `nil` (no matching launch
+        // argument) leaves `SyncCoordinator.shared`'s own default (system-backed) in place.
+        if let fakeSyncCoordinator = SyncCoordinator.makeFromLaunchArguments() {
+            SyncCoordinator.shared = fakeSyncCoordinator
+        }
+
         if case .success(let container) = outcome {
             NotificationActionDelegate.shared.context = container.mainContext
             // Kue 2.0 Phase 4 — requirement 42's missing-event/conflict presentations need one

@@ -35,7 +35,7 @@ struct ModelContainerFactoryTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let storeURL = directory.appending(path: "Kue.sqlite")
 
-        let containerA = try ModelContainer(for: ModelContainerFactory.schema, configurations: [ModelConfiguration(schema: ModelContainerFactory.schema, url: storeURL)])
+        let containerA = try ModelContainer(for: ModelContainerFactory.schema, configurations: [ModelConfiguration(schema: ModelContainerFactory.schema, url: storeURL, cloudKitDatabase: .none)])
         let contextA = ModelContext(containerA)
         let event = KueEvent(title: "Shared", eventType: .generic, startDate: .now, estimatedDurationMinutes: 0, source: .manual)
         contextA.insert(event)
@@ -43,7 +43,7 @@ struct ModelContainerFactoryTests {
 
         // A second, independent container/context opened at the same URL — standing in for
         // the widget extension's separate process opening the app's store.
-        let containerB = try ModelContainer(for: ModelContainerFactory.schema, configurations: [ModelConfiguration(schema: ModelContainerFactory.schema, url: storeURL)])
+        let containerB = try ModelContainer(for: ModelContainerFactory.schema, configurations: [ModelConfiguration(schema: ModelContainerFactory.schema, url: storeURL, cloudKitDatabase: .none)])
         let fetched = try ModelContext(containerB).fetch(FetchDescriptor<KueEvent>())
 
         #expect(fetched.count == 1)

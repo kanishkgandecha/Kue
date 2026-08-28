@@ -33,8 +33,16 @@ enum EventActions {
         event.cancelledAt = now
         event.isManuallyCompleted = false
         event.manuallyCompletedAt = nil
+        // Kue 2.0 Phase 11 — docs/26 "H.": `updatedAt` is the CloudKit conflict-resolution
+        // timestamp for this event's whole graph, so every explicit user mutation must bump
+        // it. A real pre-Phase-11 gap (found during the sync audit): only `archive`/
+        // `unarchive` did this before; the other six mutating actions here didn't.
+        event.updatedAt = now
         EventStatusEngine.reconcile(event, now: now)
         try? context.save()
+        // Kue 2.0 Phase 11 — docs/26 "E.": every explicit mutation enqueues sync work
+        // durably, immediately after the local save already succeeded — never gated on it.
+        SyncOutbox.markEventDirty(event.id)
         reloadWidget()
         NotificationEngine.removeAllNotifications(for: event, scheduler: scheduler)
         reconcileAfterMutation(event, context: context, manager: liveActivityManager, indexer: spotlightIndexer, now: now)
@@ -43,8 +51,12 @@ enum EventActions {
     static func uncancel(_ event: KueEvent, context: ModelContext, now: Date = .now, scheduler: NotificationScheduling = SystemNotificationScheduler.shared, liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared, spotlightIndexer: SpotlightIndexing = SystemSpotlightIndexer.shared) async {
         event.isCancelled = false
         event.cancelledAt = nil
+        event.updatedAt = now // Kue 2.0 Phase 11 — see `cancel`'s own comment above.
         EventStatusEngine.reconcile(event, now: now)
         try? context.save()
+        // Kue 2.0 Phase 11 — docs/26 "E.": every explicit mutation enqueues sync work
+        // durably, immediately after the local save already succeeded — never gated on it.
+        SyncOutbox.markEventDirty(event.id)
         reloadWidget()
         await rescheduleNotifications(context: context, scheduler: scheduler, now: now)
         await LiveActivityReconciler.reconcile(context: context, manager: liveActivityManager, now: now)
@@ -57,8 +69,12 @@ enum EventActions {
         event.manuallyCompletedAt = now
         event.isCancelled = false
         event.cancelledAt = nil
+        event.updatedAt = now // Kue 2.0 Phase 11 — see `cancel`'s own comment above.
         EventStatusEngine.reconcile(event, now: now)
         try? context.save()
+        // Kue 2.0 Phase 11 — docs/26 "E.": every explicit mutation enqueues sync work
+        // durably, immediately after the local save already succeeded — never gated on it.
+        SyncOutbox.markEventDirty(event.id)
         reloadWidget()
         NotificationEngine.removeAllNotifications(for: event, scheduler: scheduler)
         reconcileAfterMutation(event, context: context, manager: liveActivityManager, indexer: spotlightIndexer, now: now)
@@ -67,8 +83,12 @@ enum EventActions {
     static func uncomplete(_ event: KueEvent, context: ModelContext, now: Date = .now, scheduler: NotificationScheduling = SystemNotificationScheduler.shared, liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared, spotlightIndexer: SpotlightIndexing = SystemSpotlightIndexer.shared) async {
         event.isManuallyCompleted = false
         event.manuallyCompletedAt = nil
+        event.updatedAt = now // Kue 2.0 Phase 11 — see `cancel`'s own comment above.
         EventStatusEngine.reconcile(event, now: now)
         try? context.save()
+        // Kue 2.0 Phase 11 — docs/26 "E.": every explicit mutation enqueues sync work
+        // durably, immediately after the local save already succeeded — never gated on it.
+        SyncOutbox.markEventDirty(event.id)
         reloadWidget()
         await rescheduleNotifications(context: context, scheduler: scheduler, now: now)
         await LiveActivityReconciler.reconcile(context: context, manager: liveActivityManager, now: now)
@@ -89,8 +109,12 @@ enum EventActions {
         event.isManuallyCompleted = false
         event.manuallyCompletedAt = nil
         event.isRecurrenceException = true
+        event.updatedAt = now // Kue 2.0 Phase 11 — see `cancel`'s own comment above.
         EventStatusEngine.reconcile(event, now: now)
         try? context.save()
+        // Kue 2.0 Phase 11 — docs/26 "E.": every explicit mutation enqueues sync work
+        // durably, immediately after the local save already succeeded — never gated on it.
+        SyncOutbox.markEventDirty(event.id)
         reloadWidget()
         NotificationEngine.removeAllNotifications(for: event, scheduler: scheduler)
         reconcileAfterMutation(event, context: context, manager: liveActivityManager, indexer: spotlightIndexer, now: now)
@@ -99,8 +123,12 @@ enum EventActions {
     static func unskip(_ event: KueEvent, context: ModelContext, now: Date = .now, scheduler: NotificationScheduling = SystemNotificationScheduler.shared, liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared, spotlightIndexer: SpotlightIndexing = SystemSpotlightIndexer.shared) async {
         event.isSkipped = false
         event.skippedAt = nil
+        event.updatedAt = now // Kue 2.0 Phase 11 — see `cancel`'s own comment above.
         EventStatusEngine.reconcile(event, now: now)
         try? context.save()
+        // Kue 2.0 Phase 11 — docs/26 "E.": every explicit mutation enqueues sync work
+        // durably, immediately after the local save already succeeded — never gated on it.
+        SyncOutbox.markEventDirty(event.id)
         reloadWidget()
         await rescheduleNotifications(context: context, scheduler: scheduler, now: now)
         await LiveActivityReconciler.reconcile(context: context, manager: liveActivityManager, now: now)
@@ -112,6 +140,9 @@ enum EventActions {
         event.status = .archived
         event.updatedAt = now
         try? context.save()
+        // Kue 2.0 Phase 11 — docs/26 "E.": every explicit mutation enqueues sync work
+        // durably, immediately after the local save already succeeded — never gated on it.
+        SyncOutbox.markEventDirty(event.id)
         reloadWidget()
         NotificationEngine.removeAllNotifications(for: event, scheduler: scheduler)
         reconcileAfterMutation(event, context: context, manager: liveActivityManager, indexer: spotlightIndexer, now: now)
@@ -122,6 +153,9 @@ enum EventActions {
         event.status = EventStatusEngine.derive(for: event, now: now)
         event.updatedAt = now
         try? context.save()
+        // Kue 2.0 Phase 11 — docs/26 "E.": every explicit mutation enqueues sync work
+        // durably, immediately after the local save already succeeded — never gated on it.
+        SyncOutbox.markEventDirty(event.id)
         reloadWidget()
         await rescheduleNotifications(context: context, scheduler: scheduler, now: now)
         await LiveActivityReconciler.reconcile(context: context, manager: liveActivityManager, now: now)
@@ -140,6 +174,9 @@ enum EventActions {
         let deletedID = event.id
         context.delete(event)
         try? context.save()
+        // Kue 2.0 Phase 11 — docs/26 "E.": a deletion enqueues a tombstone, not a dirty-upload
+        // mark — see `SyncOutbox.markEventDeleted`'s own header.
+        SyncOutbox.markEventDeleted(deletedID, now: .now)
         reloadWidget()
         if !identifiers.isEmpty {
             scheduler.removePendingNotificationRequests(withIdentifiers: identifiers)

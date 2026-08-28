@@ -511,6 +511,11 @@ struct EventFormView: View {
         }
 
         try? modelContext.save()
+        // Kue 2.0 Phase 11 — docs/26 "E.": covers both the `.add` and `.edit` (including
+        // occurrence-scoped edits, which can touch more than one materialized row) paths —
+        // `OccurrenceReconciliationService.applyEdit` marks any *additional* occurrences it
+        // touches itself; this covers the primary `createdEvent`.
+        if let createdEvent { SyncOutbox.markEventDirty(createdEvent.id) }
         // docs/07-widget-engine.md "Refresh strategy" — a placed widget won't otherwise
         // notice this write until its own precomputed timeline next reloads.
         EventActions.reloadWidget()

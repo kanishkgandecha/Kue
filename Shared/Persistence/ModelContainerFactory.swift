@@ -110,6 +110,25 @@ enum ModelContainerFactory {
     /// `KueMigrationPlan`'s own header for what adding the *next* stage looks like.
     static let migrationPlan: any SchemaMigrationPlan.Type = KueMigrationPlan.self
 
+    /// Kue 2.0 Phase 11 (docs/26-icloud-cloudkit-sync.md "A."): **every** `ModelConfiguration`
+    /// constructed anywhere in this file passes `cloudKitDatabase: .none` explicitly. This is
+    /// not cosmetic — `ModelConfiguration`'s own default is `.automatic`, which opts a store
+    /// into SwiftData's *own* implicit CloudKit mirroring the instant the owning process has a
+    /// CloudKit entitlement (which the `Kue` app target now does, for `CKSyncEngine` — see
+    /// `Kue/Services/Sync/`). Without this explicit override, adding that entitlement would
+    /// have silently turned on a *second*, completely independent synchronization system
+    /// against the exact same on-disk store `CKSyncEngine` also writes to — the one outcome
+    /// this phase's own architecture requirement explicitly forbids ("Do not enable two
+    /// independent synchronization systems against the same persistent store"). It would also
+    /// likely have failed outright: automatic SwiftData↔CloudKit mirroring requires every
+    /// attribute to have a default and every relationship to be optional, neither of which
+    /// Kue's existing schema (`title: String` with no default, non-optional-both-ways
+    /// relationships, etc.) was ever designed to satisfy, and changing that now purely to
+    /// satisfy an *unused* automatic-mirroring code path would be exactly the kind of needless
+    /// schema risk docs/26 "P." rules out. `CKSyncEngine` (Kue-owned, explicit, one process)
+    /// remains the only synchronization system that ever touches this store.
+    static let cloudKitDatabase: ModelConfiguration.CloudKitDatabase = .none
+
     /// The app's real, on-disk store — shared with both extensions via the App Group
     /// container. Crashes on failure, same as Phase 1–3: a broken store is a real bug the
     /// app shouldn't silently paper over. Prefer `makeDefaultOrDiagnostic()` from any call
@@ -178,7 +197,7 @@ enum ModelContainerFactory {
     /// same recovery fallback. See this file's header ("HARDENING") for the full, reviewed
     /// mechanism and every requirement it satisfies.
     static func openThroughMigrationPlan(at url: URL) throws -> ModelContainer {
-        let configuration = ModelConfiguration(schema: schema, url: url)
+        let configuration = ModelConfiguration(schema: schema, url: url, cloudKitDatabase: cloudKitDatabase)
         // A verified historical V1 store is special-cased *before* the first container open.
         // Even a failed staged migration is allowed to modify SQLite/Core Data metadata, so
         // waiting for that failure before taking the backup would be too late. All other
@@ -258,7 +277,7 @@ enum ModelContainerFactory {
         }
         #endif
         let v1Schema = Schema(versionedSchema: KueSchemaV1.self)
-        let v1Configuration = ModelConfiguration(schema: v1Schema, url: url)
+        let v1Configuration = ModelConfiguration(schema: v1Schema, url: url, cloudKitDatabase: cloudKitDatabase)
         _ = try ModelContainer(for: v1Schema, configurations: [v1Configuration])
     }
 
@@ -286,7 +305,7 @@ enum ModelContainerFactory {
         let originalEventCount: Int
         let marker = UUID()
         do {
-            let configuration = ModelConfiguration(schema: schema, url: url)
+            let configuration = ModelConfiguration(schema: schema, url: url, cloudKitDatabase: cloudKitDatabase)
             let container = try ModelContainer(for: schema, migrationPlan: migrationPlan, configurations: [configuration])
             let context = container.mainContext
 
@@ -329,7 +348,7 @@ enum ModelContainerFactory {
         }
         #endif
 
-        let reopenConfiguration = ModelConfiguration(schema: schema, url: url)
+        let reopenConfiguration = ModelConfiguration(schema: schema, url: url, cloudKitDatabase: cloudKitDatabase)
         let reopened = try ModelContainer(for: schema, migrationPlan: migrationPlan, configurations: [reopenConfiguration])
         let reopenedContext = reopened.mainContext
 
@@ -353,7 +372,7 @@ enum ModelContainerFactory {
     /// just created from scratch), so tests exercise the same construction path production
     /// does — requirement 4.
     static func makeInMemory() -> ModelContainer {
-        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: cloudKitDatabase)
         do {
             return try ModelContainer(for: schema, migrationPlan: migrationPlan, configurations: [configuration])
         } catch {

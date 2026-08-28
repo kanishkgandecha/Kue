@@ -140,6 +140,7 @@ enum OccurrenceReconciliationService {
         occurrence.isRecurrenceException = true
         EventStatusEngine.reconcile(occurrence, now: now)
         SchedulingEngine.regenerateTasks(for: occurrence, context: context, now: now)
+        SyncOutbox.markEventDirty(occurrence.id) // Kue 2.0 Phase 11 — docs/26 "E."
         return EditOutcome(staleNotificationIdentifiers: staleIdentifiers, affectedOccurrences: [occurrence])
     }
 
@@ -181,6 +182,7 @@ enum OccurrenceReconciliationService {
         // template/rule — delete and re-plan rather than reconcile field-by-field.
         for member in futureNonExceptionMembers {
             staleIdentifiers += NotificationCandidateBuilder.allIdentifiers(for: member)
+            SyncOutbox.markEventDeleted(member.id, now: now) // Kue 2.0 Phase 11 — docs/26 "E."
             context.delete(member)
         }
         // Surviving exceptions keep their own field values untouched but reparent to the new
@@ -188,6 +190,7 @@ enum OccurrenceReconciliationService {
         for exception in futureExceptionMembers {
             exception.seriesID = newSeriesID
             exception.recurrence = newRule
+            SyncOutbox.markEventDirty(exception.id) // Kue 2.0 Phase 11 — docs/26 "E."
         }
 
         // The edited occurrence becomes the new segment's head.
@@ -202,6 +205,9 @@ enum OccurrenceReconciliationService {
         affected.append(occurrence)
 
         affected += materializeInitialOccurrences(from: occurrence, context: context, now: now)
+        // Kue 2.0 Phase 11 — docs/26 "E.": every occurrence this edit touched or created —
+        // the new head, reparented exceptions, and freshly materialized future occurrences.
+        for event in affected { SyncOutbox.markEventDirty(event.id) }
 
         return EditOutcome(staleNotificationIdentifiers: staleIdentifiers, affectedOccurrences: affected)
     }
@@ -237,10 +243,16 @@ enum OccurrenceReconciliationService {
 
         switch scope {
         case .thisOccurrence:
-            context.insert(RecurrenceExclusion(seriesID: seriesID, excludedAnchorDate: anchor))
+            let exclusion = RecurrenceExclusion(seriesID: seriesID, excludedAnchorDate: anchor)
+            context.insert(exclusion)
             let identifiers = NotificationCandidateBuilder.allIdentifiers(for: occurrence)
             context.delete(occurrence)
             try? context.save()
+            // Kue 2.0 Phase 11 — docs/26 "E./C.": the deleted occurrence tombstones; the new
+            // exclusion (its own record type — docs/26 "C.") is what actually prevents
+            // replenishment from recreating this slot on another device too.
+            SyncOutbox.markEventDeleted(occurrence.id, now: .now)
+            SyncOutbox.markExclusionDirty(exclusion.id)
             EventActions.reloadWidget()
             if !identifiers.isEmpty { scheduler.removePendingNotificationRequests(withIdentifiers: identifiers) }
             // A focused occurrence deleted individually (both this-occurrence and
@@ -257,15 +269,21 @@ enum OccurrenceReconciliationService {
             if !priorMembers.isEmpty, let lastPriorAnchor = priorMembers.compactMap(\.recurrenceAnchorDate).max(),
                let rule = priorMembers.first?.recurrence {
                 let truncatedRule = RecurrenceRule(frequency: rule.frequency, interval: rule.interval, end: .onDate(lastPriorAnchor))
-                for prior in priorMembers { prior.recurrence = truncatedRule }
+                for prior in priorMembers {
+                    prior.recurrence = truncatedRule
+                    SyncOutbox.markEventDirty(prior.id) // Kue 2.0 Phase 11 — docs/26 "E."
+                }
             }
 
             var identifiers: [String] = []
             for member in futureMembers {
                 identifiers += NotificationCandidateBuilder.allIdentifiers(for: member)
                 if let memberAnchor = member.recurrenceAnchorDate {
-                    context.insert(RecurrenceExclusion(seriesID: seriesID, excludedAnchorDate: memberAnchor))
+                    let exclusion = RecurrenceExclusion(seriesID: seriesID, excludedAnchorDate: memberAnchor)
+                    context.insert(exclusion)
+                    SyncOutbox.markExclusionDirty(exclusion.id) // Kue 2.0 Phase 11 — docs/26 "E."
                 }
+                SyncOutbox.markEventDeleted(member.id, now: .now) // Kue 2.0 Phase 11 — docs/26 "E."
                 context.delete(member)
             }
             try? context.save()

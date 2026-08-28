@@ -59,7 +59,7 @@ enum LegacyStoreFixtures {
 
         do {
             let schema = Schema(versionedSchema: KueSchemaV1.self)
-            let configuration = ModelConfiguration(schema: schema, url: stagingURL)
+            let configuration = ModelConfiguration(schema: schema, url: stagingURL, cloudKitDatabase: .none)
             let container = try ModelContainer(for: schema, configurations: [configuration])
             let event = KueSchemaV1.KueEvent(
                 title: "Fixture Event", eventType: .generic, startDate: Date(timeIntervalSince1970: 1_700_000_000),
@@ -106,7 +106,7 @@ enum LegacyStoreFixtures {
         let stagingURL = url.deletingLastPathComponent().appendingPathComponent("staging-\(UUID().uuidString).sqlite")
 
         let schema = Schema(versionedSchema: KueSchemaV1.self)
-        let configuration = ModelConfiguration(schema: schema, url: stagingURL)
+        let configuration = ModelConfiguration(schema: schema, url: stagingURL, cloudKitDatabase: .none)
         let container = try ModelContainer(for: schema, configurations: [configuration])
         container.mainContext.insert(KueSchemaV1.KueEvent(
             title: "Fixture Event", eventType: .generic, startDate: Date(timeIntervalSince1970: 1_700_000_000),

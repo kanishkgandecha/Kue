@@ -42,6 +42,12 @@ struct SettingsView: View {
     @State private var showLiveActivityTitle = LiveActivityPrivacyPreference.current.showTitle
     @State private var showLiveActivityNextTask = LiveActivityPrivacyPreference.current.showNextTask
 
+    // MARK: Kue 2.0 Phase 11 — iCloud Sync (docs/26 "K./G.")
+    @State private var isSyncEnabled = SyncPreference.current.isEnabled
+    @State private var isPerformingSyncNow = false
+    @State private var syncPersistentState = SyncCoordinator.shared.stateStore.load()
+    @State private var isReviewingAccountChange = false
+
     /// Injected for tests (requirement 10) — the live default is what KueApp effectively
     /// uses everywhere else.
     var scheduler: NotificationScheduling = SystemNotificationScheduler.shared
@@ -201,6 +207,71 @@ struct SettingsView: View {
             }
 
             Section {
+                Toggle("iCloud Sync", isOn: Binding(
+                    get: { isSyncEnabled },
+                    set: { newValue in
+                        isSyncEnabled = newValue
+                        SyncPreference.setEnabled(newValue)
+                        if newValue {
+                            Task {
+                                isPerformingSyncNow = true
+                                await SyncCoordinator.shared.sync(context: modelContext)
+                                syncPersistentState = SyncCoordinator.shared.stateStore.load()
+                                isPerformingSyncNow = false
+                            }
+                        } else {
+                            // docs/26 "K.": "Disabling sync stops cloud transfers, retains
+                            // local data, does not delete CloudKit content, does not delete
+                            // local content." No mutation here beyond the preference flip —
+                            // `SyncCoordinator.sync` itself already checks `SyncPreference`
+                            // first thing and no-ops entirely while it's off.
+                            SyncCoordinator.shared.pauseForSignOut()
+                        }
+                    }
+                ))
+                .accessibilityIdentifier("iCloudSyncToggle")
+
+                if isSyncEnabled {
+                    syncStatusRow
+                    if let lastSync = syncPersistentState.lastSuccessfulSyncAt {
+                        LabeledContent("Last Synced", value: lastSync.formatted(date: .abbreviated, time: .shortened))
+                            .accessibilityIdentifier("lastSyncedLabel")
+                    }
+                    let pendingCount = SyncOutbox.pendingChangeCount(store: SyncCoordinator.shared.stateStore)
+                    if pendingCount > 0 {
+                        LabeledContent("Waiting to Upload", value: "\(pendingCount)")
+                            .accessibilityIdentifier("pendingSyncCountLabel")
+                    }
+                    Button {
+                        Task {
+                            isPerformingSyncNow = true
+                            await SyncCoordinator.shared.sync(context: modelContext)
+                            syncPersistentState = SyncCoordinator.shared.stateStore.load()
+                            isPerformingSyncNow = false
+                        }
+                    } label: {
+                        if isPerformingSyncNow {
+                            ProgressView()
+                        } else {
+                            Text("Sync Now")
+                        }
+                    }
+                    .accessibilityIdentifier("syncNowButton")
+                    .disabled(isPerformingSyncNow)
+
+                    if SyncCoordinator.shared.status == .accountChanged {
+                        Button("Review Account Change") { isReviewingAccountChange = true }
+                            .accessibilityIdentifier("reviewAccountChangeButton")
+                    }
+                }
+            } header: {
+                Text("iCloud Sync")
+            } footer: {
+                // docs/26 "K.": privacy explanation — never claims immediacy.
+                Text("Syncs your events privately through your own iCloud account — Kue has no server of its own and no one else can see your data. Sync timing depends on network and iCloud availability, not guaranteed immediate.")
+            }
+
+            Section {
                 Button("Delete Everything", role: .destructive) {
                     isConfirmingDeleteEverything = true
                 }
@@ -236,6 +307,47 @@ struct SettingsView: View {
                 haptics.play(.destructiveConfirmed)
             }
             .accessibilityIdentifier("confirmDeleteEverythingButton")
+        }
+        .confirmationDialog(
+            "Local Kue data currently belongs to a different iCloud account. Keep your data on this device and start syncing fresh with the new account?",
+            isPresented: $isReviewingAccountChange,
+            titleVisibility: .visible
+        ) {
+            // docs/26 "G.": the only offered path — the previous account's queued/engine
+            // state is quarantined, this device's local data is fully preserved, and the new
+            // account starts as a fresh initial-sync target. Never a silent merge.
+            Button("Keep My Data & Start Fresh") {
+                Task {
+                    await SyncCoordinator.shared.resolveAccountChange(keepLocalAndStartFresh: true)
+                    await SyncCoordinator.shared.sync(context: modelContext)
+                    syncPersistentState = SyncCoordinator.shared.stateStore.load()
+                }
+            }
+            .accessibilityIdentifier("confirmAccountChangeButton")
+        }
+    }
+
+    @ViewBuilder
+    private var syncStatusRow: some View {
+        let status = SyncCoordinator.shared.status
+        Label(status.displayText, systemImage: syncStatusSymbol(status))
+            .foregroundStyle(status == .accountChanged || status.isErrorLike ? KueColor.warning : KueColor.secondaryText)
+            .accessibilityIdentifier("syncStatusLabel")
+    }
+
+    private func syncStatusSymbol(_ status: SyncStatus) -> String {
+        switch status {
+        case .off: return "icloud.slash"
+        case .checkingAccount, .syncing: return "arrow.triangle.2.circlepath.icloud"
+        case .upToDate: return "checkmark.icloud"
+        case .waitingForNetwork: return "wifi.slash"
+        case .waitingForSignIn: return "person.crop.circle.badge.exclamationmark"
+        case .paused: return "pause.circle"
+        case .changesWaitingToUpload: return "icloud.and.arrow.up"
+        case .conflictNeedsReview: return "exclamationmark.icloud"
+        case .temporarilyUnavailable: return "icloud.slash"
+        case .syncError: return "exclamationmark.triangle"
+        case .accountChanged: return "person.crop.circle.badge.exclamationmark"
         }
     }
 

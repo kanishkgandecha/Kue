@@ -438,6 +438,45 @@ into a `Task`). Two further `KueUITests` failures were investigated and, via dir
 resolved — see docs/25 "O.1." for both. See `docs/25-honest-event-outcomes-and-reminders.md`
 for the full lifecycle/precedence table, notification concept table, and files-touched list.
 
+**Kue 2.0 Phase 11 ("iCloud/CloudKit Multi-Device Sync") is implementation-complete and
+fake-backed-test-verified, not production-sync-verified — those are separate states, and
+this phase never claims the latter.** `CKSyncEngine` (`Kue/Services/Sync/`, app-only) against
+a private custom zone (`iCloud.com.kanishkgandecha.Kue`) — no custom Kue account, no server;
+the person's own Apple ID and private CloudKit database. **Central architectural finding**:
+every `ModelConfiguration` in `ModelContainerFactory.swift` now passes an explicit
+`cloudKitDatabase: .none` — SwiftData's own default is `.automatic`, which would have
+silently activated its own independent CloudKit mirroring the instant the app gained a
+CloudKit entitlement, running a second synchronization system against the exact store
+`CKSyncEngine` also writes to. Proven, not just documented — see
+`CloudKitSchemaSafetyTests.swift`. Two record types only (`Event` — bundles `KueEvent` +
+its `KueTask`s + `KueSchedule` + `WidgetConfiguration` as one record, since none of those
+three have identity independent of their owning event — and `RecurrenceExclusion`); Calendar
+linkage (`externalCalendar*` fields) stays device-local, never synced (no cross-device
+`EKEvent` identity guarantee exists). Whole-graph, `updatedAt`-timestamp conflict resolution
+with a deterministic content-hash tie-break (`SyncConflictResolver`, pure, exhaustively
+tested) — never field-by-field merging. **Real pre-Phase-11 bug found and fixed during the
+audit**: only `EventActions.archive`/`.unarchive` bumped `event.updatedAt`; the other six
+mutating actions (`cancel`/`complete`/`skip` and their un-variants) didn't, and
+`EventStatusEngine.reconcile` was *wrongly* bumping it on every passive time-derived status
+refresh — both fixed, since `updatedAt` is now the CloudKit conflict-resolution clock and
+must reflect only genuine explicit mutations. Docs/25's honest-outcome guarantees carry
+through unchanged: `status` itself is never synced (only the explicit `isCancelled`/
+`isManuallyCompleted`/`isSkipped` flags and their timestamps are), so every device still
+derives Awaiting Outcome locally rather than trusting a remote temporal snapshot. Durable
+local outbox + tombstones live in a separate JSON file in the App Group container
+(`SyncPersistentState`, not a SwiftData model). Sync defaults **off** for every existing
+install; account-switch is blocked behind an explicit app-owned confirmation that never
+merges silently. **Provisioning blocker, confirmed and reported honestly (not worked
+around)**: the signed-in developer account is a free Personal Team, which Apple does not
+allow to provision iCloud/CloudKit on a real device or container at all (a real
+`xcodebuild -allowProvisioningUpdates` attempt against a device destination failed with
+Apple's own "Personal development teams... do not support the iCloud and Push Notifications
+capabilities" error) — every verification in this phase is Simulator + fake-backed;
+zero real CloudKit operations occurred. See `docs/26-icloud-cloudkit-sync.md` for the full
+record schema, conflict matrix, offline guarantees, entitlement inspection results, and the
+physical two-device verification checklist this phase's own completion bar requires before
+ever being called production-sync-verified.
+
 ## Project structure
 
 ```

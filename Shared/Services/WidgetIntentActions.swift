@@ -84,7 +84,13 @@ enum WidgetIntentActions {
 
         task.isCompleted = true
         task.completedAt = now
+        // Kue 2.0 Phase 11 — docs/26 "H.": every explicit mutation to an event's graph (this
+        // task belongs to `event`) must bump the parent's `updatedAt`, the conflict-resolution
+        // timestamp CloudKit sync compares. A real pre-Phase-11 gap found during the sync
+        // audit — this whole file's three actions never touched it.
+        event.updatedAt = now
         try? context.save()
+        SyncOutbox.markEventDirty(event.id)
 
         let identifier = "\(event.id)-\(NotificationTransitionKind.taskDue(taskID: task.id).identifierSuffix)"
         scheduler.removePendingNotificationRequests(withIdentifiers: [identifier])
@@ -140,7 +146,9 @@ enum WidgetIntentActions {
         )
         task.dueDate = newDueDate
         task.offsetLabel = newLabel
+        event.updatedAt = now // Kue 2.0 Phase 11 — see `completeTask`'s own comment above.
         try? context.save()
+        SyncOutbox.markEventDirty(event.id)
 
         let identifier = "\(event.id)-\(NotificationTransitionKind.taskDue(taskID: task.id).identifierSuffix)"
         scheduler.removePendingNotificationRequests(withIdentifiers: [identifier])
@@ -184,7 +192,9 @@ enum WidgetIntentActions {
         event.manuallyCompletedAt = now
         event.isCancelled = false
         event.cancelledAt = nil
+        event.updatedAt = now // Kue 2.0 Phase 11 — see `completeTask`'s own comment above.
         try? context.save()
+        SyncOutbox.markEventDirty(event.id)
 
         let identifiers = NotificationCandidateBuilder.allIdentifiers(for: event)
         if !identifiers.isEmpty {

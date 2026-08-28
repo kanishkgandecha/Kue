@@ -38,7 +38,7 @@ enum MigrationTestSupport {
     /// store, not a lookalike.
     static func makeV1Store(at url: URL) throws -> ModelContainer {
         let schema = Schema(versionedSchema: KueSchemaV1.self)
-        let configuration = ModelConfiguration(schema: schema, url: url)
+        let configuration = ModelConfiguration(schema: schema, url: url, cloudKitDatabase: .none)
         return try ModelContainer(for: schema, configurations: [configuration])
     }
 
