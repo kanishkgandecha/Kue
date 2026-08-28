@@ -9,4 +9,8 @@
 
 enum WidgetKind {
     static let kue = "KueWidget"
+    /// Kue 2.0 Phase 8 — see docs/22-expanded-and-dedicated-widgets.md "A." A genuinely
+    /// separate widget kind, not a mode of `kue` above, so its own `AppIntentConfiguration`
+    /// carries an independent per-instance selection that can never fall back to "Next Up".
+    static let dedicatedCountdown = "KueDedicatedCountdownWidget"
 }

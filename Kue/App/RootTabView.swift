@@ -38,6 +38,14 @@ struct RootTabView: View {
     /// other four destinations' own navigation state (requirement 22).
     @State private var selection: RootDestination = .home
 
+    /// Kue 2.0 Phase 8 — see docs/22-expanded-and-dedicated-widgets.md "E." Presented as a
+    /// sheet over whichever tab is active (not pushed onto Home's own stack) so a widget tap
+    /// never disturbs Home's in-progress navigation state, matching the "independent
+    /// navigation stacks" principle above.
+    @State private var deepLinkedEvent: KueEvent?
+    @State private var isShowingDedicatedCountdownHelp = false
+    @Environment(\.modelContext) private var modelContext
+
     var body: some View {
         TabView(selection: $selection) {
             Tab("Home", systemImage: "house", value: RootDestination.home) {
@@ -83,6 +91,27 @@ struct RootTabView: View {
             .accessibilityIdentifier("tab-settings")
         }
         .accessibilityIdentifier("rootTabBar")
+        .onOpenURL { url in
+            guard let destination = KueDeepLink.parse(url) else { return }
+            switch destination {
+            case .event(let id):
+                // Requirement: "validate deep links and handle missing identifiers safely" —
+                // a stale/deleted id just does nothing rather than presenting an empty sheet.
+                if let event = try? modelContext.fetch(FetchDescriptor<KueEvent>(predicate: #Predicate { $0.id == id })).first {
+                    deepLinkedEvent = event
+                }
+            case .dedicatedCountdownHelp:
+                isShowingDedicatedCountdownHelp = true
+            }
+        }
+        .sheet(item: $deepLinkedEvent) { event in
+            NavigationStack {
+                EventDetailView(event: event)
+            }
+        }
+        .sheet(isPresented: $isShowingDedicatedCountdownHelp) {
+            DedicatedCountdownHelpView()
+        }
     }
 
     @State private var pendingTemplateEventType: EventType?

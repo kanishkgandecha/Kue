@@ -263,6 +263,67 @@ new schema version, no `schemaVersion` bump, same reasoning as `.ocr`/`.calendar
 `docs/20-voice-input.md` for the full contract, the state-machine diagram, and what this phase
 deliberately doesn't do.
 
+**Phase 7 ("Design System and Liquid Glass UI Redesign") is done.** `Kue/DesignSystem/`
+(spacing/radius/typography/color/icon-size/motion/haptics/glass tokens, plus `Components/` —
+`EventCard`, `PreparationProgressView`, `KueBanner`, `KueStatusStyle`, `KueWordmark`) is the
+shared visual layer every screen now reads instead of ad hoc literals; native Liquid Glass
+(`.glassEffect`, `.buttonStyle(.glassProminent)`) is used for chrome/controls, never for dense
+content, with an opaque Reduce-Transparency fallback (`KueGlass.swift`). `Kue/App/
+RootTabView.swift` replaced Home's own toolbar-driven navigation with a five-destination
+Liquid Glass bottom `TabView` — Home, Search, **Add** (deliberately the 3rd of 5, genuinely
+central), Templates, Settings — each its own `NavigationStack`; selection lives in plain
+`@State`, never SwiftData. `Kue/Features/Search/SearchView.swift`, `Kue/Features/AddHub/
+AddHubView.swift`, and `Kue/Features/Templates/TemplatesView.swift` (converted from a sheet to
+a tab-root screen) are the dedicated pages those destinations now own; `AddHubView` inherited
+the exact Calendar-import/OCR/voice `.sheet(item:)` state machinery `HomeView` used to own,
+moved verbatim. `HomeView` itself is now a date-sectioned timeline
+(`Shared/Services/HomeTimelineGrouping.swift` — pure, `now:`-parameterized, groups by each
+event's own pinned-timezone calendar day into Today/Tomorrow/dated sections plus a collapsed
+trailing "Later" group past 5 individual sections) with a centered `KueWordmark` header
+(`Kue/Assets.xcassets/KueWordmark.imageset`, light/dark asset-catalog variants) as the
+toolbar's sole `.principal` item. See `docs/21-design-system.md` for the full architecture,
+per-screen redesign notes, and accessibility/motion/haptics decisions.
+
+**Phase 8 ("Expanded and Dedicated Widgets") is done.** `KueWidget` (the existing widget kind)
+now supports `.systemLarge` and the three Lock Screen/StandBy accessory families
+(`.accessoryCircular`/`.accessoryRectangular`/`.accessoryInline`) alongside small/medium,
+unchanged; `.systemExtraLarge` was deliberately not added (iPad-only, and no part of Kue's UI
+has ever been given a tested iPad layout — see docs/22 "iPad decision"). A genuinely separate
+second widget kind, **`KueDedicatedCountdownWidget`** ("Dedicated Countdown" —
+`KueWidget/DedicatedCountdownWidget.swift`/`DedicatedCountdownProvider.swift`/
+`DedicatedCountdownConfigurationIntent.swift`/`KueEventEntity.swift`/
+`DedicatedCountdownEntryView.swift`), tracks exactly one user-chosen event per placed instance
+(WidgetKit's own per-instance `AppIntentConfiguration` storage — no new SwiftData, no schema
+change) and **never** falls back to "Next Up": `Shared/Services/
+DedicatedWidgetContentService.swift`'s `resolve(event:now:)` is a pure function taking one
+optional `KueEvent` (never an events array), returning `.tracking`/`.cancelled`/`.skipped`/
+`.unavailable` — its own signature is what makes "can never silently switch events"
+structural, not conventional. `Shared/Services/WidgetContentService.swift`'s "Next Up"
+eligibility filter was extracted into `isEligibleForAutomaticSelection(_:now:)` (behavior-
+preserving refactor) so the shared widget picker (`KueEventEntityQuery`,
+search-as-you-type via `EntityStringQuery`, case-/diacritic-insensitive) reuses the identical
+rule for what it *suggests*, without duplicating it — resolving an *already*-selected id still
+works regardless of that event's current eligibility, so Edit Widget can always show what's
+configured. `WidgetIntentActions`'s three intents (`completeTask`/`snoozeTask`/`completeEvent`)
+now reload both widget kinds' timelines (`reloadAllWidgetKinds`), since a mutation from either
+kind's own button can affect an instance of the other pinned to the same event.
+`KueDeepLink.swift` (Shared/) is the one shared `kue://` scheme both `.widgetURL` construction
+(KueWidget/) and `RootTabView`'s new `.onOpenURL` parsing agree on — tapping a resolvable
+(tracking or cancelled/skipped, since the event still exists) Dedicated widget deep-links to
+that event's own Detail screen; a genuinely `.unavailable` one opens `Kue/Features/Widgets/
+DedicatedCountdownHelpView.swift`, which states plainly that only the system's own long-press →
+Edit Widget can reconfigure that specific placed instance — there is no supported API for an
+in-app control to do that, and this phase does not pretend otherwise.
+`Shared/DesignSystem/WidgetAccessoryLabels.swift`'s `accessorySafeStatus(phase:subline:)` is
+what every accessory-family view (both kinds) reads instead of `WidgetDisplayContent.subline`
+directly — `subline` carries a task title (`.preparation`/`.tomorrow`) or the event's location
+(`.today`) for those phases, which must never reach an ambient-visible Lock Screen/StandBy
+surface (`docs/22` "H. Privacy"); only `.countdown`'s numeric subline is safe to compact
+("93 days" → "93d"). `WidgetAccessoryViews.swift` (KueWidget/) holds the accessory family
+views shared between both widget kinds, for the identical "don't duplicate status logic across
+family views" reason. See `docs/22-expanded-and-dedicated-widgets.md` for the full contract,
+terminal-state precedence, and the deferred manual placement/StandBy/Lock-Screen checklist.
+
 ## Project structure
 
 ```

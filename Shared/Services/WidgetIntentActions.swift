@@ -89,7 +89,7 @@ enum WidgetIntentActions {
         scheduler.removePendingNotificationRequests(withIdentifiers: [identifier])
 
         EventStatusEngine.sweep(context: context, now: now)
-        widgetReloader.reloadTimelines(ofKind: WidgetKind.kue)
+        reloadAllWidgetKinds(widgetReloader)
 
         return TaskCompletionResult(taskTitle: task.title)
     }
@@ -147,7 +147,7 @@ enum WidgetIntentActions {
         }
 
         EventStatusEngine.sweep(context: context, now: now)
-        widgetReloader.reloadTimelines(ofKind: WidgetKind.kue)
+        reloadAllWidgetKinds(widgetReloader)
 
         return TaskSnoozeResult(newDueDate: newDueDate, offsetLabel: newLabel)
     }
@@ -183,8 +183,17 @@ enum WidgetIntentActions {
         }
 
         EventStatusEngine.sweep(context: context, now: now)
-        widgetReloader.reloadTimelines(ofKind: WidgetKind.kue)
+        reloadAllWidgetKinds(widgetReloader)
 
         return EventCompletionResult(eventTitle: event.title)
+    }
+
+    /// Kue 2.0 Phase 8 — a `KueEvent` mutation triggered from either widget kind's own button
+    /// can affect a Dedicated Countdown instance pinned to that same event too (and vice
+    /// versa), so every write path here reloads both kinds rather than just the one the
+    /// triggering button happened to live on. See docs/22-expanded-and-dedicated-widgets.md.
+    private static func reloadAllWidgetKinds(_ reloader: WidgetReloading) {
+        reloader.reloadTimelines(ofKind: WidgetKind.kue)
+        reloader.reloadTimelines(ofKind: WidgetKind.dedicatedCountdown)
     }
 }

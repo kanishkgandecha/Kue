@@ -54,19 +54,44 @@ struct WidgetDisplayContent: Equatable {
 enum WidgetContentService {
     // MARK: - "Next Up" (docs/07-widget-engine.md "Widget instances vs. event eligibility")
 
-    /// The unconfigured-widget default: soonest `isEnabled` event whose derived status is
-    /// upcoming/preparing/tomorrow/today/active — deterministic, ties broken by id so the
-    /// same input set always yields the same winner. Explicitly excludes completed,
-    /// cancelled, *and archived* events — archived is checked directly on `event.status`
-    /// (not inferred from the derived status) because a user can manually archive an event
-    /// that's still date-wise upcoming, which `derive(for:)` alone wouldn't catch.
-    static func nextUpEvent(from events: [KueEvent], now: Date = .now) -> KueEvent? {
+    /// The shared "is this event date/status-wise a live, actionable one right now" check —
+    /// both `isEligibleForAutomaticSelection` and `isEligibleForDedicatedSelection` build on
+    /// this; it's *not* itself a complete eligibility rule for either caller. Archived is
+    /// checked directly on `event.status` (not inferred from the derived status) because a
+    /// user can manually archive an event that's still date-wise upcoming, which
+    /// `derive(for:)` alone wouldn't catch.
+    private static func isDateAndStatusLive(_ event: KueEvent, now: Date) -> Bool {
         let eligible: Set<EventStatus> = [.upcoming, .preparing, .tomorrow, .today, .active]
-        let candidates = events.filter { event in
-            guard event.widgetConfiguration?.isEnabled == true else { return false }
-            guard event.status != .archived else { return false }
-            return eligible.contains(EventStatusEngine.derive(for: event, now: now))
-        }
+        guard event.status != .archived else { return false }
+        return eligible.contains(EventStatusEngine.derive(for: event, now: now))
+    }
+
+    /// docs/22-expanded-and-dedicated-widgets.md "C." — "Next Up"'s own eligibility rule,
+    /// unchanged: date/status-live *and* the user hasn't opted this event out of the
+    /// automatic widget (`WidgetConfiguration.isEnabled == true`).
+    static func isEligibleForAutomaticSelection(_ event: KueEvent, now: Date = .now) -> Bool {
+        guard event.widgetConfiguration?.isEnabled == true else { return false }
+        return isDateAndStatusLive(event, now: now)
+    }
+
+    /// Kue 2.0 Phase 8 correction — the Dedicated Countdown picker's *new-selection*
+    /// suggestion/search list. Originally implemented by reusing
+    /// `isEligibleForAutomaticSelection` directly; that was wrong — `WidgetConfiguration
+    /// .isEnabled` means "opted this event out of the *automatic* widget," which has no
+    /// bearing on a user explicitly, one-time picking an event for a Dedicated Countdown
+    /// instance (docs/07-widget-engine.md's own `isEnabled` doc: "the user opted this event
+    /// out of getting a widget **at all**" is the automatic-widget-era framing this predates
+    /// needing to distinguish from). A newly created event isn't excluded here just because
+    /// it has no `WidgetConfiguration` yet, or because the user turned the automatic widget
+    /// off for it — this picker offers any date/status-live, non-archived event, full stop.
+    static func isEligibleForDedicatedSelection(_ event: KueEvent, now: Date = .now) -> Bool {
+        isDateAndStatusLive(event, now: now)
+    }
+
+    /// The unconfigured-widget default: soonest eligible event — deterministic, ties broken
+    /// by id so the same input set always yields the same winner.
+    static func nextUpEvent(from events: [KueEvent], now: Date = .now) -> KueEvent? {
+        let candidates = events.filter { isEligibleForAutomaticSelection($0, now: now) }
         return candidates.min { lhs, rhs in
             lhs.startDate != rhs.startDate
                 ? lhs.startDate < rhs.startDate

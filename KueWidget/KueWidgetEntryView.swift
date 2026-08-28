@@ -2,10 +2,12 @@
 //  KueWidgetEntryView.swift
 //  KueWidget
 //
-//  Small + medium rendering for all five widget types — docs/07-widget-engine.md "Widget
-//  types (V1)". Family is chosen by the user, supplied via `\.widgetFamily`, never app-owned
-//  data. `urgent` is a treatment layered on top of whichever type/phase applies, never its
-//  own case.
+//  All six supported families for all five widget types — docs/07-widget-engine.md "Widget
+//  types (V1)" and docs/22-expanded-and-dedicated-widgets.md "B." (Kue 2.0 Phase 8 added
+//  systemLarge + the three accessory families; small/medium behavior below is unchanged from
+//  before Phase 8). Family is chosen by the user, supplied via `\.widgetFamily`, never
+//  app-owned data. `urgent` is a treatment layered on top of whichever type/phase applies,
+//  never its own case.
 //
 //  Phase 9 (M8) added interactive buttons, gated to "only context-valid controls" per-type
 //  and per-state: `CompleteTaskIntent`/`SnoozeTaskIntent` appear next to a visible task only
@@ -13,7 +15,10 @@
 //  appears only on the whole-event types (Countdown/Progress/Timeline — docs/07 "Exposed on
 //  the Countdown/Progress/Timeline widget types... as a single button") and only while the
 //  event hasn't already reached `.completed`/`.removed`, since offering "mark complete" on an
-//  event that's already finished or archived isn't a context-valid control.
+//  event that's already finished or archived isn't a context-valid control. Phase 8 keeps
+//  this gating unchanged for `.systemLarge`; accessory families offer no interactive buttons
+//  at all (see `DedicatedCountdownEntryView`'s own header comment for why — the same decision
+//  applies here for the identical reason).
 //
 
 import SwiftUI
@@ -29,17 +34,31 @@ struct KueWidgetEntryView: View {
         case .event(let content):
             EventContentView(content: content, family: family)
         case .noEligibleEvent:
-            EmptyStateView(
+            stateView(
                 title: "Nothing Coming Up",
                 message: "Add an event in Kue to see it here.",
                 symbol: "calendar.badge.clock"
             )
         case .storeUnavailable:
-            EmptyStateView(
+            stateView(
                 title: "Unavailable",
                 message: "Open Kue to refresh.",
                 symbol: "exclamationmark.triangle"
             )
+        }
+    }
+
+    @ViewBuilder
+    private func stateView(title: String, message: String, symbol: String) -> some View {
+        switch family {
+        case .accessoryCircular:
+            AccessoryCircularStateView(symbol: symbol, label: title)
+        case .accessoryRectangular:
+            AccessoryRectangularStateView(title: title, message: message)
+        case .accessoryInline:
+            Text("\(Image(systemName: symbol)) \(title)")
+        default:
+            EmptyStateView(title: title, message: message, symbol: symbol)
         }
     }
 }
@@ -49,25 +68,50 @@ private struct EventContentView: View {
     let family: WidgetFamily
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        switch family {
+        case .accessoryCircular:
+            AccessoryCircularTrackingView(content: content)
+        case .accessoryRectangular:
+            AccessoryRectangularTrackingView(content: content)
+        case .accessoryInline:
+            Text("\(content.eventTitle) · \(WidgetAccessoryLabels.accessorySafeStatus(phase: content.phase, subline: content.subline))")
+        case .systemLarge:
+            SizedBody(content: content, isLarge: true, maxRows: 6)
+        default: // .systemSmall, .systemMedium
+            SizedBody(content: content, isLarge: false, maxRows: family == .systemSmall ? 2 : 3)
+        }
+    }
+}
+
+/// Small/Medium/Large all share this shape — only `isLarge` (title/countdown sizing +
+/// button control size) and `maxRows` (how much of the type-specific body shows) differ.
+/// docs/22 "B.": Large shows *more of the same real content* (more task rows), never a
+/// differently organized layout invented just to fill space.
+private struct SizedBody: View {
+    let content: WidgetDisplayContent
+    let isLarge: Bool
+    let maxRows: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: isLarge ? 6 : 4) {
             header
             Text(content.headline)
-                .font(family == .systemSmall ? .headline : .title3)
-                .fontWeight(.semibold)
+                .font(isLarge ? .title2 : (maxRows == 2 ? .headline : .title3))
+                .fontWeight(isLarge ? .bold : .semibold)
                 .foregroundStyle(content.isUrgent ? Color.red : Color.primary)
                 .lineLimit(2)
 
-            body(for: content.widgetType)
+            TypeBody(widgetType: content.widgetType, content: content, maxRows: maxRows)
 
             Spacer(minLength: 0)
 
             if showsCompleteEventButton {
                 Button(intent: CompleteEventIntent(eventID: content.eventID)) {
                     Label("Mark Complete", systemImage: "checkmark.circle")
-                        .font(.caption2)
+                        .font(isLarge ? .body : .caption2)
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.mini)
+                .controlSize(isLarge ? .small : .mini)
                 .tint(content.isUrgent ? .red : .accentColor)
             }
         }
@@ -75,8 +119,6 @@ private struct EventContentView: View {
         .containerBackground(content.isUrgent ? AnyShapeStyle(.red.opacity(0.12)) : AnyShapeStyle(.fill.tertiary), for: .widget)
     }
 
-    /// docs/07-widget-engine.md "CompleteEventIntent" — the whole-event types only, and only
-    /// while there's still something meaningful to mark complete.
     private var showsCompleteEventButton: Bool {
         guard content.widgetType == .countdown || content.widgetType == .progress || content.widgetType == .timeline else {
             return false
@@ -88,56 +130,67 @@ private struct EventContentView: View {
         HStack(spacing: 4) {
             if content.isUrgent {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.caption2)
+                    .font(isLarge ? .caption : .caption2)
                     .foregroundStyle(.red)
             }
             Text(content.eventTypeDisplayName.uppercased())
-                .font(.caption2)
+                .font(isLarge ? .caption : .caption2)
                 .foregroundStyle(.secondary)
         }
     }
+}
 
-    /// docs/07-widget-engine.md "Widget types (V1)" — layout/copy rules per type. All five
-    /// share the headline above; this is what makes each type visually distinct.
-    @ViewBuilder
-    private func body(for widgetType: WidgetType) -> some View {
+/// docs/07-widget-engine.md "Widget types (V1)" — layout/copy rules per type. All five share
+/// the headline `SizedBody` already renders above this; this is what makes each type
+/// visually distinct, at whatever `maxRows` the caller (Small/Medium/Large) allows.
+private struct TypeBody: View {
+    let widgetType: WidgetType
+    let content: WidgetDisplayContent
+    let maxRows: Int
+
+    var body: some View {
         switch widgetType {
         case .countdown:
             if let subline = content.subline {
                 Text(subline)
-                    .font(family == .systemSmall ? .title2 : .title)
+                    .font(maxRows <= 2 ? .title2 : .title)
                     .fontWeight(.bold)
                     .foregroundStyle(content.isUrgent ? Color.red : Color.secondary)
             }
         case .preparation:
             // docs/07-widget-engine.md "Preparation — today's task alongside the upcoming
             // event." `content.tasks` is already sorted soonest-due-first, so the first
-            // incomplete one *is* "today's task" — the same row `CompleteTaskIntent`/
-            // `SnoozeTaskIntent` are documented to appear on ("per-visible-task button").
+            // incomplete one *is* "today's task."
             if let nextTask = content.tasks.first(where: { !$0.isCompleted }) {
                 TaskRow(task: nextTask, canSnooze: content.canSnooze, showsOffsetLabel: true)
+                if maxRows > 3 {
+                    let remaining = content.tasks.filter { !$0.isCompleted && $0.id != nextTask.id }.prefix(maxRows - 1)
+                    ForEach(Array(remaining)) { task in
+                        TaskRow(task: task, canSnooze: content.canSnooze, showsOffsetLabel: true)
+                    }
+                }
             } else if let subline = content.subline {
                 Label(subline, systemImage: "checklist")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                    .lineLimit(family == .systemSmall ? 1 : 2)
+                    .lineLimit(maxRows <= 2 ? 1 : 2)
             }
         case .timeline:
-            TimelineRows(tasks: content.tasks, family: family)
+            TimelineRows(tasks: content.tasks, maxRows: maxRows)
         case .progress:
-            ProgressBody(completed: content.tasksCompleted, total: content.tasksTotal)
+            ProgressBody(completed: content.tasksCompleted, total: content.tasksTotal, showsUpcoming: maxRows > 3, tasks: content.tasks)
         case .checklist:
-            ChecklistRows(tasks: content.tasks, family: family, canSnooze: content.canSnooze)
+            ChecklistRows(tasks: content.tasks, maxRows: maxRows, canSnooze: content.canSnooze)
         }
     }
 }
 
 private struct TimelineRows: View {
     let tasks: [WidgetTaskSummary]
-    let family: WidgetFamily
+    let maxRows: Int
 
     var body: some View {
-        let visible = tasks.prefix(family == .systemSmall ? 2 : 3)
+        let visible = tasks.prefix(maxRows)
         if visible.isEmpty {
             Text("No timeline yet").font(.caption).foregroundStyle(.secondary)
         } else {
@@ -161,6 +214,8 @@ private struct TimelineRows: View {
 private struct ProgressBody: View {
     let completed: Int
     let total: Int
+    let showsUpcoming: Bool
+    let tasks: [WidgetTaskSummary]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -169,17 +224,28 @@ private struct ProgressBody: View {
             Text("\(completed) / \(total) tasks")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            // docs/22 "B.": Large uses the extra room for a concise upcoming-task preview
+            // rather than just a bigger bar — real additional information, not a stretch.
+            if showsUpcoming {
+                let upcoming = tasks.filter { !$0.isCompleted }.prefix(3)
+                ForEach(Array(upcoming)) { task in
+                    HStack(spacing: 4) {
+                        Image(systemName: "circle").font(.caption2).foregroundStyle(.secondary)
+                        Text(task.title).font(.caption2).lineLimit(1)
+                    }
+                }
+            }
         }
     }
 }
 
 private struct ChecklistRows: View {
     let tasks: [WidgetTaskSummary]
-    let family: WidgetFamily
+    let maxRows: Int
     let canSnooze: Bool
 
     var body: some View {
-        let visible = tasks.prefix(family == .systemSmall ? 2 : 4)
+        let visible = tasks.prefix(maxRows)
         if visible.isEmpty {
             Text("No tasks yet").font(.caption).foregroundStyle(.secondary)
         } else {
@@ -195,12 +261,12 @@ private struct ChecklistRows: View {
 /// One task, with its interactive controls — docs/07-widget-engine.md "CompleteTaskIntent"
 /// (per-visible-task button) / "SnoozeTaskIntent" (secondary button alongside it, hidden —
 /// not disabled — once `canSnooze` is false). Shared between Checklist's multi-row list and
-/// Preparation's single "today's task" row.
+/// Preparation's task row(s).
 private struct TaskRow: View {
     let task: WidgetTaskSummary
     let canSnooze: Bool
     /// Preparation shows the offset ("2 days before") next to the title; Checklist doesn't
-    /// (its rows are already dense with up to 4 tasks).
+    /// (its rows are already dense at max row count).
     let showsOffsetLabel: Bool
 
     var body: some View {

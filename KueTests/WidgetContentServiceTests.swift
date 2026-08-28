@@ -77,6 +77,29 @@ struct WidgetContentServiceTests {
         #expect(first?.id == second?.id) // same winner regardless of array order
     }
 
+    // MARK: - isEligibleForAutomaticSelection (Kue 2.0 Phase 8 extraction — see
+    // docs/22-expanded-and-dedicated-widgets.md "C.": `nextUpEvent` and the Dedicated
+    // Countdown picker's default-suggestion list now share this one predicate.)
+
+    @Test func eligibilityPredicateMatchesEveryCaseNextUpAlreadyExcludes() {
+        let now = Date(timeIntervalSince1970: 1_000_000_000)
+        let disabled = makeEvent(startDate: now.addingTimeInterval(86_400), isEnabled: false)
+        let archived: KueEvent = {
+            let event = makeEvent(startDate: now.addingTimeInterval(86_400))
+            event.status = .archived
+            return event
+        }()
+        let cancelled = makeEvent(startDate: now.addingTimeInterval(86_400), isCancelled: true)
+        let completed = makeEvent(startDate: now.addingTimeInterval(-86_400), estimatedDurationMinutes: 0)
+        let eligible = makeEvent(startDate: now.addingTimeInterval(3 * 86_400))
+
+        #expect(!WidgetContentService.isEligibleForAutomaticSelection(disabled, now: now))
+        #expect(!WidgetContentService.isEligibleForAutomaticSelection(archived, now: now))
+        #expect(!WidgetContentService.isEligibleForAutomaticSelection(cancelled, now: now))
+        #expect(!WidgetContentService.isEligibleForAutomaticSelection(completed, now: now))
+        #expect(WidgetContentService.isEligibleForAutomaticSelection(eligible, now: now))
+    }
+
     // MARK: - Lifecycle phase thresholds
 
     @Test func phaseIsCountdownWhenFarOut() {

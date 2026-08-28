@@ -128,6 +128,17 @@ enum ModelContainerFactory {
     /// widget extension and Share Extension, where a broken store must degrade gracefully
     /// (a placeholder-style widget entry; an alert + no-op in the Share Extension), never
     /// take down the whole extension process.
+    ///
+    /// Kue 2.0 Phase 8 — a process-local cache was added here and then reverted. It was an
+    /// *inferred* fix for "Edit Widget shows CAT 2026, but the placed widget renders
+    /// `.unavailable`," proposed without observing which resolution branch actually failed,
+    /// and manual re-verification showed the symptom persisted with the cache in place —
+    /// disproving it as the cause. Reintroducing container caching here would need its own
+    /// independent justification and test coverage (store-recovery/legacy-hardening behavior,
+    /// UI-test isolation, retry-after-failure, migration-failure paths — this function funnels
+    /// through the same `makeDefaultThrowing()` those all depend on), not just "this call site
+    /// looked expensive." Left uncached, matching every other call site's original shape,
+    /// until a *confirmed* cause calls for it.
     static func makeDefaultOrNil() -> ModelContainer? {
         try? makeDefaultThrowing()
     }

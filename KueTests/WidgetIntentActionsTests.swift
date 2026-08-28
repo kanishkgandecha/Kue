@@ -89,7 +89,10 @@ struct WidgetIntentActionsTests {
         let reloader = FakeWidgetReloader()
         _ = try WidgetIntentActions.completeTask(taskID: task.id, context: context, scheduler: FakeNotificationScheduler(), widgetReloader: reloader, now: now)
 
-        #expect(reloader.reloadedKinds == [WidgetKind.kue])
+        // Kue 2.0 Phase 8 — a mutation from either widget kind's own button can affect a
+        // Dedicated Countdown instance pinned to the same event, so both kinds reload now;
+        // see docs/22-expanded-and-dedicated-widgets.md and WidgetIntentActions.reloadAllWidgetKinds.
+        #expect(reloader.reloadedKinds == [WidgetKind.kue, WidgetKind.dedicatedCountdown])
     }
 
     @Test func completeTaskDoesNotChangeEventStatus() throws {
@@ -222,7 +225,10 @@ struct WidgetIntentActionsTests {
         let event = insertEvent(in: context, startDate: now.addingTimeInterval(10 * 86_400))
         let reloader = FakeWidgetReloader()
         _ = try WidgetIntentActions.completeEvent(eventID: event.id, context: context, scheduler: FakeNotificationScheduler(), widgetReloader: reloader, now: now)
-        #expect(reloader.reloadedKinds == [WidgetKind.kue])
+        // Kue 2.0 Phase 8 — a mutation from either widget kind's own button can affect a
+        // Dedicated Countdown instance pinned to the same event, so both kinds reload now;
+        // see docs/22-expanded-and-dedicated-widgets.md and WidgetIntentActions.reloadAllWidgetKinds.
+        #expect(reloader.reloadedKinds == [WidgetKind.kue, WidgetKind.dedicatedCountdown])
     }
 
     @Test func completeEventThrowsForAMissingEvent() {
