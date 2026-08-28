@@ -324,6 +324,41 @@ views shared between both widget kinds, for the identical "don't duplicate statu
 family views" reason. See `docs/22-expanded-and-dedicated-widgets.md` for the full contract,
 terminal-state precedence, and the deferred manual placement/StandBy/Lock-Screen checklist.
 
+**Kue 2.0 Phase 9 ("Live Activities, Dynamic Island, and Event Focus Mode") is done.**
+`Shared/Services/LiveActivity/` (`KueLiveActivityAttributes`/`LiveActivityStateBuilder`/
+`LiveActivityManaging`/`SystemLiveActivityManager`/`FakeLiveActivityManager`/
+`LiveActivityReconciler`/`LiveActivityPrivacyPreference`) plus `Kue/Features/LiveActivity/`
+(`LiveActivityFocusCoordinator`, app-only — the one-event focus policy — and
+`LiveActivityEnvironment`'s `\.liveActivityManager` DI seam) plus `KueWidget/
+KueLiveActivityWidget.swift`/`LiveActivityViews.swift` (the `ActivityConfiguration`/
+`DynamicIsland` declaration and every Lock Screen/Dynamic Island region). Exactly one
+Kue-owned `Activity` runs at a time, pinned to one event chosen explicitly from Event Detail —
+a separate policy from automatic "Next Up" and from Dedicated Countdown's own pinning, which
+never interact with it. `LiveActivityStateBuilder` reuses `DedicatedWidgetContentService
+.resolve(event:now:)` (Phase 8, unchanged) so a Live Activity and the Dedicated widget can
+never disagree about the same event. `LiveActivityFocusCoordinator.requestFocus` never
+silently replaces a different already-focused event — it returns
+`.needsReplacementConfirmation`, and only an explicit `replaceFocus` call (after the user
+confirms, naming both events) ends the old activity and starts the new one.
+`LiveActivityReconciler.reconcile(context:manager:now:)` is the one bounded reconciliation
+entry point, wired into `EventReconciliation.run` (now `async`), `EventFormView.save()`,
+`EventActions`' cancel/complete/skip/archive/delete/uncancel/uncomplete/unskip/unarchive, and
+(awaited, not fire-and-forget, since a widget-extension process can be suspended immediately
+after `perform()` returns) `WidgetIntentActions`' three interactive intents — never fetches or
+falls back to a different event. `EventActions.reloadWidget()` also gained a real Phase-8 gap
+fix here: it now reloads both widget kinds, not just `.kue`. Interactive Lock
+Screen/Dynamic-Island buttons reuse the existing `CompleteTaskIntent`/`SnoozeTaskIntent`/
+`CompleteEventIntent` App Intents verbatim. Privacy (`LiveActivityPrivacyPreference`, two
+toggles — show title default on, show next-task title default off) lives in App Group
+`UserDefaults`, not a new SwiftData field, avoiding a schema migration. Deep links reuse
+`KueDeepLink`'s existing `.event(UUID)` case unchanged; `RootTabView.onOpenURL` gained
+`EventUnavailableView` for a stale/deleted id, replacing what used to be a silent no-op.
+Phase 8's temporary D0–D3 diagnostic codes and verbose logging in
+`DedicatedCountdownProvider.swift` (added to chase a real, now-fixed widget-configuration bug)
+were removed, leaving only concise fault-only logging. See
+`docs/23-live-activities-and-focus-mode.md` for the full contract, the terminal-state grace
+periods, the privacy matrix, and the deferred physical-device manual-verification checklist.
+
 ## Project structure
 
 ```

@@ -225,11 +225,13 @@ enum OccurrenceReconciliationService {
         _ occurrence: KueEvent,
         scope: RecurrenceEditScope,
         context: ModelContext,
-        scheduler: NotificationScheduling = SystemNotificationScheduler.shared
+        scheduler: NotificationScheduling = SystemNotificationScheduler.shared,
+        liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared
     ) {
         guard let seriesID = occurrence.seriesID, let anchor = occurrence.recurrenceAnchorDate else {
-            // Not part of a series — unchanged plain-delete behavior.
-            EventActions.delete(occurrence, context: context, scheduler: scheduler)
+            // Not part of a series — unchanged plain-delete behavior (already reconciles Live
+            // Activity itself).
+            EventActions.delete(occurrence, context: context, scheduler: scheduler, liveActivityManager: liveActivityManager)
             return
         }
 
@@ -241,6 +243,10 @@ enum OccurrenceReconciliationService {
             try? context.save()
             EventActions.reloadWidget()
             if !identifiers.isEmpty { scheduler.removePendingNotificationRequests(withIdentifiers: identifiers) }
+            // A focused occurrence deleted individually (both this-occurrence and
+            // this-and-future below delete rows directly, bypassing EventActions.delete's own
+            // reconciliation call) still needs its Live Activity moved to `.unavailable`.
+            Task { await LiveActivityReconciler.reconcile(context: context, manager: liveActivityManager, now: .now) }
 
         case .thisAndFuture:
             let allEvents = (try? context.fetch(FetchDescriptor<KueEvent>())) ?? []
@@ -265,6 +271,7 @@ enum OccurrenceReconciliationService {
             try? context.save()
             EventActions.reloadWidget()
             if !identifiers.isEmpty { scheduler.removePendingNotificationRequests(withIdentifiers: identifiers) }
+            Task { await LiveActivityReconciler.reconcile(context: context, manager: liveActivityManager, now: .now) }
         }
     }
 

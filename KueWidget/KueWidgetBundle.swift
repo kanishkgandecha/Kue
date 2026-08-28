@@ -12,5 +12,7 @@ struct KueWidgetBundle: WidgetBundle {
         KueWidget()
         // Kue 2.0 Phase 8 — see docs/22-expanded-and-dedicated-widgets.md.
         DedicatedCountdownWidget()
+        // Kue 2.0 Phase 9 — see docs/23-live-activities-and-focus-mode.md.
+        KueLiveActivityWidget()
     }
 }

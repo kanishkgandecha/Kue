@@ -27,7 +27,7 @@ enum BackgroundRefreshHandler {
         var didExpire = false
         task.expirationHandler = { didExpire = true }
 
-        EventReconciliation.run(context: context, now: now)
+        await EventReconciliation.run(context: context, now: now)
         guard !didExpire else {
             task.setTaskCompleted(success: false)
             return

@@ -29,6 +29,9 @@ struct EventDetailView: View {
     // Kue 2.0 Phase 7 — requirement 32/34: restrained, injectable haptic feedback. Never the
     // real Taptic Engine under `KueUITests` — see `KueHaptics.swift`.
     @Environment(\.kueHaptics) private var haptics
+    // Kue 2.0 Phase 9 — `\.liveActivityManager` (Kue/Features/LiveActivity/), same DI seam as
+    // every other Fake-under-UITests service.
+    @Environment(\.liveActivityManager) private var liveActivityManager
 
     @State private var tab: DetailTab = .info
     @State private var isEditing = false
@@ -43,6 +46,14 @@ struct EventDetailView: View {
     @State private var isConfirmingCalendarUpdate = false
     @State private var isPerformingCalendarAction = false
     @State private var calendarErrorMessage: String?
+
+    // MARK: Kue 2.0 Phase 9 — Live Activity focus (docs/23-live-activities-and-focus-mode.md "F.")
+    @State private var focusedLiveActivityEventID: UUID?
+    @State private var isPerformingLiveActivityAction = false
+    @State private var isConfirmingLiveActivityReplacement = false
+    @State private var replacementCurrentEventID: UUID?
+    @State private var replacementCurrentEventTitle = ""
+    @State private var liveActivityErrorMessage: String?
 
     /// Kue 2.0 Phase 2, requirement 9 — wraps what `EventDuplicationService.duplicate`
     /// returned so the sheet below can show the same duplicate-warning banner
@@ -147,6 +158,27 @@ struct EventDetailView: View {
             // Kue 2.0 Phase 4 — a pure status read (requirement 26), never a network/EventKit
             // side effect a user didn't ask for; re-derived every time this screen appears.
             refreshCalendarStatus()
+            focusedLiveActivityEventID = await liveActivityManager.focusedEventID()
+        }
+        .confirmationDialog(
+            "Replace the Live Activity for \"\(replacementCurrentEventTitle)\" with this event?",
+            isPresented: $isConfirmingLiveActivityReplacement,
+            titleVisibility: .visible
+        ) {
+            Button("Replace", role: .destructive) { confirmReplaceLiveActivity() }
+                .accessibilityIdentifier("confirmReplaceLiveActivityButton")
+            // Kue 2.0 Phase 9 — the system-provided `role: .cancel` row doesn't carry a custom
+            // `.accessibilityIdentifier` through to the accessibility tree (confirmed via the
+            // UI test suite); tests match it by its "Cancel" label instead.
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            // Requirement C: never silently replace — name both events up front.
+            Text("Kue tracks one event's Live Activity at a time.")
+        }
+        .alert("Live Activity", isPresented: Binding(get: { liveActivityErrorMessage != nil }, set: { if !$0 { liveActivityErrorMessage = nil } })) {
+            Button("OK") { liveActivityErrorMessage = nil }
+        } message: {
+            Text(liveActivityErrorMessage ?? "")
         }
         .sheet(isPresented: $isChoosingExportCalendar) {
             CalendarDestinationPickerView(calendars: calendarProvider.writableCalendars()) { chosen in
@@ -213,6 +245,10 @@ struct EventDetailView: View {
                 if let rule = event.recurrence {
                     LabeledContent("Repeats", value: rule.summary(startDate: event.recurrenceAnchorDate ?? event.startDate))
                 }
+            }
+
+            Section("Live Activity") {
+                liveActivityFocusRow
             }
 
             if let notes = event.notes, !notes.isEmpty {
@@ -492,6 +528,106 @@ struct EventDetailView: View {
             let outcome = await EventDuplicationService.duplicate(event, context: modelContext)
             isDuplicating = false
             duplicationPresentation = DuplicationPresentation(newEvent: outcome.newEvent, detectedDuplicate: outcome.detectedDuplicate)
+        }
+    }
+
+    // MARK: - Kue 2.0 Phase 9 — Live Activity focus (docs/23-live-activities-and-focus-mode.md "F.")
+
+    /// One-event focus policy, surfaced directly: this event's own activity (refresh/stop),
+    /// starting fresh, or — reusing the exact same eligibility rule the Dedicated Countdown
+    /// widget already uses (`WidgetContentService.isEligibleForDedicatedSelection`) — an
+    /// honest "not eligible" note for a terminal/archived event, never an offer that would fail.
+    @ViewBuilder
+    private var liveActivityFocusRow: some View {
+        if focusedLiveActivityEventID == event.id {
+            Label("Live Activity Active", systemImage: "bolt.fill")
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("liveActivityActiveLabel")
+            Button("Refresh") {
+                performLiveActivityAction { await liveActivityManager.update(for: event, now: .now) }
+            }
+            .disabled(isPerformingLiveActivityAction)
+            Button("Stop Live Activity", role: .destructive) {
+                performLiveActivityAction {
+                    await LiveActivityFocusCoordinator.stopFocus(eventID: event.id, manager: liveActivityManager)
+                    focusedLiveActivityEventID = nil
+                }
+            }
+            .accessibilityIdentifier("stopLiveActivityButton")
+            .disabled(isPerformingLiveActivityAction)
+        } else if WidgetContentService.isEligibleForDedicatedSelection(event) {
+            Button {
+                performLiveActivityAction { await startLiveActivity() }
+            } label: {
+                if isPerformingLiveActivityAction {
+                    ProgressView()
+                } else {
+                    Text("Start Live Activity")
+                }
+            }
+            .accessibilityIdentifier("startLiveActivityButton")
+            .disabled(isPerformingLiveActivityAction || !liveActivityManager.isAvailable)
+            if !liveActivityManager.isAvailable {
+                Text("Live Activities are turned off. Enable them in Settings to track this event on the Lock Screen.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            Text("This event isn't currently eligible for a Live Activity.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func performLiveActivityAction(_ action: @escaping () async -> Void) {
+        isPerformingLiveActivityAction = true
+        Task {
+            await action()
+            isPerformingLiveActivityAction = false
+        }
+    }
+
+    private func startLiveActivity() async {
+        switch await LiveActivityFocusCoordinator.requestFocus(for: event, manager: liveActivityManager) {
+        case .started, .alreadyActiveForThisEvent:
+            focusedLiveActivityEventID = event.id
+        case .needsReplacementConfirmation(let currentEventID):
+            replacementCurrentEventID = currentEventID
+            replacementCurrentEventTitle = (try? modelContext.fetch(
+                FetchDescriptor<KueEvent>(predicate: #Predicate { $0.id == currentEventID })
+            ))?.first?.title ?? "another event"
+            isConfirmingLiveActivityReplacement = true
+        case .unavailable(let reason):
+            liveActivityErrorMessage = Self.liveActivityUnavailableMessage(reason)
+        }
+    }
+
+    /// Only reachable after the user explicitly tapped "Replace" in the confirmation dialog
+    /// above — never invoked automatically (requirement C).
+    private func confirmReplaceLiveActivity() {
+        guard let currentEventID = replacementCurrentEventID else { return }
+        performLiveActivityAction {
+            switch await LiveActivityFocusCoordinator.replaceFocus(currentEventID: currentEventID, with: event, manager: liveActivityManager) {
+            case .started, .alreadyActiveForThisEvent:
+                focusedLiveActivityEventID = event.id
+            case .unavailable(let reason):
+                liveActivityErrorMessage = Self.liveActivityUnavailableMessage(reason)
+            case .needsReplacementConfirmation:
+                break // can't recur — the old activity was already ended above
+            }
+        }
+    }
+
+    private static func liveActivityUnavailableMessage(_ reason: LiveActivityUnavailableReason) -> String {
+        switch reason {
+        case .authorizationDisabled:
+            return "Live Activities are turned off. Enable them in Settings to track this event on the Lock Screen."
+        case .unsupported:
+            return "Live Activities aren't supported on this device."
+        case .anotherEventAlreadyFocused:
+            return "Another event's Live Activity is already active."
+        case .requestFailed:
+            return "Couldn't start the Live Activity. Try again."
         }
     }
 

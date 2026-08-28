@@ -56,11 +56,11 @@ struct HomeView: View {
                     }
                 }
         }
-        .task { EventReconciliation.run(context: modelContext) }
+        .task { await EventReconciliation.run(context: modelContext) }
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {
             case .active:
-                EventReconciliation.run(context: modelContext)
+                Task { await EventReconciliation.run(context: modelContext) }
                 // docs/08-notifications.md "Replenishment" — foreground is one of the three
                 // triggers that picks anything trimmed by the pending-request cap back up.
                 // Passive: never prompts for permission.

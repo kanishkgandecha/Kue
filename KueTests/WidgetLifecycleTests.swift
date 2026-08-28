@@ -194,7 +194,7 @@ struct WidgetLifecycleTests {
         ModelContext(ModelContainerFactory.makeInMemory())
     }
 
-    @Test func reconciliationRunRecomputesStaleStatusJustLikeTheUnderlyingSweep() throws {
+    @Test func reconciliationRunRecomputesStaleStatusJustLikeTheUnderlyingSweep() async throws {
         let context = makeContext()
         let start = Date(timeIntervalSince1970: 1_000_000_000)
         let event = makeEvent(eventType: .deadline, startDate: start, estimatedDurationMinutes: 0)
@@ -203,18 +203,18 @@ struct WidgetLifecycleTests {
         try context.save()
 
         let now = start.addingTimeInterval(3600)
-        let changed = EventReconciliation.run(context: context, now: now)
+        let changed = await EventReconciliation.run(context: context, now: now)
 
         #expect(changed)
         #expect(event.status == .completed)
     }
 
-    @Test func reconciliationRunIsANoOpWhenNothingIsStale() throws {
+    @Test func reconciliationRunIsANoOpWhenNothingIsStale() async throws {
         let context = makeContext()
         let event = makeEvent(startDate: .distantFuture)
         context.insert(event)
         try context.save()
 
-        #expect(EventReconciliation.run(context: context) == false)
+        await #expect(EventReconciliation.run(context: context) == false)
     }
 }

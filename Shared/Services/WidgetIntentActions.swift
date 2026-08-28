@@ -72,8 +72,9 @@ enum WidgetIntentActions {
         context: ModelContext,
         scheduler: NotificationScheduling,
         widgetReloader: WidgetReloading,
+        liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared,
         now: Date = .now
-    ) throws -> TaskCompletionResult {
+    ) async throws -> TaskCompletionResult {
         guard let task = try? context.fetch(FetchDescriptor<KueTask>(predicate: #Predicate { $0.id == taskID })).first else {
             throw WidgetIntentError.taskNotFound
         }
@@ -90,6 +91,10 @@ enum WidgetIntentActions {
 
         EventStatusEngine.sweep(context: context, now: now)
         reloadAllWidgetKinds(widgetReloader)
+        // Kue 2.0 Phase 9 — section H: a completed task can change preparation progress/next-
+        // task on a focused Live Activity; awaited (not fire-and-forget) since a widget
+        // extension process can be suspended the instant `perform()` returns.
+        await LiveActivityReconciler.reconcile(context: context, manager: liveActivityManager, now: now)
 
         return TaskCompletionResult(taskTitle: task.title)
     }
@@ -112,6 +117,7 @@ enum WidgetIntentActions {
         context: ModelContext,
         scheduler: NotificationScheduling,
         widgetReloader: WidgetReloading,
+        liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared,
         now: Date = .now
     ) async throws -> TaskSnoozeResult {
         guard let task = try? context.fetch(FetchDescriptor<KueTask>(predicate: #Predicate { $0.id == taskID })).first else {
@@ -148,6 +154,7 @@ enum WidgetIntentActions {
 
         EventStatusEngine.sweep(context: context, now: now)
         reloadAllWidgetKinds(widgetReloader)
+        await LiveActivityReconciler.reconcile(context: context, manager: liveActivityManager, now: now)
 
         return TaskSnoozeResult(newDueDate: newDueDate, offsetLabel: newLabel)
     }
@@ -165,8 +172,9 @@ enum WidgetIntentActions {
         context: ModelContext,
         scheduler: NotificationScheduling,
         widgetReloader: WidgetReloading,
+        liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared,
         now: Date = .now
-    ) throws -> EventCompletionResult {
+    ) async throws -> EventCompletionResult {
         guard let event = try? context.fetch(FetchDescriptor<KueEvent>(predicate: #Predicate { $0.id == eventID })).first else {
             throw WidgetIntentError.eventNotFound
         }
@@ -184,6 +192,10 @@ enum WidgetIntentActions {
 
         EventStatusEngine.sweep(context: context, now: now)
         reloadAllWidgetKinds(widgetReloader)
+        // Completing the focused event ends its Live Activity via the terminal-state policy
+        // (`.completed` phase → `LiveActivityPolicy.completedGracePeriod`), never leaving it
+        // showing a stale "still counting down" state.
+        await LiveActivityReconciler.reconcile(context: context, manager: liveActivityManager, now: now)
 
         return EventCompletionResult(eventTitle: event.title)
     }

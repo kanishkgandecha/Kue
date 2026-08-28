@@ -554,6 +554,12 @@ struct EventFormView: View {
                 requestPermissionIfNeeded: true
             )
         }
+        // Kue 2.0 Phase 9 — section G: "event saved/edited" is an explicit reconciliation
+        // trigger — a focused Live Activity needs its title/dates/next-task refreshed the
+        // instant this save lands, same fire-and-forget shape as the reschedule Task above.
+        Task {
+            await LiveActivityReconciler.reconcile(context: modelContext, manager: SystemLiveActivityManager.shared, now: now)
+        }
         haptics.play(.eventCreated)
         dismiss()
     }

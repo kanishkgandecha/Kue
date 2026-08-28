@@ -44,6 +44,9 @@ struct RootTabView: View {
     /// navigation stacks" principle above.
     @State private var deepLinkedEvent: KueEvent?
     @State private var isShowingDedicatedCountdownHelp = false
+    // Kue 2.0 Phase 9 — docs/23 "J.": a stale/deleted event id now says so explicitly rather
+    // than silently doing nothing.
+    @State private var isShowingEventUnavailable = false
     @Environment(\.modelContext) private var modelContext
 
     var body: some View {
@@ -96,9 +99,12 @@ struct RootTabView: View {
             switch destination {
             case .event(let id):
                 // Requirement: "validate deep links and handle missing identifiers safely" —
-                // a stale/deleted id just does nothing rather than presenting an empty sheet.
+                // a stale/deleted id shows an honest unavailable message (docs/23 "J."),
+                // never a silent no-op or a redirect to a different event.
                 if let event = try? modelContext.fetch(FetchDescriptor<KueEvent>(predicate: #Predicate { $0.id == id })).first {
                     deepLinkedEvent = event
+                } else {
+                    isShowingEventUnavailable = true
                 }
             case .dedicatedCountdownHelp:
                 isShowingDedicatedCountdownHelp = true
@@ -111,6 +117,9 @@ struct RootTabView: View {
         }
         .sheet(isPresented: $isShowingDedicatedCountdownHelp) {
             DedicatedCountdownHelpView()
+        }
+        .sheet(isPresented: $isShowingEventUnavailable) {
+            EventUnavailableView()
         }
     }
 

@@ -16,6 +16,17 @@ struct KueApp: App {
     /// without relaunching the app.
     @State private var openOutcome: ModelContainerOpenOutcome
 
+    /// Kue 2.0 Phase 9 — resolved once at launch, not inline in `body`: unlike every other
+    /// fake-service factory in this file, `FakeLiveActivityManager` is a stateful reference
+    /// type a UI test flow relies on staying identical across navigation (start on event A,
+    /// navigate away, come back — the same fake must still remember it). `body` can be
+    /// re-evaluated more than once per process (scene reconnection events), and calling
+    /// `Self.makeLiveActivityManager()` inline there would silently hand a *fresh*
+    /// `FakeLiveActivityManager()` to whatever re-renders after that point, discarding
+    /// whichever activity the test had just started. `SystemLiveActivityManager.shared` is
+    /// already a singleton so this changes nothing for the production path.
+    private let liveActivityManager: LiveActivityManaging = Self.makeLiveActivityManager()
+
     /// docs/08-notifications.md "Replenishment" / docs/04-event-types.md "Reconciliation" —
     /// registering the launch handler must happen before the app finishes launching, which
     /// for a SwiftUI `App` means here, in `init()`, not later in `.task`/`onAppear`.
@@ -100,6 +111,9 @@ struct KueApp: App {
                     // Kue 2.0 Phase 7 — same launch-argument-gated seam as Calendar/OCR/Voice
                     // above: haptics never fire under `XCUIApplication` automation.
                     .environment(\.kueHaptics, Self.makeHapticPlayer())
+                    // Kue 2.0 Phase 9 — same seam again: real ActivityKit never runs under
+                    // `KueUITests` (docs/23-live-activities-and-focus-mode.md "A./L.").
+                    .environment(\.liveActivityManager, liveActivityManager)
                     .modelContainer(container)
             case .failure(let diagnostic):
                 StoreOpenFailureView(diagnostic: diagnostic) {
@@ -191,6 +205,12 @@ struct KueApp: App {
     @MainActor
     private static func makeVoiceSpeechRecognizer() -> VoiceSpeechRecognizing {
         FakeVoiceSpeechRecognizer.makeFromLaunchArguments() ?? SystemVoiceSpeechRecognizer()
+    }
+
+    /// Kue 2.0 Phase 9 — same "launch-argument-gated fake" shape as `makeCalendarProvider()`.
+    @MainActor
+    private static func makeLiveActivityManager() -> LiveActivityManaging {
+        FakeLiveActivityManager.makeFromLaunchArguments() ?? SystemLiveActivityManager.shared
     }
 
     /// Kue 2.0 Phase 7 — UI tests already launch with one of the fake-service arguments above

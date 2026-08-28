@@ -22,12 +22,20 @@ struct SettingsView: View {
     @Environment(\.calendarProvider) private var calendarProvider
     // Kue 2.0 Phase 7 — requirement 32/34: the one destructive confirmation this screen has.
     @Environment(\.kueHaptics) private var haptics
+    // Kue 2.0 Phase 9 — same DI seam Event Detail's Focus section reads.
+    @Environment(\.liveActivityManager) private var liveActivityManager
     @State private var preference: UserPreference?
     @State private var authorizationStatus: UNAuthorizationStatus = .notDetermined
     @State private var isConfirmingDeleteEverything = false
     // Kue 2.0 Phase 4 — Calendar section (docs/18-calendar-integration.md "Settings").
     @State private var calendarAuthorizationState: CalendarAuthorizationState = .notDetermined
     @State private var isRequestingCalendarAccess = false
+
+    // MARK: Kue 2.0 Phase 9 — Live Activity focus management (docs/23 "F./I.")
+    @State private var focusedLiveActivityEvent: KueEvent?
+    @State private var isPerformingLiveActivityAction = false
+    @State private var showLiveActivityTitle = LiveActivityPrivacyPreference.current.showTitle
+    @State private var showLiveActivityNextTask = LiveActivityPrivacyPreference.current.showNextTask
 
     /// Injected for tests (requirement 10) — the live default is what KueApp effectively
     /// uses everywhere else.
@@ -107,6 +115,54 @@ struct SettingsView: View {
             }
 
             Section {
+                Toggle("Show Event Title", isOn: Binding(
+                    get: { showLiveActivityTitle },
+                    set: { newValue in
+                        showLiveActivityTitle = newValue
+                        LiveActivityPrivacyPreference.setShowTitle(newValue)
+                        Task { await LiveActivityReconciler.reconcile(context: modelContext, manager: liveActivityManager) }
+                    }
+                ))
+                .accessibilityIdentifier("liveActivityShowTitleToggle")
+                Toggle("Show Next Task", isOn: Binding(
+                    get: { showLiveActivityNextTask },
+                    set: { newValue in
+                        showLiveActivityNextTask = newValue
+                        LiveActivityPrivacyPreference.setShowNextTask(newValue)
+                        Task { await LiveActivityReconciler.reconcile(context: modelContext, manager: liveActivityManager) }
+                    }
+                ))
+                .accessibilityIdentifier("liveActivityShowNextTaskToggle")
+
+                if let focusedLiveActivityEvent {
+                    NavigationLink(destination: EventDetailView(event: focusedLiveActivityEvent)) {
+                        Label(focusedLiveActivityEvent.title, systemImage: "bolt.fill")
+                    }
+                    .accessibilityIdentifier("openFocusedLiveActivityEventLink")
+                    Button("Stop Live Activity", role: .destructive) {
+                        let eventID = focusedLiveActivityEvent.id
+                        isPerformingLiveActivityAction = true
+                        Task {
+                            await LiveActivityFocusCoordinator.stopFocus(eventID: eventID, manager: liveActivityManager)
+                            self.focusedLiveActivityEvent = nil
+                            isPerformingLiveActivityAction = false
+                        }
+                    }
+                    .accessibilityIdentifier("settingsStopLiveActivityButton")
+                    .disabled(isPerformingLiveActivityAction)
+                } else {
+                    Text("No event currently has an active Live Activity.")
+                        .foregroundStyle(KueColor.secondaryText)
+                        .accessibilityIdentifier("noFocusedLiveActivityLabel")
+                }
+            } header: {
+                Text("Live Activity")
+            } footer: {
+                // docs/23 "I." — exact privacy matrix: title defaults on, next task defaults off.
+                Text("Kue tracks one event's Live Activity at a time, shown on the Lock Screen and Dynamic Island. The next task's title stays hidden until you turn it on.")
+            }
+
+            Section {
                 Button("Delete Everything", role: .destructive) {
                     isConfirmingDeleteEverything = true
                 }
@@ -125,6 +181,11 @@ struct SettingsView: View {
             // Requirement 6: a pure state *read*, never a request — `authorizationState()`
             // itself never prompts.
             calendarAuthorizationState = calendarProvider.authorizationState()
+            if let focusedID = await liveActivityManager.focusedEventID() {
+                focusedLiveActivityEvent = (try? modelContext.fetch(
+                    FetchDescriptor<KueEvent>(predicate: #Predicate { $0.id == focusedID })
+                ))?.first
+            }
         }
         .confirmationDialog(
             "Delete all events and reset settings? This can't be undone.",

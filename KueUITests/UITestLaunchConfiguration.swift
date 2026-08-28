@@ -69,6 +69,11 @@ enum UITestLaunchConfiguration {
     /// Must match `FakeVoiceAudioSessionManager.uiTestSimulateInterruptionArgument` exactly.
     static let fakeVoiceInterruptionArgument = "-uiTestFakeVoiceInterruption"
 
+    /// Kue 2.0 Phase 9 — must match `FakeLiveActivityManager.uiTestLaunchArgument` exactly.
+    /// `KueApp` installs a `FakeLiveActivityManager` in place of `SystemLiveActivityManager`
+    /// when present — real ActivityKit never runs under `KueUITests`.
+    static let fakeLiveActivityArgument = "-uiTestFakeLiveActivity"
+
     /// The simulator's interface orientation is a *device*-level property, not scoped to one
     /// app process — it doesn't reset just because a test relaunches the app. A stray rotation
     /// left over from an earlier test (or an earlier run against the same booted simulator)

@@ -58,8 +58,8 @@ enum HomeTimelineGrouping {
 
     /// Requirement: "current and upcoming events" — completed/cancelled events never appear
     /// here (see this file's header); everything else is grouped by calendar date.
-    static func timelineEligible(_ event: KueEvent) -> Bool {
-        let status = EventStatusEngine.derive(for: event)
+    static func timelineEligible(_ event: KueEvent, now: Date = .now) -> Bool {
+        let status = EventStatusEngine.derive(for: event, now: now)
         return status != .completed && status != .cancelled
     }
 
@@ -68,7 +68,7 @@ enum HomeTimelineGrouping {
     /// (`EventStatusEngine.derive(for:now:)`, `VoiceInputCoordinator.tick(now:)`) — tests pass
     /// a fixed reference date instead of depending on wall-clock time.
     static func sections(events: [KueEvent], now: Date = .now) -> [HomeTimelineSection] {
-        let eligible = events.filter(timelineEligible)
+        let eligible = events.filter { timelineEligible($0, now: now) }
         guard !eligible.isEmpty else { return [] }
 
         // Group by (event's own pinned-timezone) calendar day.
@@ -83,7 +83,7 @@ enum HomeTimelineGrouping {
         var laterEvents: [KueEvent] = []
 
         for (index, day) in sortedDays.enumerated() {
-            let dayEvents = order(byDay[day] ?? [])
+            let dayEvents = order(byDay[day] ?? [], now: now)
             if index < maximumIndividualDateSections {
                 let (kind, title) = kindAndTitle(for: day, now: now)
                 sections.append(HomeTimelineSection(kind: kind, title: title, events: dayEvents))
@@ -141,10 +141,10 @@ enum HomeTimelineGrouping {
 
     // MARK: - Within-section ordering (requirement: deterministic, stable across reloads)
 
-    private static func order(_ events: [KueEvent]) -> [KueEvent] {
+    private static func order(_ events: [KueEvent], now: Date) -> [KueEvent] {
         events.sorted { lhs, rhs in
-            let lhsStatus = EventStatusEngine.derive(for: lhs)
-            let rhsStatus = EventStatusEngine.derive(for: rhs)
+            let lhsStatus = EventStatusEngine.derive(for: lhs, now: now)
+            let rhsStatus = EventStatusEngine.derive(for: rhs, now: now)
             if (lhsStatus == .active) != (rhsStatus == .active) { return lhsStatus == .active }
             if lhs.isAllDay != rhs.isAllDay { return lhs.isAllDay }
             if lhs.startDate != rhs.startDate { return lhs.startDate < rhs.startDate }
