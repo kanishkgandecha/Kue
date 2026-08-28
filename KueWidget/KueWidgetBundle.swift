@@ -14,5 +14,12 @@ struct KueWidgetBundle: WidgetBundle {
         DedicatedCountdownWidget()
         // Kue 2.0 Phase 9 — see docs/23-live-activities-and-focus-mode.md.
         KueLiveActivityWidget()
+        // Kue 2.0 Phase 10 — see docs/24-siri-shortcuts-spotlight-and-controls.md "H."
+        // `ControlWidget`s are auto-adapted into `Widget`s by `WidgetBundleBuilder` itself —
+        // no separate `ControlWidgetBundle`/`@main` needed.
+        QuickAddControl()
+        ShowNextEventControl()
+        CompleteNextTaskControl()
+        StopFocusControl()
     }
 }

@@ -114,6 +114,19 @@ struct SettingsView: View {
                 }
             }
 
+            // Kue 2.0 Phase 10 — docs/24 "L." Not a new bottom tab; reached from here exactly
+            // like every other Settings sub-surface (Calendar/Live Activity above).
+            Section {
+                NavigationLink {
+                    SystemIntegrationSettingsView()
+                } label: {
+                    Label("Siri, Shortcuts & Spotlight", systemImage: "mic.circle")
+                }
+                .accessibilityIdentifier("systemIntegrationSettingsLink")
+            } footer: {
+                Text("Create, find, and manage events with Siri and Shortcuts; find them in Spotlight; use Control Center and Lock Screen controls.")
+            }
+
             Section {
                 Toggle("Show Event Title", isOn: Binding(
                     get: { showLiveActivityTitle },

@@ -27,6 +27,11 @@ struct KueApp: App {
     /// already a singleton so this changes nothing for the production path.
     private let liveActivityManager: LiveActivityManaging = Self.makeLiveActivityManager()
 
+    /// Kue 2.0 Phase 10 — same "resolved once at launch, not inline in `body`" reasoning as
+    /// `liveActivityManager` immediately above: `FakeSpotlightIndexer` is stateful, and a UI
+    /// test flow (index → verify → remove) needs the identical instance across navigation.
+    private let spotlightIndexer: SpotlightIndexing = Self.makeSpotlightIndexer()
+
     /// docs/08-notifications.md "Replenishment" / docs/04-event-types.md "Reconciliation" —
     /// registering the launch handler must happen before the app finishes launching, which
     /// for a SwiftUI `App` means here, in `init()`, not later in `.task`/`onAppear`.
@@ -114,6 +119,9 @@ struct KueApp: App {
                     // Kue 2.0 Phase 9 — same seam again: real ActivityKit never runs under
                     // `KueUITests` (docs/23-live-activities-and-focus-mode.md "A./L.").
                     .environment(\.liveActivityManager, liveActivityManager)
+                    // Kue 2.0 Phase 10 — same seam again: real Core Spotlight indexing never
+                    // runs under `KueUITests` (docs/24-siri-shortcuts-spotlight-and-controls.md).
+                    .environment(\.spotlightIndexer, spotlightIndexer)
                     .modelContainer(container)
             case .failure(let diagnostic):
                 StoreOpenFailureView(diagnostic: diagnostic) {
@@ -211,6 +219,12 @@ struct KueApp: App {
     @MainActor
     private static func makeLiveActivityManager() -> LiveActivityManaging {
         FakeLiveActivityManager.makeFromLaunchArguments() ?? SystemLiveActivityManager.shared
+    }
+
+    /// Kue 2.0 Phase 10 — same shape again.
+    @MainActor
+    private static func makeSpotlightIndexer() -> SpotlightIndexing {
+        FakeSpotlightIndexer.makeFromLaunchArguments() ?? SystemSpotlightIndexer.shared
     }
 
     /// Kue 2.0 Phase 7 — UI tests already launch with one of the fake-service arguments above

@@ -14,7 +14,11 @@ import SwiftData
 
 enum EventReconciliation {
     @discardableResult
-    static func run(context: ModelContext, now: Date = .now, liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared) async -> Bool {
+    static func run(
+        context: ModelContext, now: Date = .now,
+        liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared,
+        spotlightIndexer: SpotlightIndexing = SystemSpotlightIndexer.shared
+    ) async -> Bool {
         let statusChanged = EventStatusEngine.sweep(context: context, now: now)
         // Kue 2.0 Phase 3 — docs/17-recurring-events.md "Reconciliation wiring": replenish the
         // rolling occurrence horizon at exactly the same points status reconciliation already
@@ -23,6 +27,12 @@ enum EventReconciliation {
         let changed = statusChanged || occurrencesChanged
         if changed {
             EventActions.reloadWidget()
+            // Kue 2.0 Phase 10 — docs/24 "G.": a *passive*, date-driven status change (e.g.
+            // Tomorrow → Today → auto-archived) never goes through `EventActions`/
+            // `WidgetIntentActions`, so nothing else keeps Spotlight's status label current for
+            // it. Bounded to only when something actually changed (never on every idle sweep)
+            // and fire-and-forget so this never blocks foreground UI.
+            Task { await SpotlightReconciliation.reindexAll(context: context, indexer: spotlightIndexer, now: now) }
         }
         // Kue 2.0 Phase 9 — section G: "app active" is one of the reconciliation triggers, and
         // this is the single sweep point HomeView/BackgroundRefreshHandler already both route

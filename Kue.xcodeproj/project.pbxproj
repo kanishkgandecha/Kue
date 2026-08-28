@@ -90,6 +90,26 @@
 		C70FEA0CE5330D431747B4A9 /* Exceptions for "Kue" folder in "KueShare" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				AppIntents/CancelEventIntent.swift,
+				AppIntents/CompleteEventIntent.swift,
+				AppIntents/CompleteNextTaskIntent.swift,
+				AppIntents/CreateEventFromTemplateIntent.swift,
+				AppIntents/CreateEventIntent.swift,
+				AppIntents/EventTypeOption.swift,
+				AppIntents/FindEventsIntent.swift,
+				AppIntents/KueAppEventOptionsProvider.swift,
+				AppIntents/KueIntentError.swift,
+				AppIntents/KueIntentSupport.swift,
+				AppIntents/KueShortcuts.swift,
+				AppIntents/OpenEventIntent.swift,
+				AppIntents/QuickAddEventIntent.swift,
+				AppIntents/RestoreEventIntent.swift,
+				AppIntents/ShowNextEventIntent.swift,
+				AppIntents/ShowTodaysEventsIntent.swift,
+				AppIntents/SkipEventIntent.swift,
+				AppIntents/SnoozeNextTaskIntent.swift,
+				AppIntents/StartEventFocusIntent.swift,
+				AppIntents/StopEventFocusIntent.swift,
 				Info.plist,
 				KueApp.swift,
 			);

@@ -359,6 +359,44 @@ were removed, leaving only concise fault-only logging. See
 `docs/23-live-activities-and-focus-mode.md` for the full contract, the terminal-state grace
 periods, the privacy matrix, and the deferred physical-device manual-verification checklist.
 
+**Kue 2.0 Phase 10 ("Siri, Shortcuts, Spotlight, and System Controls") is done.**
+`Shared/Services/AppIntents/` (`EventResolutionService` — pure event lookup/disambiguation,
+reusing `WidgetContentService.nextUpEvent` for "next event" verbatim, never a re-derived rule;
+`SpotlightIndexing`/`SystemSpotlightIndexer`/`FakeSpotlightIndexer`/
+`SpotlightIndexingPreference`/`SpotlightReconciliation`) plus `Kue/AppIntents/` (15 App
+Intents: Create/Quick Add/Find/Open/Complete/Cancel/Skip/Restore Event, Complete/Snooze Next
+Task, Start/Stop Event Focus, Show Next Event/Today's Events, Create from Template, plus
+`KueShortcuts: AppShortcutsProvider`) plus `Kue/Features/SystemIntegration/` (Settings
+sub-screen, no new bottom tab) plus 4 `ControlWidget`s in `KueWidget/KueControls.swift`
+(Quick Add/Show Next Event open the app; Complete Next Task/Stop Focus act silently). Every
+mutating intent reuses an existing service (`EventActions`/`WidgetIntentActions`/
+`EventCreationService` — the last one new, extracted from `EventFormView.save()`'s `.add` case
+so App Intents share the exact same create path) — no duplicated mutation logic anywhere.
+**Central architectural decision**: given Phase 8's real "AppEntity is not a registered
+identifier" failure, Phase 10 uses zero `AppEntity` types anywhere — every event-referencing
+parameter is a plain UUID `String` backed by a `DynamicOptionsProvider`
+(`KueAppEventOptionsProvider`, mirroring `KueEventOptionsProvider` exactly), confirmed via the
+generated `Metadata.appintents/extract.actionsdata` (`entities: {}` in both the `Kue` and
+`KueWidget` targets — inspected directly after a real build). `AppEnum` (a compile-time,
+registry-free mechanism) is used for closed-set choices (`EventTypeOption`/
+`EventTemplateOption`/`FindEventsScope`) instead. iOS caps AppShortcuts at 10 per app (a real,
+enforced limit — 15 intents failed the build until curated); `KueShortcuts` ships the 10 most
+distinct ones. `KueDeepLink` gained 6 new destinations (Quick Add, NL text, Today, Search,
+Templates, Live Activity focus) — same one parser, no second scheme. `EventActions`/
+`WidgetIntentActions`/`PrivacyActions`/`EventReconciliation` all gained a `spotlightIndexer`
+consistency dimension, the same DI shape `liveActivityManager` already established — every
+mutation keeps Spotlight's copy of the event current, bounded and fire-and-forget/awaited
+matching the same process-suspension reasoning Phase 9's Live Activity wiring already uses.
+**Real cross-target bug found and fixed**: `Kue/` is a `PBXFileSystemSynchronizedRootGroup`
+shared with the `KueShare` Share Extension target — a `UIApplication.shared` call added to
+`Kue/AppIntents/KueIntentSupport.swift` broke the `KueShare` build (`UIApplication` is
+extension-unavailable) until those files were explicitly excluded from that target's
+membership (per-file `membershipExceptions` in `project.pbxproj`; a directory-level exception
+entry was tried first and silently didn't take effect). See
+`docs/24-siri-shortcuts-spotlight-and-controls.md` for the full intent catalog, confirmation
+matrix, Spotlight lifecycle, Control Widget behavior, and the deferred Siri/Shortcuts-app/
+Spotlight-UI/Control-Center manual-verification checklist.
+
 ## Project structure
 
 ```

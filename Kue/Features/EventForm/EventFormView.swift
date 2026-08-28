@@ -28,6 +28,11 @@ struct EventFormView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.nlParser) private var nlParser
     @Environment(\.aiAvailabilityChecker) private var aiAvailabilityChecker
+    // Kue 2.0 Phase 10 — read through the environment (not the bare singleton) so a UI test's
+    // fakes are honored here too; `save()` previously called `SystemLiveActivityManager.shared`
+    // directly, a real inconsistency with every other Live-Activity-reading call site.
+    @Environment(\.liveActivityManager) private var liveActivityManager
+    @Environment(\.spotlightIndexer) private var spotlightIndexer
     // Kue 2.0 Phase 7 — requirement 32/34: a successful create/save gets one restrained
     // confirmation haptic; never the real Taptic Engine under `KueUITests`.
     @Environment(\.kueHaptics) private var haptics
@@ -469,40 +474,12 @@ struct EventFormView: View {
         // this is the only point that can still name them.
         var staleIdentifiers: [String] = []
 
+        var createdEvent: KueEvent?
         switch mode {
         case .add(_):
-            let event = KueEvent(
-                title: title,
-                eventType: draft.eventType,
-                startDate: draft.startDate,
-                endDate: draft.eventType == .trip ? draft.endDate : nil,
-                estimatedDurationMinutes: draft.eventType.defaultEstimatedDurationMinutes,
-                isAllDay: draft.isAllDay,
-                location: draft.location.isEmpty ? nil : draft.location,
-                notes: draft.notes.isEmpty ? nil : draft.notes,
-                source: draftSource,
-                priority: draft.priority,
-                // Kue 2.0 Phase 4 — nil for every non-Calendar-import draft; set only when
-                // this draft came from CalendarImportPipeline (requirement 16: reuse this
-                // exact save() path unchanged for the persistence side).
-                externalCalendarEventIdentifier: draft.externalCalendarEventIdentifier,
-                externalCalendarIdentifier: draft.externalCalendarIdentifier,
-                externalCalendarTitle: draft.externalCalendarTitle,
-                externalCalendarLastKnownModifiedAt: draft.externalCalendarLastKnownModifiedAt
-            )
-            EventStatusEngine.reconcile(event, now: now)
-            modelContext.insert(event)
-            let widgetConfiguration = WidgetConfiguration(
-                event: event,
-                widgetType: WidgetType.defaultType(for: draft.eventType)
-            )
-            modelContext.insert(widgetConfiguration)
-            event.widgetConfiguration = widgetConfiguration
-            SchedulingEngine.regenerateTasks(for: event, context: modelContext, now: now)
-            // Kue 2.0 Phase 3 — docs/17-recurring-events.md: a brand-new recurring event
-            // becomes the origin of a fresh series; the rest of the initial horizon is
-            // materialized immediately, same as this event's own tasks just were.
-            startSeriesIfNeeded(for: event, now: now)
+            // Kue 2.0 Phase 10 — shared with App Intents (`EventCreationService.swift`), so
+            // Siri/Shortcuts-created events go through the identical construction sequence.
+            createdEvent = EventCreationService.create(from: draft, source: draftSource, context: modelContext, now: now)
         case .edit(let event):
             if event.seriesID != nil {
                 // Kue 2.0 Phase 3 — route through the This Occurrence / This and Future split.
@@ -530,6 +507,7 @@ struct EventFormView: View {
                 // Kue 2.0 Phase 3 — a plain event can start a fresh series from an edit too.
                 startSeriesIfNeeded(for: event, now: now)
             }
+            createdEvent = event
         }
 
         try? modelContext.save()
@@ -545,20 +523,16 @@ struct EventFormView: View {
         if !staleIdentifiers.isEmpty {
             SystemNotificationScheduler.shared.removePendingNotificationRequests(withIdentifiers: staleIdentifiers)
         }
-        Task {
-            let intensity = UserPreferenceStore.current(context: modelContext).notificationIntensity
-            await NotificationEngine.reschedule(
-                context: modelContext,
-                intensity: intensity,
-                scheduler: SystemNotificationScheduler.shared,
-                requestPermissionIfNeeded: true
-            )
-        }
-        // Kue 2.0 Phase 9 — section G: "event saved/edited" is an explicit reconciliation
-        // trigger — a focused Live Activity needs its title/dates/next-task refreshed the
-        // instant this save lands, same fire-and-forget shape as the reschedule Task above.
-        Task {
-            await LiveActivityReconciler.reconcile(context: modelContext, manager: SystemLiveActivityManager.shared, now: now)
+        // Kue 2.0 Phase 9/10 — "event saved/edited" is an explicit reconciliation trigger for
+        // both the focused Live Activity and Spotlight's copy of this event; fire-and-forget
+        // so the sheet dismisses instantly rather than waiting on these round trips.
+        if let createdEvent {
+            Task {
+                await EventCreationService.reconcileAfterWrite(
+                    createdEvent, context: modelContext, now: now,
+                    liveActivityManager: liveActivityManager, spotlightIndexer: spotlightIndexer
+                )
+            }
         }
         haptics.play(.eventCreated)
         dismiss()

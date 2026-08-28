@@ -47,7 +47,22 @@ struct RootTabView: View {
     // Kue 2.0 Phase 9 — docs/23 "J.": a stale/deleted event id now says so explicitly rather
     // than silently doing nothing.
     @State private var isShowingEventUnavailable = false
+    // Kue 2.0 Phase 10 — docs/24 "J." deep-link destinations.
+    @State private var pendingSearchQuery: String?
+    @State private var quickAddFormInput: QuickAddFormInput?
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.nlParser) private var nlParser
+    @Environment(\.aiAvailabilityChecker) private var aiAvailabilityChecker
+
+    /// Bundles what `EventFormView(prefilledDraft:ambiguities:source:)` needs for a
+    /// `kue://quick-add-text` deep link — same shape `ShareExtensionRootView.FormInput`
+    /// (KueShare/) already establishes for the identical "parse, then present pre-filled"
+    /// contract, just app-side.
+    private struct QuickAddFormInput: Identifiable {
+        let id = UUID()
+        var draft: EventDraft
+        var ambiguities: [DraftAmbiguity]
+    }
 
     var body: some View {
         TabView(selection: $selection) {
@@ -57,7 +72,7 @@ struct RootTabView: View {
             .accessibilityIdentifier("tab-home")
 
             Tab("Search", systemImage: "magnifyingglass", value: RootDestination.search) {
-                SearchView()
+                SearchView(pendingQuery: $pendingSearchQuery)
             }
             .accessibilityIdentifier("tab-search")
 
@@ -108,6 +123,20 @@ struct RootTabView: View {
                 }
             case .dedicatedCountdownHelp:
                 isShowingDedicatedCountdownHelp = true
+            case .quickAdd:
+                selection = .add
+            case .addFromText(let text):
+                selection = .add
+                Task { await presentQuickAddForm(text: text) }
+            case .today:
+                selection = .home
+            case .search(let query):
+                selection = .search
+                pendingSearchQuery = query ?? ""
+            case .templates:
+                selection = .templates
+            case .liveActivityFocus:
+                selection = .settings
             }
         }
         .sheet(item: $deepLinkedEvent) { event in
@@ -120,6 +149,38 @@ struct RootTabView: View {
         }
         .sheet(isPresented: $isShowingEventUnavailable) {
             EventUnavailableView()
+        }
+        .sheet(item: $quickAddFormInput) { input in
+            EventFormView(prefilledDraft: input.draft, ambiguities: input.ambiguities, source: .shortcuts)
+        }
+    }
+
+    /// Kue 2.0 Phase 10 — docs/24 "F." Re-runs the *same* `NLParsingPipeline` typed Quick Add
+    /// uses (never a second parser), respecting the same AI-off/unavailable fallbacks
+    /// `ShareExtensionRootView` (KueShare/) already establishes, then presents the identical
+    /// prefilled `EventFormView` confirmation sheet — nothing is persisted until that sheet's
+    /// own Create button runs.
+    @available(iOS 26.0, *)
+    private func presentQuickAddForm(text: String) async {
+        guard UserPreferenceStore.current(context: modelContext).aiParsingEnabled else {
+            var draft = EventDraft()
+            draft.title = text
+            quickAddFormInput = QuickAddFormInput(draft: draft, ambiguities: [])
+            return
+        }
+        guard aiAvailabilityChecker.currentAvailability().isAvailable else {
+            var draft = EventDraft()
+            draft.title = text
+            quickAddFormInput = QuickAddFormInput(draft: draft, ambiguities: [])
+            return
+        }
+        let outcome = await NLParsingPipeline.run(text: text, parser: nlParser, timeZoneIdentifier: TimeZone.current.identifier)
+        if let draft = outcome.draft {
+            quickAddFormInput = QuickAddFormInput(draft: draft, ambiguities: outcome.ambiguities)
+        } else {
+            var draft = EventDraft()
+            draft.title = text
+            quickAddFormInput = QuickAddFormInput(draft: draft, ambiguities: [])
         }
     }
 

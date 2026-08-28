@@ -20,6 +20,19 @@ struct SearchView: View {
     @State private var sortOption: EventListQueryEngine.SortOption = .default
     @State private var isShowingFilterSort = false
 
+    /// Kue 2.0 Phase 10 — `RootTabView`'s `kue://search?q=` deep link (docs/24 "J.") applies
+    /// here via `.onChange`, not via `init`-seeded `@State`: `TabView` keeps each tab's content
+    /// view alive across selection changes (this file's own Phase 7 header), so a *repeat* deep
+    /// link after the user has already visited Search once would otherwise silently do nothing
+    /// — `init`-seeded state only applies the first time a view is constructed. A separate
+    /// external-trigger `Binding` (rather than binding `searchText` itself) keeps normal typing
+    /// entirely unaffected: `pendingQuery` only ever pushes a value in, never reads one back.
+    @Binding private var pendingQuery: String?
+
+    init(pendingQuery: Binding<String?> = .constant(nil)) {
+        _pendingQuery = pendingQuery
+    }
+
     private var isDefaultFilterAndSort: Bool {
         filter == .default && sortOption == .default
     }
@@ -55,7 +68,15 @@ struct SearchView: View {
                     EventFilterSortSheet(filter: $filter, sortOption: $sortOption)
                 }
                 .searchable(text: $searchText, prompt: "Search title, location, or notes")
+                .onAppear { applyPendingQueryIfNeeded() }
+                .onChange(of: pendingQuery) { applyPendingQueryIfNeeded() }
         }
+    }
+
+    private func applyPendingQueryIfNeeded() {
+        guard let pendingQuery else { return }
+        searchText = pendingQuery
+        self.pendingQuery = nil
     }
 
     @ViewBuilder

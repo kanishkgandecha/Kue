@@ -65,7 +65,37 @@ struct PrivacyActionsTests {
         let context = makeContext()
         let reloader = FakeWidgetReloader()
         PrivacyActions.deleteEverything(context: context, scheduler: FakeNotificationScheduler(), widgetReloader: reloader)
-        #expect(reloader.reloadedKinds == [WidgetKind.kue])
+        // Kue 2.0 Phase 10 — docs/24 "I.": both widget kinds reload now, matching every other
+        // mutation path (`EventActions.reloadWidget`/`WidgetIntentActions.reloadAllWidgetKinds`).
+        #expect(reloader.reloadedKinds == [WidgetKind.kue, WidgetKind.dedicatedCountdown])
+    }
+
+    /// Kue 2.0 Phase 10 — docs/24 "I.": nothing left to focus once every event is gone.
+    @Test func endsAnyFocusedLiveActivity() async throws {
+        let context = makeContext()
+        let event = KueEvent(title: "Interview", eventType: .interview, startDate: .now.addingTimeInterval(86_400), estimatedDurationMinutes: 60, source: .manual)
+        context.insert(event)
+        try? context.save()
+        let manager = FakeLiveActivityManager()
+        _ = await manager.start(for: event, now: .now)
+        #expect(manager.runningEventID == event.id)
+
+        #expect(PrivacyActions.deleteEverything(context: context, scheduler: FakeNotificationScheduler(), widgetReloader: FakeWidgetReloader(), liveActivityManager: manager))
+        try await Task.sleep(nanoseconds: 50_000_000) // fire-and-forget Task
+        #expect(manager.runningEventID == nil)
+    }
+
+    @Test func removesEverySpotlightEntry() async throws {
+        let context = makeContext()
+        let event = KueEvent(title: "Interview", eventType: .interview, startDate: .now.addingTimeInterval(86_400), estimatedDurationMinutes: 60, source: .manual)
+        context.insert(event)
+        try? context.save()
+        let indexer = FakeSpotlightIndexer()
+        await indexer.index([SpotlightEventPayloadBuilder.payload(for: event)])
+
+        #expect(PrivacyActions.deleteEverything(context: context, scheduler: FakeNotificationScheduler(), widgetReloader: FakeWidgetReloader(), spotlightIndexer: indexer))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(indexer.indexedPayloads.isEmpty)
     }
 
     @Test func isANoOpSuccessWhenThereWasNothingToDelete() {

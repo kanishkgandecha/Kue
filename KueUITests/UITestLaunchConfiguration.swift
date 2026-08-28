@@ -74,6 +74,11 @@ enum UITestLaunchConfiguration {
     /// when present — real ActivityKit never runs under `KueUITests`.
     static let fakeLiveActivityArgument = "-uiTestFakeLiveActivity"
 
+    /// Kue 2.0 Phase 10 — must match `FakeSpotlightIndexer.uiTestLaunchArgument` exactly.
+    /// `KueApp` installs a `FakeSpotlightIndexer` in place of `SystemSpotlightIndexer` when
+    /// present — the real on-device Core Spotlight index never runs under `KueUITests`.
+    static let fakeSpotlightArgument = "-uiTestFakeSpotlight"
+
     /// The simulator's interface orientation is a *device*-level property, not scoped to one
     /// app process — it doesn't reset just because a test relaunches the app. A stray rotation
     /// left over from an earlier test (or an earlier run against the same booted simulator)

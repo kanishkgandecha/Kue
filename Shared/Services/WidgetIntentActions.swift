@@ -173,6 +173,7 @@ enum WidgetIntentActions {
         scheduler: NotificationScheduling,
         widgetReloader: WidgetReloading,
         liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared,
+        spotlightIndexer: SpotlightIndexing = SystemSpotlightIndexer.shared,
         now: Date = .now
     ) async throws -> EventCompletionResult {
         guard let event = try? context.fetch(FetchDescriptor<KueEvent>(predicate: #Predicate { $0.id == eventID })).first else {
@@ -196,6 +197,10 @@ enum WidgetIntentActions {
         // (`.completed` phase → `LiveActivityPolicy.completedGracePeriod`), never leaving it
         // showing a stale "still counting down" state.
         await LiveActivityReconciler.reconcile(context: context, manager: liveActivityManager, now: now)
+        // Kue 2.0 Phase 10 — a status change is exactly the field Spotlight's copy needs kept
+        // current (docs/24 "G."); awaited for the same widget-extension-suspension-risk reason
+        // the Live Activity reconcile above already is.
+        await spotlightIndexer.index([SpotlightEventPayloadBuilder.payload(for: event, now: now)])
 
         return EventCompletionResult(eventTitle: event.title)
     }

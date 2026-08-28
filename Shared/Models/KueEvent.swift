@@ -49,6 +49,15 @@ enum EventSource: String, Codable, CaseIterable {
     /// reviewed/edited by the user, then routed through the exact same `NLParsingPipeline`
     /// typed natural-language text uses — not a separate voice-specific parser (requirement 43).
     case voice
+    /// Kue 2.0 Phase 10 — docs/24-siri-shortcuts-spotlight-and-controls.md. Created via an App
+    /// Intent (Siri, the Shortcuts app, or a Control Center/Lock Screen control), structured or
+    /// natural-language alike — a surface-based case, same precedent as `.shareSheet` (the
+    /// Share Extension's own NL-parsed events get `.shareSheet`, not `.naturalLanguage`, for
+    /// the identical "which entry surface" reason). Not a schema change: `EventSource` is a
+    /// plain `Codable` enum field, not itself frozen/versioned by `KueSchemaV1`'s nested
+    /// `KueEvent` copy (that copy references this live type directly), so a new case needs no
+    /// migration stage.
+    case shortcuts
 }
 
 enum Priority: String, Codable, CaseIterable {
