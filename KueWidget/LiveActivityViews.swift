@@ -42,6 +42,7 @@ private func statusLine(_ state: ContentState) -> String {
         }
     }
     switch state.phase {
+    case .awaitingOutcome: return "Needs Review"
     case .completed: return "Completed"
     case .removed: return "Archived"
     default: return state.countdownSubline ?? state.eventTypeDisplayName
@@ -61,6 +62,7 @@ private func statusSymbol(_ state: ContentState) -> String {
         }
     }
     switch state.phase {
+    case .awaitingOutcome: return "questionmark.circle"
     case .completed: return "checkmark.circle.fill"
     case .removed: return "archivebox"
     default: return state.isUrgent ? "exclamationmark.triangle.fill" : "clock"
@@ -113,8 +115,11 @@ struct LiveActivityLockScreenView: View {
 
             // Section H — reuses the exact same App Intents the ordinary widgets already use;
             // omitted entirely (not shown disabled) once the event is terminal, matching
-            // "omit rather than presenting a nonfunctional control."
-            if state.terminal == nil, state.phase != .completed, state.phase != .removed {
+            // "omit rather than presenting a nonfunctional control." Kue 2.0 Phase 10.1 —
+            // docs/25 "G.": Awaiting Outcome is neither terminal nor "still tracking" — never
+            // offer a one-tap `CompleteEventIntent` here (that's exactly the silent-completion
+            // risk this phase corrects); a `Link` to the exact event's outcome flow instead.
+            if state.terminal == nil, state.phase != .completed, state.phase != .removed, state.phase != .awaitingOutcome {
                 HStack(spacing: 8) {
                     if let nextTaskID = state.nextTaskID {
                         Button(intent: CompleteTaskIntent(taskID: nextTaskID)) {
@@ -136,6 +141,14 @@ struct LiveActivityLockScreenView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
+            } else if state.phase == .awaitingOutcome {
+                Link(destination: KueDeepLink.url(for: .event(attributes.eventID))) {
+                    Label("Confirm Outcome", systemImage: "questionmark.circle")
+                        .font(.caption2)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .tint(.orange)
             }
         }
         .padding(.vertical, 2)
@@ -201,7 +214,7 @@ struct LiveActivityDynamicIslandExpandedBottom: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
-            if state.terminal == nil, state.phase != .completed, state.phase != .removed {
+            if state.terminal == nil, state.phase != .completed, state.phase != .removed, state.phase != .awaitingOutcome {
                 HStack(spacing: 8) {
                     if let nextTaskID = state.nextTaskID {
                         Button(intent: CompleteTaskIntent(taskID: nextTaskID)) {
@@ -215,6 +228,14 @@ struct LiveActivityDynamicIslandExpandedBottom: View {
                 .font(.caption2)
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
+            } else if state.phase == .awaitingOutcome {
+                Link(destination: KueDeepLink.url(for: .event(attributes.eventID))) {
+                    Label("Confirm Outcome", systemImage: "questionmark.circle")
+                }
+                .font(.caption2)
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .tint(.orange)
             }
         }
     }

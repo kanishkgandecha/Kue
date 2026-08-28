@@ -83,7 +83,13 @@ final class EventManagementUITests: XCTestCase {
         createEvent(title: title)
 
         app.staticTexts[title].tap()
-        app.buttons["archiveEventButton"].tap()
+        // Kue 2.0 Phase 10.1 — docs/25 "E." added an outcome card above the Actions section
+        // for events awaiting outcome (this fixture's default zero-duration type reaches that
+        // state immediately), pushing Archive further down; scroll first, same as the
+        // existing `deleteButton`/Calendar/Live-Activity buttons below already do.
+        let archiveButton = app.buttons["archiveEventButton"]
+        archiveButton.scrollUpUntilHittable(in: app)
+        archiveButton.tap()
         XCTAssertTrue(app.buttons["unarchiveEventButton"].waitForExistence(timeout: 5))
 
         app.navigationBars.buttons.element(boundBy: 0).tap() // back to Home

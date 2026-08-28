@@ -54,6 +54,9 @@ enum SpotlightEventPayloadBuilder {
         case .tomorrow: return "Tomorrow"
         case .today: return "Today"
         case .active: return "Active"
+        // Kue 2.0 Phase 10.1 — docs/25 "L.": Spotlight must never claim an unresolved past
+        // event was "Completed."
+        case .awaitingOutcome: return "Needs Review"
         case .completed: return "Completed"
         case .cancelled: return "Cancelled"
         case .archived: return "Archived"

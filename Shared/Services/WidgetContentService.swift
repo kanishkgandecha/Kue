@@ -61,6 +61,10 @@ enum WidgetContentService {
     /// user can manually archive an event that's still date-wise upcoming, which
     /// `derive(for:)` alone wouldn't catch.
     private static func isDateAndStatusLive(_ event: KueEvent, now: Date) -> Bool {
+        // Kue 2.0 Phase 10.1 — docs/25 "F.": `.awaitingOutcome` is deliberately excluded here.
+        // A past event with no confirmed outcome must never be selected as "Next Up" or
+        // treated as eligible for a fresh Dedicated Countdown pick — it needs a decision, not
+        // a countdown.
         let eligible: Set<EventStatus> = [.upcoming, .preparing, .tomorrow, .today, .active]
         guard event.status != .archived else { return false }
         return eligible.contains(EventStatusEngine.derive(for: event, now: now))
@@ -117,7 +121,11 @@ enum WidgetContentService {
         if event.status == .archived || EventStatusEngine.isPastAutoArchiveWindow(event, now: now) {
             return .removed
         }
-        if event.isManuallyCompleted || now >= event.effectiveEndDate { return .completed }
+        if event.isManuallyCompleted { return .completed }
+        // Kue 2.0 Phase 10.1 — docs/25 "F.": time passing alone never means "Completed" for a
+        // widget either. `now >= effectiveEndDate` with no explicit outcome is
+        // `.awaitingOutcome`, mirroring `EventStatusEngine.derive` exactly.
+        if now >= event.effectiveEndDate { return .awaitingOutcome }
 
         let calendar = calendar(for: event)
         let startOfEventDay = calendar.startOfDay(for: event.startDate)
@@ -156,9 +164,18 @@ enum WidgetContentService {
             (preparation, .preparation),
             (oneDayBefore, .tomorrow),
             (startOfEventDay, .today),
-            (event.effectiveEndDate, .completed),
+            (event.effectiveEndDate, .awaitingOutcome),
         ]
-        if let archiveDate = EventStatusEngine.archiveThreshold(for: event) {
+        // Kue 2.0 Phase 10.1 — docs/25 "C.": `.removed` is only a real future boundary once
+        // the event is *already* in a terminal state that actually runs the auto-archive
+        // countdown (manually completed, cancelled, or skipped — see
+        // `EventStatusEngine.shouldAutoArchive`). An Awaiting Outcome event's archive date is
+        // unknowable until the user provides an outcome, so it must never appear as a
+        // precomputed transition — precomputing one here would desync from what `reconcile`
+        // actually persists, exactly the "assumption that all past events are completed" bug
+        // this phase corrects.
+        if event.isManuallyCompleted || event.isCancelled || event.isSkipped,
+           let archiveDate = EventStatusEngine.archiveThreshold(for: event) {
             candidates.append((archiveDate, .removed))
         }
         return candidates.filter { $0.0 > now }.sorted { $0.0 < $1.0 }
@@ -195,6 +212,10 @@ enum WidgetContentService {
             // user-editable toggle (Event Detail's Widget tab) — genuine V1 gap found during
             // the Phase 10 audit, it was persisted but never actually read here.
             subline = (event.widgetConfiguration?.showLocation ?? true) ? event.location : nil
+        case .awaitingOutcome:
+            headline = event.title
+            // docs/25 "A." — the one consistent user-facing label chosen for this status.
+            subline = "Needs Review"
         case .completed:
             headline = event.title
             subline = "Completed"

@@ -103,7 +103,13 @@ struct NotificationCandidateBuilderTests {
         #expect(all.contains("\(event.id)-tomorrow"))
         #expect(all.contains("\(event.id)-today"))
         #expect(all.contains("\(event.id)-task-\(task.id.uuidString)"))
-        #expect(all.count == 4)
+        // Kue 2.0 Phase 10.1 — docs/25 "J.": the three new transition kinds join the
+        // exhaustive identifier set too, so editing/cancelling this event reliably clears
+        // their stale pending requests as well.
+        #expect(all.contains("\(event.id)-pre-event"))
+        #expect(all.contains("\(event.id)-event-start"))
+        #expect(all.contains("\(event.id)-outcome-follow-up"))
+        #expect(all.count == 7)
     }
 
     // MARK: - Cleanup (requirement 5 — no candidates for events the user no longer cares about)
@@ -183,5 +189,62 @@ struct NotificationCandidateBuilderTests {
         let today = NotificationCandidate(eventID: UUID(), kind: .today, fireDate: sameDate, isUrgentTier: true, title: "Today", body: "")
         let sorted = NotificationCandidateBuilder.prioritized([preparation, tomorrow, today])
         #expect(sorted.map(\.title) == ["Today", "Tomorrow", "Prep"])
+    }
+
+    // MARK: - Kue 2.0 Phase 10.1 — docs/25 "H./J." — event-start, pre-event, outcome follow-up
+
+    @Test func eventStartFiresAtTheActualStartInstantForATimedEvent() {
+        let start = now.addingTimeInterval(10 * 86_400 + 3_723) // an arbitrary non-midnight time
+        let event = makeEvent(startDate: start)
+        let candidate = NotificationCandidateBuilder.candidates(for: event, now: now, reminderPreference: ReminderPreference(preEventMinutes: nil)).first { $0.kind == .eventStart }
+        #expect(candidate?.fireDate == start)
+        #expect(candidate?.body == "Interview is starting now")
+        #expect(candidate?.priorityTier == 0) // shown even at .minimal
+    }
+
+    @Test func eventStartNeverFiresInThePastForAnAlreadyStartedEvent() {
+        let event = makeEvent(startDate: now.addingTimeInterval(-3_600))
+        let candidate = NotificationCandidateBuilder.candidates(for: event, now: now, reminderPreference: ReminderPreference(preEventMinutes: nil)).first { $0.kind == .eventStart }
+        #expect(candidate == nil)
+    }
+
+    @Test func eventStartUsesAPinnedTimezoneMorningReminderForAllDayEventsNotMidnight() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let midnight = calendar.date(from: DateComponents(year: 2026, month: 3, day: 10))!
+        let expectedMorning = calendar.date(from: DateComponents(year: 2026, month: 3, day: 10, hour: 9))!
+        let event = makeEvent(startDate: midnight, isAllDay: true)
+        let candidate = NotificationCandidateBuilder.candidates(for: event, now: now, reminderPreference: ReminderPreference(preEventMinutes: nil)).first { $0.kind == .eventStart }
+        #expect(candidate?.fireDate == expectedMorning)
+        #expect(candidate?.body == "Interview is today")
+    }
+
+    @Test func preEventIsAbsentWhenThePreferenceIsOff() {
+        let event = makeEvent(startDate: now.addingTimeInterval(10 * 86_400))
+        let candidates = NotificationCandidateBuilder.candidates(for: event, now: now, reminderPreference: ReminderPreference(preEventMinutes: nil))
+        #expect(!candidates.contains { $0.kind == .preEvent })
+    }
+
+    @Test func preEventFiresTheConfiguredMinutesBeforeStartDate() {
+        let start = now.addingTimeInterval(10 * 86_400)
+        let event = makeEvent(startDate: start)
+        let candidate = NotificationCandidateBuilder.candidates(for: event, now: now, reminderPreference: ReminderPreference(preEventMinutes: 30)).first { $0.kind == .preEvent }
+        #expect(candidate?.fireDate == start.addingTimeInterval(-30 * 60))
+        #expect(candidate?.body == "Interview starts in 30 minutes")
+    }
+
+    @Test func preEventNeverFiresForAllDayEvents() {
+        let event = makeEvent(startDate: now.addingTimeInterval(10 * 86_400), isAllDay: true)
+        let candidates = NotificationCandidateBuilder.candidates(for: event, now: now, reminderPreference: ReminderPreference(preEventMinutes: 30))
+        #expect(!candidates.contains { $0.kind == .preEvent })
+    }
+
+    @Test func outcomeFollowUpFiresExactlyAtEffectiveEndDateWithHonestCopy() {
+        let start = now.addingTimeInterval(10 * 86_400)
+        let event = makeEvent(startDate: start)
+        let candidate = NotificationCandidateBuilder.candidates(for: event, now: now, reminderPreference: ReminderPreference(preEventMinutes: nil)).first { $0.kind == .outcomeFollowUp }
+        #expect(candidate?.fireDate == event.effectiveEndDate)
+        #expect(candidate?.body == "How did Interview go?")
+        #expect(candidate?.priorityTier == 0) // requirement: never starved by low-priority reminders
     }
 }

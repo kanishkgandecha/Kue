@@ -88,6 +88,16 @@ nonisolated final class SystemLiveActivityManager: LiveActivityManaging {
         switch resolution {
         case .tracking(let content) where content.phase == .completed || content.phase == .removed:
             await activity.end(nil, dismissalPolicy: .after(now.addingTimeInterval(LiveActivityPolicy.completedGracePeriod)))
+        // Kue 2.0 Phase 10.1 — docs/25 "G.": never end immediately (the user might confirm an
+        // outcome any moment) and never mark the event Completed automatically — the `.update`
+        // above already refreshed it to "Needs Review." Only once a genuinely long grace
+        // period passes with no explicit outcome does Kue quietly stop the *activity* — the
+        // event itself is untouched, still Awaiting Outcome, still visible in Home's Needs
+        // Attention section and Event Detail's outcome card.
+        case .tracking(let content) where content.phase == .awaitingOutcome:
+            if now >= event.effectiveEndDate.addingTimeInterval(LiveActivityPolicy.awaitingOutcomeGracePeriod) {
+                await activity.end(nil, dismissalPolicy: .after(now.addingTimeInterval(LiveActivityPolicy.terminalGracePeriod)))
+            }
         case .cancelled, .skipped:
             await activity.end(nil, dismissalPolicy: .after(now.addingTimeInterval(LiveActivityPolicy.terminalGracePeriod)))
         default:
@@ -119,4 +129,10 @@ enum LiveActivityPolicy {
     static let terminalGracePeriod: TimeInterval = 5 * 60
     /// The focused event was deleted entirely.
     static let unavailableGracePeriod: TimeInterval = 5 * 60
+    /// Kue 2.0 Phase 10.1 (docs/25 "G.") — how long a focused Live Activity keeps showing
+    /// "Needs Review" past `effectiveEndDate` with no explicit outcome before Kue quietly
+    /// stops updating it. Deliberately longer than the other grace periods — this isn't a
+    /// terminal state (the user might still act), so it shouldn't disappear quickly the way a
+    /// cancelled/skipped one does.
+    static let awaitingOutcomeGracePeriod: TimeInterval = 6 * 60 * 60
 }

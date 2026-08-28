@@ -20,7 +20,7 @@ struct EventFilterSortSheet: View {
     /// The lifecycle statuses `EventStatusEngine.derive(for:)` can actually produce (see its
     /// own doc comment on `.preparing`) — offering a status that can never match anything
     /// would be a dead, confusing option, not a real filter.
-    private static let filterableStatuses: [EventStatus] = [.upcoming, .tomorrow, .today, .active, .completed, .cancelled]
+    private static let filterableStatuses: [EventStatus] = [.upcoming, .tomorrow, .today, .active, .awaitingOutcome, .completed, .cancelled]
 
     var body: some View {
         NavigationStack {
@@ -106,6 +106,7 @@ struct EventFilterSortSheet: View {
         case .tomorrow: return "Tomorrow"
         case .today: return "Today"
         case .active: return "Active"
+        case .awaitingOutcome: return "Needs Review"
         case .completed: return "Completed"
         case .cancelled: return "Cancelled"
         case .archived: return "Archived"

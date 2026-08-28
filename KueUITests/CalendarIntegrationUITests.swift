@@ -150,9 +150,13 @@ final class CalendarIntegrationUITests: XCTestCase {
         createEvent(title: title)
         app.staticTexts[title].tap()
 
+        // Kue 2.0 Phase 10.1 — docs/25 "E." added an outcome card above the Actions section
+        // for this fixture's default (awaiting-outcome) event, so `addToCalendarButton` isn't
+        // materialized until scrolled into view — scroll *before* asserting existence, same
+        // fix `duplicateEventButton` (SearchAndOrganizationUITests) already documents.
         let addToCalendarButton = app.buttons["addToCalendarButton"]
-        XCTAssertTrue(addToCalendarButton.waitForExistence(timeout: 5))
         addToCalendarButton.scrollUpUntilHittable(in: app)
+        XCTAssertTrue(addToCalendarButton.waitForExistence(timeout: 5))
         addToCalendarButton.tap()
 
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "calendarDestinationList").firstMatch.waitForExistence(timeout: 5))
@@ -169,9 +173,11 @@ final class CalendarIntegrationUITests: XCTestCase {
         let title = uniqueTitle("UI Test Update")
         createEvent(title: title)
         app.staticTexts[title].tap()
+        // See `testAddToCalendarPresentsDestinationPickerAndLinksOnSelection` above — scroll
+        // before asserting existence, not after.
         let addToCalendarButton = app.buttons["addToCalendarButton"]
-        XCTAssertTrue(addToCalendarButton.waitForExistence(timeout: 5))
         addToCalendarButton.scrollUpUntilHittable(in: app)
+        XCTAssertTrue(addToCalendarButton.waitForExistence(timeout: 5))
         addToCalendarButton.tap()
         app.staticTexts["Fake Calendar Home"].tap()
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "calendarLinkStatusLinked").firstMatch.waitForExistence(timeout: 5))

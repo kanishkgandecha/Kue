@@ -144,7 +144,11 @@ private struct CompactTrackingView: View {
     }
 
     private var showsMarkCompleteButton: Bool {
-        content.phase != .completed && content.phase != .removed
+        // Kue 2.0 Phase 10.1 — docs/25 "F.": never a one-tap complete for an unconfirmed
+        // outcome. No separate "Confirm Outcome" control is needed here specifically — the
+        // whole widget already deep-links to Event Detail via `.widgetURL` (this file's own
+        // header), and `displayContent`'s "Needs Review" subline already says why.
+        content.phase != .completed && content.phase != .removed && content.phase != .awaitingOutcome
     }
 }
 
@@ -209,7 +213,9 @@ private struct LargeTrackingView: View {
 
             Spacer(minLength: 0)
 
-            if content.phase != .completed && content.phase != .removed {
+            // Kue 2.0 Phase 10.1 — docs/25 "F." — same reasoning as `CompactTrackingView`'s
+            // own `showsMarkCompleteButton`.
+            if content.phase != .completed && content.phase != .removed && content.phase != .awaitingOutcome {
                 Button(intent: CompleteEventIntent(eventID: content.eventID)) {
                     Label("Mark Complete", systemImage: "checkmark.circle")
                 }

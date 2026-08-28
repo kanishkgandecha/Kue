@@ -26,6 +26,7 @@ enum WidgetAccessoryLabels {
         case .preparation: return "Preparing"
         case .tomorrow: return "Tomorrow"
         case .today: return "Today"
+        case .awaitingOutcome: return "Needs Review"
         case .completed: return "Completed"
         case .removed: return "Archived"
         }

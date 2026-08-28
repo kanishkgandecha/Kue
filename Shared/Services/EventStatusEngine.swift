@@ -39,8 +39,12 @@ enum EventStatusEngine {
         if event.isSkipped { return .cancelled }
         if event.isManuallyCompleted { return .completed }
 
+        // Kue 2.0 Phase 10.1 — docs/25 "A.": scheduled time passing is not proof the event
+        // happened. `.completed` now only ever comes from the `isManuallyCompleted` check
+        // above; a non-terminal event at/after its own end is `.awaitingOutcome` until the
+        // user explicitly says what happened (Complete/Reschedule/Skip/Cancel).
         let end = event.effectiveEndDate
-        if now >= end { return .completed }
+        if now >= end { return .awaitingOutcome }
         // All-day events never pass through `.active` — they stay `.today` for the whole
         // calendar day and jump straight to `.completed` at the following midnight (the `end`
         // check above). Without this guard, `now >= event.startDate` alone would wrongly

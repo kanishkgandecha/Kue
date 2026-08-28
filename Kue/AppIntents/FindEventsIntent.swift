@@ -18,12 +18,18 @@ enum FindEventsScope: String, AppEnum {
     case today
     case upcoming
     case all
+    /// Kue 2.0 Phase 10.1 — docs/25 "L.": "Find Events supports new status" — lets a Shortcut
+    /// or Siri request ask specifically for events awaiting an outcome, matching the wording
+    /// used everywhere else in Kue (`SpotlightEventPayloadBuilder.statusLabel`, Home's Needs
+    /// Attention section).
+    case needsReview
 
     static var typeDisplayRepresentation: TypeDisplayRepresentation = "Scope"
     static var caseDisplayRepresentations: [FindEventsScope: DisplayRepresentation] = [
         .today: "Today",
         .upcoming: "Upcoming",
         .all: "All Current",
+        .needsReview: "Needs Review",
     ]
 }
 
@@ -58,6 +64,11 @@ struct FindEventsIntent: AppIntent {
         case .today: matches = EventResolutionService.todaysEvents(in: allEvents)
         case .upcoming: matches = EventResolutionService.upcomingEvents(in: allEvents)
         case .all: matches = EventListQueryEngine.sorted(allEvents.filter { $0.status != .archived }, by: .date)
+        case .needsReview:
+            matches = EventListQueryEngine.sorted(
+                allEvents.filter { $0.status != .archived && EventStatusEngine.derive(for: $0) == .awaitingOutcome },
+                by: .date
+            )
         }
 
         if let eventType {

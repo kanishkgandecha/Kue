@@ -11,6 +11,8 @@
 
 import SwiftUI
 import SwiftData
+import UserNotifications
+import UIKit
 
 private enum DetailTab: String, CaseIterable {
     case info = "Info"
@@ -32,6 +34,10 @@ struct EventDetailView: View {
     // Kue 2.0 Phase 9 — `\.liveActivityManager` (Kue/Features/LiveActivity/), same DI seam as
     // every other Fake-under-UITests service.
     @Environment(\.liveActivityManager) private var liveActivityManager
+    // Kue 2.0 Phase 10.1 — docs/25 "I.": `openURL` (not `UIApplication.shared`, which is
+    // unavailable in application extensions and would break `KueShare`'s incidental compile
+    // of this whole view hierarchy) is the SwiftUI-safe way to open System Settings.
+    @Environment(\.openURL) private var openURL
 
     @State private var tab: DetailTab = .info
     @State private var isEditing = false
@@ -54,6 +60,12 @@ struct EventDetailView: View {
     @State private var replacementCurrentEventID: UUID?
     @State private var replacementCurrentEventTitle = ""
     @State private var liveActivityErrorMessage: String?
+
+    // MARK: Kue 2.0 Phase 10.1 — docs/25 "I." Notification transparency: read fresh right
+    // after the `.task` below's own reschedule pass, so `notificationsTab` shows what's
+    // actually true, not what Kue merely intends.
+    @State private var notificationAuthorizationStatus: UNAuthorizationStatus = .notDetermined
+    @State private var pendingNotificationIdentifiers: Set<String> = []
 
     /// Kue 2.0 Phase 2, requirement 9 — wraps what `EventDuplicationService.duplicate`
     /// returned so the sheet below can show the same duplicate-warning banner
@@ -159,6 +171,14 @@ struct EventDetailView: View {
             // side effect a user didn't ask for; re-derived every time this screen appears.
             refreshCalendarStatus()
             focusedLiveActivityEventID = await liveActivityManager.focusedEventID()
+            // Kue 2.0 Phase 10.1 — docs/25 "I.": read the two truths `notificationsTab` needs
+            // to distinguish "Kue intends to remind you" from "this will actually fire." Last
+            // in this task deliberately — these only feed the Notifications tab, not the Info
+            // tab's Calendar/Live Activity state above, which other flows read as soon as this
+            // screen appears and shouldn't wait behind two extra `UNUserNotificationCenter`
+            // round trips for.
+            notificationAuthorizationStatus = await SystemNotificationScheduler.shared.authorizationStatus()
+            pendingNotificationIdentifiers = Set(await SystemNotificationScheduler.shared.pendingRequestIdentifiers())
         }
         .confirmationDialog(
             "Replace the Live Activity for \"\(replacementCurrentEventTitle)\" with this event?",
@@ -218,7 +238,7 @@ struct EventDetailView: View {
                     EventStatusBadge(style: KueStatusStyle.forEvent(event, status: displayedStatus))
                     Spacer()
                 }
-                if !event.tasks.isEmpty && displayedStatus != .completed && displayedStatus != .cancelled && displayedStatus != .archived {
+                if !event.tasks.isEmpty && displayedStatus != .completed && displayedStatus != .cancelled && displayedStatus != .archived && displayedStatus != .awaitingOutcome {
                     PreparationProgressView(
                         completedCount: event.tasks.filter(\.isCompleted).count,
                         totalCount: event.tasks.count
@@ -226,6 +246,21 @@ struct EventDetailView: View {
                 }
             }
             .listRowBackground(Color.clear)
+
+            // Kue 2.0 Phase 10.1 — docs/25 "E." The one place a past, unconfirmed event is
+            // asked about directly. Placed right after the status badge — the most prominent
+            // spot on this screen short of the navigation title.
+            if displayedStatus == .awaitingOutcome {
+                // No identifier on the `Section` itself — a real bug found via UI testing:
+                // `.accessibilityIdentifier` applied to a `Form` `Section` propagates down and
+                // overrides each child's own identifier (every button inside reported
+                // "outcomeCardSection" instead of its own), rather than labeling the section
+                // as a distinct element. `outcomeCard`'s own buttons/text already carry their
+                // own identifiers, which is all any caller (test or VoiceOver) actually needs.
+                Section {
+                    outcomeCard
+                }
+            }
 
             Section {
                 LabeledContent("Type", value: event.eventType.displayName)
@@ -351,6 +386,7 @@ struct EventDetailView: View {
         case .tomorrow: return "Tomorrow"
         case .today: return "Today"
         case .active: return "Active"
+        case .awaitingOutcome: return "Needs Review"
         case .completed: return "Completed"
         case .cancelled: return "Cancelled"
         case .archived: return "Archived"
@@ -359,6 +395,70 @@ struct EventDetailView: View {
 
     private var dateStyle: Date.FormatStyle {
         event.isAllDay ? .dateTime.month().day().year() : .dateTime.month().day().year().hour().minute()
+    }
+
+    // MARK: - Kue 2.0 Phase 10.1 — outcome card (docs/25 "E.")
+
+    /// "How did it go?" — the one place a past, unconfirmed event is asked directly.
+    /// Completed/Reschedule/Skipped/Cancelled all reuse the exact same mutation functions the
+    /// Actions section below already calls — no separate outcome-specific mutation logic.
+    private var outcomeCard: some View {
+        VStack(alignment: .leading, spacing: KueSpacing.sm) {
+            Label("How did it go?", systemImage: "questionmark.circle")
+                .font(KueTypography.cardTitle)
+                .foregroundStyle(KueColor.warning)
+            Text(outcomeTimingDescription)
+                .font(KueTypography.footnote)
+                .foregroundStyle(KueColor.secondaryText)
+                .accessibilityIdentifier("outcomeTimingDescription")
+
+            HStack(spacing: KueSpacing.sm) {
+                Button("Completed") {
+                    EventActions.complete(event, context: modelContext)
+                    haptics.play(.taskCompleted)
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("outcomeCompletedButton")
+
+                Button("Reschedule") { isEditing = true }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("outcomeRescheduleButton")
+            }
+
+            HStack(spacing: KueSpacing.sm) {
+                // Occurrence-aware, same rule the Actions section's own Skip button follows.
+                if event.seriesID != nil {
+                    Button("Skipped") {
+                        EventActions.skip(event, context: modelContext)
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("outcomeSkippedButton")
+                }
+                // No extra confirmation dialog — matches the plain "Cancel Event" button below
+                // exactly (reversible via Un-cancel; only Delete gets a blocking dialog).
+                Button("Cancelled", role: .destructive) {
+                    EventActions.cancel(event, context: modelContext)
+                    haptics.play(.destructiveConfirmed)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("outcomeCancelledButton")
+            }
+        }
+        .padding(.vertical, KueSpacing.xxs)
+    }
+
+    /// "Scheduled for ... · ended ..." — both read in the event's own pinned timezone, never
+    /// the device's current one (docs/25 "E."). `RelativeDateTimeFormatter` compares absolute
+    /// instants, so the "how long ago" half needs no explicit timezone of its own.
+    private var outcomeTimingDescription: String {
+        let pinnedZone = TimeZone(identifier: event.timeZoneIdentifier) ?? .current
+        let base = Date.FormatStyle(timeZone: pinnedZone)
+        let scheduledStyle = event.isAllDay
+            ? base.month().day().year()
+            : base.month().day().year().hour().minute()
+        let scheduled = event.startDate.formatted(scheduledStyle)
+        let elapsed = RelativeDateTimeFormatter().localizedString(for: event.effectiveEndDate, relativeTo: .now)
+        return "Scheduled for \(scheduled) — ended \(elapsed)"
     }
 
     /// Kue 2.0 Phase 3, requirement 16 — states scope up front, before the dialog's own
@@ -452,30 +552,82 @@ struct EventDetailView: View {
     /// fixed during the Phase 10 audit. Reuses `NotificationCandidateBuilder` (Shared/)
     /// directly — the exact same candidate list `NotificationEngine.reschedule` would
     /// actually schedule, not a re-derived summary.
+    /// Kue 2.0 Phase 10.1 — docs/25 "I.": never just list what Kue *intends* to schedule: an
+    /// authorization-denied user or one whose Intensity/pending-cap excluded a reminder would
+    /// read that as a promise Kue can't keep — the exact honesty gap this phase exists to
+    /// close. `isNotificationsDisabled` gates a top banner; each row's own `notificationStatusText(for:)`
+    /// distinguishes "scheduled," "time already passed," and "not currently scheduled" (the
+    /// one honest umbrella for the pending-cap and scheduling-failure cases, which look
+    /// identical from here — `add()` swallows its own errors, docs/08 "Permission handling").
     private var notificationsTab: some View {
         let intensity = UserPreferenceStore.current(context: modelContext).notificationIntensity
-        let candidates = NotificationCandidateBuilder.prioritized(
-            NotificationCandidateBuilder.filter(NotificationCandidateBuilder.candidates(for: event), intensity: intensity)
+        let allCandidates = NotificationCandidateBuilder.candidates(for: event)
+        let visibleCandidates = NotificationCandidateBuilder.prioritized(
+            NotificationCandidateBuilder.filter(allCandidates, intensity: intensity)
         )
+        let excludedByIntensityCount = allCandidates.count - visibleCandidates.count
         return Group {
-            if candidates.isEmpty {
+            if visibleCandidates.isEmpty && !isNotificationsDisabled {
                 ContentUnavailableView(
                     "No Upcoming Notifications",
                     systemImage: "bell.slash",
                     description: Text("Nothing left to remind you about for this event.")
                 )
             } else {
-                List(candidates, id: \.identifier) { candidate in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(candidate.body)
-                        Text(candidate.fireDate.formatted(date: .abbreviated, time: .shortened))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                List {
+                    if isNotificationsDisabled {
+                        Section {
+                            Label("Notifications are off", systemImage: "bell.slash")
+                                .foregroundStyle(KueColor.secondaryText)
+                                .accessibilityIdentifier("notificationsDisabledLabel")
+                            Button("Open Settings") { openSystemSettings() }
+                                .accessibilityIdentifier("openSystemSettingsButton")
+                        } footer: {
+                            Text("Kue can't guarantee reminders below fire until notifications are on.")
+                        }
+                    }
+                    Section {
+                        ForEach(visibleCandidates, id: \.identifier) { candidate in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(candidate.body)
+                                Text(notificationStatusText(for: candidate))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    } footer: {
+                        if excludedByIntensityCount > 0 {
+                            Text("\(excludedByIntensityCount) more reminder\(excludedByIntensityCount == 1 ? "" : "s") won't fire — excluded by your Intensity setting.")
+                        }
                     }
                 }
                 .accessibilityIdentifier("notificationsList")
             }
         }
+    }
+
+    private var isNotificationsDisabled: Bool {
+        notificationAuthorizationStatus == .denied || notificationAuthorizationStatus == .notDetermined
+    }
+
+    private func notificationStatusText(for candidate: NotificationCandidate, now: Date = .now) -> String {
+        if isNotificationsDisabled {
+            return "Won't fire — notifications are off"
+        }
+        if candidate.fireDate <= now {
+            return "Reminder time has passed"
+        }
+        if pendingNotificationIdentifiers.contains(candidate.identifier) {
+            return "Scheduled for \(candidate.fireDate.formatted(date: .abbreviated, time: .shortened))"
+        }
+        // Never claim delivery Kue can't confirm — docs/25 "I.": distinguish "submitted
+        // pending" from "authorized" from "actually delivered," which no app can guarantee.
+        return "Not currently scheduled — may be past Kue's reminder limit"
+    }
+
+    private func openSystemSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        openURL(url)
     }
 
     // MARK: - Widget (functional settings, not rendering — docs/09-screens-and-ux.md)

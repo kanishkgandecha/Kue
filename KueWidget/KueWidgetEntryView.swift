@@ -113,6 +113,19 @@ private struct SizedBody: View {
                 .buttonStyle(.bordered)
                 .controlSize(isLarge ? .small : .mini)
                 .tint(content.isUrgent ? .red : .accentColor)
+            } else if showsConfirmOutcomeLink {
+                // Kue 2.0 Phase 10.1 — docs/25 "F.": never a one-tap "Mark Complete" for an
+                // event whose outcome hasn't actually been confirmed — `CompleteEventIntent`
+                // would silently mark it Completed with no chance to say Rescheduled/Skipped/
+                // Cancelled instead. `Link` (not an `AppIntent` button) opens the exact event's
+                // outcome flow in-app via the same deep link Spotlight/Live Activity taps use.
+                Link(destination: KueDeepLink.url(for: .event(content.eventID))) {
+                    Label("Confirm Outcome", systemImage: "questionmark.circle")
+                        .font(isLarge ? .body : .caption2)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(isLarge ? .small : .mini)
+                .tint(.orange)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -123,7 +136,14 @@ private struct SizedBody: View {
         guard content.widgetType == .countdown || content.widgetType == .progress || content.widgetType == .timeline else {
             return false
         }
-        return content.phase != .completed && content.phase != .removed
+        return content.phase != .completed && content.phase != .removed && content.phase != .awaitingOutcome
+    }
+
+    private var showsConfirmOutcomeLink: Bool {
+        guard content.widgetType == .countdown || content.widgetType == .progress || content.widgetType == .timeline else {
+            return false
+        }
+        return content.phase == .awaitingOutcome
     }
 
     private var header: some View {

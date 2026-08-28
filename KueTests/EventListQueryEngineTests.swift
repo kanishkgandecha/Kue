@@ -99,14 +99,16 @@ struct EventListQueryEngineTests {
         #expect(!EventListQueryEngine.matchesFilter(exam, filter: filter, now: now))
     }
 
+    // Kue 2.0 Phase 10.1 — docs/25 "D./F.": a stale-but-time-passed event derives Awaiting
+    // Outcome live, not the old stale `.completed` inference this test used to encode.
     @Test func statusFilterUsesLiveDerivedStatusNotStalePersistedStatus() {
-        // Stored as `.upcoming` but its startDate has already passed — derive() says `.completed`.
+        // Stored as `.upcoming` but its startDate has already passed — derive() says `.awaitingOutcome`.
         let staleEvent = makeEvent(title: "Stale", startDate: now.addingTimeInterval(-3600), status: .upcoming)
-        let filter = EventListQueryEngine.Filter(statuses: [.completed])
+        let filter = EventListQueryEngine.Filter(statuses: [.awaitingOutcome])
         #expect(EventListQueryEngine.matchesFilter(staleEvent, filter: filter, now: now))
 
-        let notCompletedFilter = EventListQueryEngine.Filter(statuses: [.upcoming])
-        #expect(!EventListQueryEngine.matchesFilter(staleEvent, filter: notCompletedFilter, now: now))
+        let notAwaitingFilter = EventListQueryEngine.Filter(statuses: [.upcoming])
+        #expect(!EventListQueryEngine.matchesFilter(staleEvent, filter: notAwaitingFilter, now: now))
     }
 
     @Test func archivedScopeCurrentOnlyExcludesArchived() {

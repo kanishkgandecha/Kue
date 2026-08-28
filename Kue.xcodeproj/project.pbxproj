@@ -112,6 +112,7 @@
 				AppIntents/StopEventFocusIntent.swift,
 				Info.plist,
 				KueApp.swift,
+				Services/NotificationActionHandler.swift,
 			);
 			target = 959B72BFB1B17F264687FCC2 /* KueShare */;
 		};

@@ -32,6 +32,12 @@ struct AccessoryCircularTrackingView: View {
             if content.phase == .completed || content.phase == .removed {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.title2)
+            } else if content.phase == .awaitingOutcome {
+                // Kue 2.0 Phase 10.1 — docs/25 "F.": never the checkmark (that would falsely
+                // imply confirmed completion), and a progress gauge is moot once the event has
+                // already passed — just the "Needs Review" status word.
+                Text(status)
+                    .font(.headline)
             } else if content.tasksTotal > 0 {
                 Gauge(value: Double(content.tasksCompleted), in: 0...Double(max(content.tasksTotal, 1))) {
                     Text(status)

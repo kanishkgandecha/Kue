@@ -27,6 +27,7 @@ import SwiftData
 struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.kueHaptics) private var haptics
     @Query(sort: \KueEvent.startDate) private var events: [KueEvent]
     @State private var isCompletedExpanded = false
     @State private var isLaterExpanded = false
@@ -39,8 +40,22 @@ struct HomeView: View {
         HomeTimelineGrouping.sections(events: visibleEvents)
     }
 
+    /// Kue 2.0 Phase 10.1 — docs/25 "D.": Awaiting Outcome events belong in their own "Needs
+    /// Attention" section, never lumped into Completed alongside events the user actually
+    /// confirmed.
+    private var needsAttentionEvents: [KueEvent] {
+        HomeTimelineGrouping.needsAttentionEvents(events: visibleEvents)
+    }
+
+    private var hasTodaySection: Bool {
+        timelineSections.contains { $0.kind == .today }
+    }
+
     private var completedEvents: [KueEvent] {
-        visibleEvents.filter { !HomeTimelineGrouping.timelineEligible($0) }
+        visibleEvents.filter {
+            let status = EventStatusEngine.derive(for: $0)
+            return status == .completed || status == .cancelled
+        }
     }
 
     var body: some View {
@@ -87,7 +102,7 @@ struct HomeView: View {
                 Text("Add an interview, exam, deadline, or trip to get started.")
             }
             .accessibilityIdentifier("emptyDatabaseView")
-        } else if timelineSections.isEmpty && completedEvents.isEmpty {
+        } else if timelineSections.isEmpty && completedEvents.isEmpty && needsAttentionEvents.isEmpty {
             // Every visible event is archived — a real, if rare, state distinct from "no
             // events at all."
             ContentUnavailableView {
@@ -106,6 +121,15 @@ struct HomeView: View {
     /// list simply starts at whichever section is soonest; no "Today" placeholder row needed.
     private var timeline: some View {
         List {
+            // Kue 2.0 Phase 10.1 — docs/25 "D.": "near the top of Home, after any truly active
+            // event but before ordinary future sections." Active events only ever appear
+            // inside the Today section, so placing this immediately after Today (when Today
+            // exists) satisfies both halves at once; when there's no Today section at all,
+            // it's simply the first thing shown.
+            if !hasTodaySection, !needsAttentionEvents.isEmpty {
+                needsAttentionSection
+            }
+
             ForEach(Array(timelineSections.enumerated()), id: \.element.id) { index, section in
                 if section.kind == .later {
                     laterSection(section)
@@ -120,6 +144,9 @@ struct HomeView: View {
                         }
                     }
                 }
+                if section.kind == .today, !needsAttentionEvents.isEmpty {
+                    needsAttentionSection
+                }
             }
 
             if !completedEvents.isEmpty {
@@ -127,6 +154,19 @@ struct HomeView: View {
             }
         }
         .accessibilityIdentifier("homeTimelineList")
+    }
+
+    private var needsAttentionSection: some View {
+        Section {
+            ForEach(needsAttentionEvents) { event in
+                NeedsAttentionRow(event: event)
+            }
+        } header: {
+            Label("Needs Attention", systemImage: "questionmark.circle")
+        } footer: {
+            Text("These events have ended without a confirmed outcome.")
+        }
+        .accessibilityIdentifier("needsAttentionSection")
     }
 
     /// Requirement: distant events "must remain discoverable and correctly ordered" —
@@ -164,6 +204,71 @@ struct HomeView: View {
             }
             .accessibilityIdentifier("completedSectionDisclosure")
         }
+    }
+}
+
+/// Kue 2.0 Phase 10.1 — docs/25 "D." One row in Home's "Needs Attention" section: tapping
+/// still navigates to the full outcome flow (Event Detail, docs/25 "E."); the four concise
+/// actions here are the same shortcut every other Kue surface already exposes for
+/// Complete/Reschedule/Skip/Cancel — no new mutation logic, just faster access without
+/// leaving Home. Buttons live inside the `NavigationLink`'s own label — the standard SwiftUI
+/// `List` pattern where a distinctly-styled control inside a row's label gets its own tap
+/// target, separate from the row's navigation.
+private struct NeedsAttentionRow: View {
+    @Bindable var event: KueEvent
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.kueHaptics) private var haptics
+    @State private var isEditingForReschedule = false
+
+    var body: some View {
+        NavigationLink {
+            EventDetailView(event: event)
+        } label: {
+            VStack(alignment: .leading, spacing: KueSpacing.sm) {
+                EventCard(event: event)
+                actionRow
+            }
+        }
+        .sheet(isPresented: $isEditingForReschedule) {
+            // docs/25 "E." — "Reschedule opens the existing edit flow ... clears no unrelated
+            // data." Same `EventFormView(mode: .edit(event))` every other reschedule path uses.
+            EventFormView(mode: .edit(event))
+        }
+    }
+
+    private var actionRow: some View {
+        HStack(spacing: KueSpacing.sm) {
+            actionButton("Mark Completed", identifier: "needsAttentionComplete") {
+                EventActions.complete(event, context: modelContext)
+                haptics.play(.taskCompleted)
+            }
+            actionButton("Reschedule", identifier: "needsAttentionReschedule") {
+                isEditingForReschedule = true
+            }
+            // Skip is occurrence-aware (docs/17-recurring-events.md) — only offered when this
+            // row is actually part of a recurring series, same rule Event Detail already
+            // follows.
+            if event.seriesID != nil {
+                actionButton("Skip", identifier: "needsAttentionSkip") {
+                    EventActions.skip(event, context: modelContext)
+                }
+            }
+            // No extra confirmation dialog — matches the existing "Cancel Event" button in
+            // Event Detail's own Actions section exactly (reversible via Un-cancel, so only
+            // Delete gets a blocking confirmation dialog anywhere in Kue).
+            actionButton("Cancel", identifier: "needsAttentionCancel", role: .destructive) {
+                EventActions.cancel(event, context: modelContext)
+                haptics.play(.destructiveConfirmed)
+            }
+        }
+        .font(KueTypography.footnote)
+    }
+
+    private func actionButton(_ title: String, identifier: String, role: ButtonRole? = nil, action: @escaping () -> Void) -> some View {
+        Button(title, role: role, action: action)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .accessibilityIdentifier("\(identifier)-\(event.id.uuidString)")
     }
 }
 

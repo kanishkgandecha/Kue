@@ -108,7 +108,9 @@ struct DedicatedCountdownEligibilityTests {
     // MARK: - A previously configured terminal event still resolves by identifier (requirement 7, bullet 5)
 
     @Test func aPreviouslyConfiguredCompletedEventStillResolvesAndRendersItsTerminalState() {
-        let event = makeEvent(startDate: now.addingTimeInterval(-3600), estimatedDurationMinutes: 30)
+        // Kue 2.0 Phase 10.1 — docs/25 "F.": explicitly (manually) completed, not just
+        // time-passed — the one path allowed to actually resolve to `.completed` here.
+        let event = makeEvent(startDate: now.addingTimeInterval(-3600), estimatedDurationMinutes: 30, isManuallyCompleted: true)
         // Even though it's no longer offered for a *new* selection...
         #expect(!WidgetContentService.isEligibleForDedicatedSelection(event, now: now))
         // ...resolving an *already*-configured id must still succeed, so the widget can show
@@ -116,6 +118,16 @@ struct DedicatedCountdownEligibilityTests {
         let resolution = DedicatedWidgetContentService.resolve(event: event, now: now)
         guard case .tracking(let content) = resolution else { Issue.record("expected .tracking(.completed)"); return }
         #expect(content.phase == .completed)
+    }
+
+    // Kue 2.0 Phase 10.1 — docs/25 "F.": the far more common case — time passed with no
+    // explicit outcome yet — must resolve to Awaiting Outcome, not silently to Completed.
+    @Test func aPreviouslyConfiguredEventPastEndWithNoOutcomeResolvesAsAwaitingOutcome() {
+        let event = makeEvent(startDate: now.addingTimeInterval(-3600), estimatedDurationMinutes: 30)
+        #expect(!WidgetContentService.isEligibleForDedicatedSelection(event, now: now))
+        let resolution = DedicatedWidgetContentService.resolve(event: event, now: now)
+        guard case .tracking(let content) = resolution else { Issue.record("expected .tracking(.awaitingOutcome)"); return }
+        #expect(content.phase == .awaitingOutcome)
     }
 
     @Test func aPreviouslyConfiguredCancelledEventStillResolvesAndRendersItsTerminalState() {

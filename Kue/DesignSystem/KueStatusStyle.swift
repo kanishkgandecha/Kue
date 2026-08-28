@@ -36,6 +36,11 @@ struct KueStatusStyle {
             return KueStatusStyle(label: "Today", systemImage: "clock.badge.exclamationmark", tint: KueColor.urgent)
         case .active:
             return KueStatusStyle(label: "Active", systemImage: "play.circle.fill", tint: KueColor.active)
+        case .awaitingOutcome:
+            // Kue 2.0 Phase 10.1 — docs/25 "A.": the one consistent user-facing label for a
+            // past event with no confirmed outcome. `.warning` (not `.completed`/`.disabled`)
+            // so it reads as needing attention, not as a settled state.
+            return KueStatusStyle(label: "Needs Review", systemImage: "questionmark.circle", tint: KueColor.warning)
         case .completed:
             return KueStatusStyle(label: "Completed", systemImage: "checkmark.circle.fill", tint: KueColor.completed)
         case .cancelled:
@@ -64,7 +69,7 @@ struct EventStatusBadge: View {
 
 #Preview("Status Badges — Light") {
     VStack(alignment: .leading, spacing: KueSpacing.sm) {
-        ForEach([EventStatus.upcoming, .preparing, .tomorrow, .today, .active, .completed, .cancelled, .archived], id: \.self) { status in
+        ForEach([EventStatus.upcoming, .preparing, .tomorrow, .today, .active, .awaitingOutcome, .completed, .cancelled, .archived], id: \.self) { status in
             EventStatusBadge(style: KueStatusStyle(label: status.rawValue.capitalized, systemImage: "circle.fill", tint: .blue))
         }
     }

@@ -57,10 +57,27 @@ enum HomeTimelineGrouping {
     static let maximumIndividualDateSections = 5
 
     /// Requirement: "current and upcoming events" — completed/cancelled events never appear
-    /// here (see this file's header); everything else is grouped by calendar date.
+    /// here (see this file's header); everything else is grouped by calendar date. Kue 2.0
+    /// Phase 10.1 — docs/25 "D.": Awaiting Outcome events are *also* excluded from the
+    /// date-sectioned timeline, but for the opposite reason completed/cancelled ones are —
+    /// they need a prominent, separate "Needs Attention" section (`needsAttentionEvents`
+    /// below), not a quiet spot inside an ordinary date section or (worse) the collapsed
+    /// "Later" group.
     static func timelineEligible(_ event: KueEvent, now: Date = .now) -> Bool {
         let status = EventStatusEngine.derive(for: event, now: now)
-        return status != .completed && status != .cancelled
+        return status != .completed && status != .cancelled && status != .awaitingOutcome
+    }
+
+    /// Kue 2.0 Phase 10.1 — docs/25 "D." Home's "Needs Attention" section: every event whose
+    /// derived status is `.awaitingOutcome`, most-recently-ended first (the event freshest in
+    /// the user's memory, easiest to confirm accurately — never a random/insertion order),
+    /// with a stable id tie-break so equal end dates never reorder between renders.
+    static func needsAttentionEvents(events: [KueEvent], now: Date = .now) -> [KueEvent] {
+        let matches = events.filter { EventStatusEngine.derive(for: $0, now: now) == .awaitingOutcome }
+        return matches.sorted { lhs, rhs in
+            if lhs.effectiveEndDate != rhs.effectiveEndDate { return lhs.effectiveEndDate > rhs.effectiveEndDate }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
     }
 
     /// `now` is a parameter (not `.now` read internally) for the same determinism reason

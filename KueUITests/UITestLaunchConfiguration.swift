@@ -144,13 +144,18 @@ extension XCUIApplication {
         row.tap()
     }
 
-    /// A freshly created event's `startDate` defaults to "now," so it can become `.completed`
-    /// within seconds of saving (before this call even runs) — landing it inside Home's
+    /// A freshly created event's `startDate` defaults to "now," so it can reach a terminal
+    /// widget/notification phase within seconds of saving (before this call even runs). Kue
+    /// 2.0 Phase 10.1 (docs/25): that phase is `awaitingOutcome`, which Home shows in its
+    /// always-visible Needs Attention section — no expansion needed, so this now typically
+    /// short-circuits at the guard below. Kept as a general fallback for the genuinely
+    /// `.completed`/explicit-mark-complete case, which still lands inside Home's
     /// collapsed-by-default Completed section instead of a date section, invisible to a plain
     /// `app.staticTexts[title]` lookup. Only expands the Completed disclosure when `title`
-    /// isn't already on-screen (an ordinary date-sectioned event needs no help, and a second
-    /// call within the same test — the disclosure is already expanded — never accidentally
-    /// re-collapses it), matching how a user would open the section to check.
+    /// isn't already on-screen (an ordinary date-sectioned or Needs-Attention event needs no
+    /// help, and a second call within the same test — the disclosure is already expanded —
+    /// never accidentally re-collapses it), matching how a user would open the section to
+    /// check.
     func revealHomeEventIfInsideCollapsedCompletedSection(titled title: String) {
         guard !staticTexts[title].waitForExistence(timeout: 2) else { return }
         // A `DisclosureGroup`'s own accessibility identifier resolves to an ambiguous element

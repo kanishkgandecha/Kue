@@ -397,6 +397,47 @@ entry was tried first and silently didn't take effect). See
 matrix, Spotlight lifecycle, Control Widget behavior, and the deferred Siri/Shortcuts-app/
 Spotlight-UI/Control-Center manual-verification checklist.
 
+**Kue 2.0 Phase 10.1 ("Honest Event Outcomes and Reliable Reminder UX") is done.** Corrects a
+real Kue 1.0 incident: `EventStatusEngine.derive` used to return `.completed` the instant
+`now >= effectiveEndDate`, regardless of `isManuallyCompleted` — passing time alone silently
+completed events with no user confirmation, and no notification fired at an event's actual
+start time. Fix: a new `EventStatus`/`WidgetLifecyclePhase` case, `.awaitingOutcome`
+("Needs Review" / Home's "Needs Attention"), inserted between Active and Completed —
+confirmed (by reading the frozen `KueSchemaV1`/`V2` snapshots directly) to reference both
+enums unversioned, so this needed **zero schema/migration change**. Auto-archive already only
+fired from `.completed`/`.cancelled`, so it stopped applying to Awaiting Outcome for free once
+`derive` stopped returning `.completed` for a merely time-passed event; the same fix cascaded
+through the widget/Live Activity/Next-Up eligibility chain with no changes needed there.
+New: Home's **Needs Attention** section (`HomeTimelineGrouping.needsAttentionEvents`, most
+recently ended first); Event Detail's **"How did it go?"** outcome card
+(Completed/Reschedule/Skip/Cancel, all calling the same existing `EventActions`/edit-flow
+each other surface already uses); three new notification concepts —
+event-start (fires at the real `startDate`, 9 AM pinned-timezone for all-day, never midnight),
+a configurable pre-event reminder (`ReminderPreference`, App Group `UserDefaults`-backed like
+`LiveActivityPrivacyPreference`, default 30 min), and an outcome follow-up
+("How did X go?") — all three tier-0 (shown even at Minimal intensity, never starved by the
+64-request cap); Event Detail's notification tab now shows truthful per-reminder state
+(scheduled/passed/disabled/possibly-capped) instead of just what Kue intends; one new
+actionable notification category (Mark Completed/Reschedule/Skip/Cancel) routed through a
+retained `UNUserNotificationCenterDelegate` (`Kue/Services/NotificationActionHandler.swift`)
+that calls the exact same `EventActions` functions every other surface uses — excluded from
+`KueShare`'s default synchronized membership the same per-file `membershipExceptions` way
+Phase 10's `AppIntents/` files were (same underlying `UIApplication`-in-extension
+constraint). `FindEventsIntent` gained a `.needsReview` scope; `entities: {}` reconfirmed
+empty in the generated App Intents metadata — no `AppEntity` reintroduced. **Real bugs found
+via a full `KueUITests` run** (required since `HomeView`/`EventDetailView` are shared
+infrastructure every existing UI suite exercises) and fixed: a `Section`-level
+`.accessibilityIdentifier` on the new outcome card silently overrode every child button's own
+identifier (SwiftUI `Form`/`List` `Section` quirk — removed, the buttons' own identifiers are
+enough); the outcome card's added height broke two pre-existing tests' unscrolled
+`waitForExistence` assumptions (fixed by scrolling before asserting, matching an existing
+documented pattern); `UNUserNotificationCenter` calls sitting in `KueApp.init()`'s synchronous
+path added real launch-time latency, tightening borderline test timeouts elsewhere (deferred
+into a `Task`). Two further `KueUITests` failures were investigated and, via direct
+`git show HEAD:<path>` comparison, ruled out as caused by this phase's diff but not otherwise
+resolved — see docs/25 "O.1." for both. See `docs/25-honest-event-outcomes-and-reminders.md`
+for the full lifecycle/precedence table, notification concept table, and files-touched list.
+
 ## Project structure
 
 ```

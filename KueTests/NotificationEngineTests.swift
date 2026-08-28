@@ -53,7 +53,7 @@ struct NotificationEngineTests {
         SchedulingEngine.regenerateTasks(for: event, context: context, now: now)
 
         let scheduler = FakeNotificationScheduler()
-        await NotificationEngine.reschedule(context: context, intensity: .standard, scheduler: scheduler, now: now)
+        await NotificationEngine.reschedule(context: context, intensity: .standard, scheduler: scheduler, now: now, reminderPreference: ReminderPreference(preEventMinutes: nil))
 
         #expect(scheduler.addedIdentifiers.contains("\(event.id)-preparation"))
     }
@@ -66,8 +66,8 @@ struct NotificationEngineTests {
         SchedulingEngine.regenerateTasks(for: event, context: context, now: now)
 
         let scheduler = FakeNotificationScheduler()
-        await NotificationEngine.reschedule(context: context, intensity: .standard, scheduler: scheduler, now: now)
-        await NotificationEngine.reschedule(context: context, intensity: .standard, scheduler: scheduler, now: now)
+        await NotificationEngine.reschedule(context: context, intensity: .standard, scheduler: scheduler, now: now, reminderPreference: ReminderPreference(preEventMinutes: nil))
+        await NotificationEngine.reschedule(context: context, intensity: .standard, scheduler: scheduler, now: now, reminderPreference: ReminderPreference(preEventMinutes: nil))
 
         let identifiers = scheduler.addedIdentifiers
         #expect(Set(identifiers).count == identifiers.count)
@@ -81,7 +81,7 @@ struct NotificationEngineTests {
         SchedulingEngine.regenerateTasks(for: event, context: context, now: now)
 
         let scheduler = FakeNotificationScheduler()
-        await NotificationEngine.reschedule(context: context, intensity: .all, scheduler: scheduler, now: now)
+        await NotificationEngine.reschedule(context: context, intensity: .all, scheduler: scheduler, now: now, reminderPreference: ReminderPreference(preEventMinutes: nil))
         let oldTaskIdentifiers = event.tasks.map { "\(event.id)-task-\($0.id.uuidString)" }
         #expect(!oldTaskIdentifiers.isEmpty)
         for id in oldTaskIdentifiers { #expect(scheduler.addedIdentifiers.contains(id)) }
@@ -93,7 +93,7 @@ struct NotificationEngineTests {
         event.startDate = now.addingTimeInterval(20 * 86_400) // moves every task's due date
         SchedulingEngine.regenerateTasks(for: event, context: context, now: now)
         scheduler.removePendingNotificationRequests(withIdentifiers: staleIdentifiers)
-        await NotificationEngine.reschedule(context: context, intensity: .all, scheduler: scheduler, now: now)
+        await NotificationEngine.reschedule(context: context, intensity: .all, scheduler: scheduler, now: now, reminderPreference: ReminderPreference(preEventMinutes: nil))
 
         for id in oldTaskIdentifiers {
             #expect(!scheduler.addedIdentifiers.contains(id))
@@ -110,12 +110,12 @@ struct NotificationEngineTests {
         SchedulingEngine.regenerateTasks(for: event, context: context, now: now)
 
         let scheduler = FakeNotificationScheduler()
-        await NotificationEngine.reschedule(context: context, intensity: .standard, scheduler: scheduler, now: now)
+        await NotificationEngine.reschedule(context: context, intensity: .standard, scheduler: scheduler, now: now, reminderPreference: ReminderPreference(preEventMinutes: nil))
         #expect(!scheduler.addedIdentifiers.isEmpty)
 
         event.status = .archived
         try? context.save()
-        await NotificationEngine.reschedule(context: context, intensity: .standard, scheduler: scheduler, now: now)
+        await NotificationEngine.reschedule(context: context, intensity: .standard, scheduler: scheduler, now: now, reminderPreference: ReminderPreference(preEventMinutes: nil))
         #expect(scheduler.addedIdentifiers.isEmpty)
     }
 
@@ -123,10 +123,12 @@ struct NotificationEngineTests {
 
     @Test func onlyTheNearest64SurviveWhenTheCapIsThreatened() async {
         let context = makeContext()
-        // 70 independent events, `.minimal` intensity so each contributes exactly one
-        // candidate (`.today`, the only tier-0 category) at a distinct, staggered date —
-        // isolates the cap/priority logic from having to reason about multiple candidates
-        // per event competing at once.
+        // 70 independent events, `.minimal` intensity. Kue 2.0 Phase 10.1 — docs/25 "J.":
+        // `.minimal` now keeps every tier-0 category, not just `.today` — each timed event
+        // here contributes three (`.today`, `.eventStart`, `.outcomeFollowUp`; `.preEvent` is
+        // explicitly off above), so rather than hand-deriving the exact per-event cutoff, this
+        // asserts against the same prioritization Kue itself uses: exactly the cap's worth of
+        // candidates survive, and they're precisely the nearest-dated ones.
         var events: [KueEvent] = []
         for i in 0..<70 {
             let event = insertEvent(in: context, title: "Event \(i)", eventType: .exam, startDate: now.addingTimeInterval(Double(100 + i) * 86_400))
@@ -134,17 +136,22 @@ struct NotificationEngineTests {
         }
         try? context.save()
 
+        let noPreEvent = ReminderPreference(preEventMinutes: nil)
+        let expectedSurvivors = Set(NotificationCandidateBuilder.prioritized(
+            NotificationCandidateBuilder.filter(
+                events.flatMap { NotificationCandidateBuilder.candidates(for: $0, now: now, reminderPreference: noPreEvent) },
+                intensity: .minimal
+            )
+        ).prefix(NotificationEngine.pendingRequestCap).map(\.identifier))
+
         let scheduler = FakeNotificationScheduler()
-        await NotificationEngine.reschedule(context: context, intensity: .minimal, scheduler: scheduler, now: now)
+        await NotificationEngine.reschedule(context: context, intensity: .minimal, scheduler: scheduler, now: now, reminderPreference: noPreEvent)
 
         #expect(scheduler.addedIdentifiers.count == NotificationEngine.pendingRequestCap)
-        // The nearest-dated events (0..<64) survive; the furthest-out (64..<70) are trimmed.
-        for i in 0..<64 {
-            #expect(scheduler.addedIdentifiers.contains("\(events[i].id)-today"))
-        }
-        for i in 64..<70 {
-            #expect(!scheduler.addedIdentifiers.contains("\(events[i].id)-today"))
-        }
+        #expect(Set(scheduler.addedIdentifiers) == expectedSurvivors)
+        // The furthest-out event is trimmed entirely; the nearest is fully kept.
+        #expect(!scheduler.addedIdentifiers.contains("\(events[69].id)-today"))
+        #expect(scheduler.addedIdentifiers.contains("\(events[0].id)-today"))
     }
 
     // MARK: - Replenishment (requirement 6/7)
@@ -159,15 +166,20 @@ struct NotificationEngineTests {
         try? context.save()
 
         let scheduler = FakeNotificationScheduler()
-        await NotificationEngine.reschedule(context: context, intensity: .minimal, scheduler: scheduler, now: now)
+        await NotificationEngine.reschedule(context: context, intensity: .minimal, scheduler: scheduler, now: now, reminderPreference: ReminderPreference(preEventMinutes: nil))
         #expect(!scheduler.addedIdentifiers.contains("\(events[69].id)-today"))
 
         // Budget frees up — some events are removed entirely (simulating them completing).
-        for event in events[0..<10] { context.delete(event) }
+        // Kue 2.0 Phase 10.1 — docs/25 "J.": each event now contributes three tier-0
+        // candidates (`.today`, `.eventStart`, `.outcomeFollowUp`), so deleting 50 (not 10) is
+        // what actually gets the remaining 20 events' 60 candidates under the 64 cap.
+        for event in events[0..<50] { context.delete(event) }
         try? context.save()
 
-        await NotificationEngine.reschedule(context: context, intensity: .minimal, scheduler: scheduler, now: now)
+        await NotificationEngine.reschedule(context: context, intensity: .minimal, scheduler: scheduler, now: now, reminderPreference: ReminderPreference(preEventMinutes: nil))
         #expect(scheduler.addedIdentifiers.contains("\(events[69].id)-today"))
+        #expect(scheduler.addedIdentifiers.contains("\(events[69].id)-event-start"))
+        #expect(scheduler.addedIdentifiers.contains("\(events[69].id)-outcome-follow-up"))
     }
 
     // MARK: - Permission handling (requirement 9)
@@ -179,7 +191,7 @@ struct NotificationEngineTests {
 
         let scheduler = FakeNotificationScheduler()
         scheduler.authorizationStatusToReturn = .denied
-        await NotificationEngine.reschedule(context: context, intensity: .standard, scheduler: scheduler, now: now, requestPermissionIfNeeded: true)
+        await NotificationEngine.reschedule(context: context, intensity: .standard, scheduler: scheduler, now: now, requestPermissionIfNeeded: true, reminderPreference: ReminderPreference(preEventMinutes: nil))
 
         #expect(scheduler.addedIdentifiers.isEmpty)
         #expect(scheduler.requestAuthorizationCallCount == 0) // already-decided states never re-prompt
@@ -192,7 +204,7 @@ struct NotificationEngineTests {
 
         let scheduler = FakeNotificationScheduler()
         scheduler.authorizationStatusToReturn = .notDetermined
-        await NotificationEngine.reschedule(context: context, intensity: .standard, scheduler: scheduler, now: now) // requestPermissionIfNeeded defaults false
+        await NotificationEngine.reschedule(context: context, intensity: .standard, scheduler: scheduler, now: now, reminderPreference: ReminderPreference(preEventMinutes: nil)) // requestPermissionIfNeeded defaults false
 
         #expect(scheduler.addedIdentifiers.isEmpty)
         #expect(scheduler.requestAuthorizationCallCount == 0)
@@ -206,7 +218,7 @@ struct NotificationEngineTests {
         let scheduler = FakeNotificationScheduler()
         scheduler.authorizationStatusToReturn = .notDetermined
         scheduler.requestAuthorizationResult = true
-        await NotificationEngine.reschedule(context: context, intensity: .standard, scheduler: scheduler, now: now, requestPermissionIfNeeded: true)
+        await NotificationEngine.reschedule(context: context, intensity: .standard, scheduler: scheduler, now: now, requestPermissionIfNeeded: true, reminderPreference: ReminderPreference(preEventMinutes: nil))
 
         #expect(scheduler.requestAuthorizationCallCount == 1)
         #expect(!scheduler.addedIdentifiers.isEmpty)

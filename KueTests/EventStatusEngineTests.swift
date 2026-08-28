@@ -74,18 +74,30 @@ struct EventStatusEngineTests {
         #expect(EventStatusEngine.derive(for: event, now: now) == .active)
     }
 
-    @Test func afterEffectiveEndIsCompleted() {
+    // Kue 2.0 Phase 10.1 — docs/25 "A./N.1": passing time alone must never mark an event
+    // Completed — that was exactly the incident this phase corrects (see docs/25's own
+    // header). An event with no explicit `isManuallyCompleted` derives Awaiting Outcome once
+    // it's past its effective end, not Completed.
+    @Test func afterEffectiveEndIsAwaitingOutcomeNotCompleted() {
         let start = Date(timeIntervalSince1970: 1_000_000_000)
         let event = makeEvent(startDate: start, estimatedDurationMinutes: 60)
         let now = start.addingTimeInterval(61 * 60)
-        #expect(EventStatusEngine.derive(for: event, now: now) == .completed)
+        #expect(EventStatusEngine.derive(for: event, now: now) == .awaitingOutcome)
     }
 
-    @Test func zeroDurationEventSkipsActive() {
+    @Test func zeroDurationEventSkipsActiveIntoAwaitingOutcome() {
         let start = Date(timeIntervalSince1970: 1_000_000_000)
         let event = makeEvent(eventType: .deadline, startDate: start, estimatedDurationMinutes: 0)
         #expect(EventStatusEngine.derive(for: event, now: start.addingTimeInterval(-1)) == .today)
-        #expect(EventStatusEngine.derive(for: event, now: start) == .completed)
+        #expect(EventStatusEngine.derive(for: event, now: start) == .awaitingOutcome)
+    }
+
+    // Kue 2.0 Phase 10.1 — docs/25 "N.2": explicit manual completion still reads as Completed
+    // regardless of how much time has passed since — the one path that's allowed to.
+    @Test func manuallyCompletedPastEffectiveEndStaysCompleted() {
+        let start = Date(timeIntervalSince1970: 1_000_000_000)
+        let event = makeEvent(startDate: start, estimatedDurationMinutes: 60, isManuallyCompleted: true, manuallyCompletedAt: start.addingTimeInterval(30 * 60))
+        #expect(EventStatusEngine.derive(for: event, now: start.addingTimeInterval(61 * 60)) == .completed)
     }
 
     @Test func allDayEventStaysTodayUntilEndOfDayNotStartInstant() {
@@ -100,8 +112,10 @@ struct EventStatusEngineTests {
         #expect(EventStatusEngine.derive(for: event, now: midnight.addingTimeInterval(3600)) == .today)
         #expect(EventStatusEngine.derive(for: event, now: midnight.addingTimeInterval(23 * 3600)) == .today)
 
+        // Kue 2.0 Phase 10.1 — docs/25 "N.3": same "no auto-completion" rule for all-day
+        // events once their pinned-timezone day ends.
         let nextMidnight = calendar.date(byAdding: .day, value: 1, to: midnight)!
-        #expect(EventStatusEngine.derive(for: event, now: nextMidnight) == .completed)
+        #expect(EventStatusEngine.derive(for: event, now: nextMidnight) == .awaitingOutcome)
     }
 
     // MARK: - Cancellation / manual completion
@@ -155,16 +169,45 @@ struct EventStatusEngineTests {
         #expect(event.status == .archived)
     }
 
-    @Test func reconcileAutoArchivesAfterWindowPastCompletion() {
+    // Kue 2.0 Phase 10.1 — docs/25 "C.": auto-archive only ever fires from an *explicit*
+    // terminal state (manually completed here); passing time alone never produces one to
+    // archive from in the first place (see the awaiting-outcome test immediately below).
+    @Test func reconcileAutoArchivesAfterWindowPastManualCompletion() {
         let start = Date(timeIntervalSince1970: 1_000_000_000)
-        let event = makeEvent(startDate: start, estimatedDurationMinutes: 0)
-        let justAfterCompletion = start.addingTimeInterval(60)
-        EventStatusEngine.reconcile(event, now: justAfterCompletion)
+        let event = makeEvent(startDate: start, estimatedDurationMinutes: 0, isManuallyCompleted: true, manuallyCompletedAt: start)
+        EventStatusEngine.reconcile(event, now: start.addingTimeInterval(60))
         #expect(event.status == .completed)
 
         let wellPastArchiveWindow = start.addingTimeInterval(Double(EventStatusEngine.autoArchiveDays + 1) * 86_400)
         EventStatusEngine.reconcile(event, now: wellPastArchiveWindow)
         #expect(event.status == .archived)
+    }
+
+    // Kue 2.0 Phase 10.1 — docs/25 "C./N.8": Awaiting Outcome must never auto-archive merely
+    // because time keeps passing — this is the exact regression the old
+    // `afterEffectiveEndIsCompleted`-style assumption would have hidden.
+    @Test func reconcileNeverAutoArchivesAwaitingOutcome() {
+        let start = Date(timeIntervalSince1970: 1_000_000_000)
+        let event = makeEvent(startDate: start, estimatedDurationMinutes: 0)
+        EventStatusEngine.reconcile(event, now: start.addingTimeInterval(60))
+        #expect(event.status == .awaitingOutcome)
+
+        let wellPastArchiveWindow = start.addingTimeInterval(Double(EventStatusEngine.autoArchiveDays + 1) * 86_400)
+        EventStatusEngine.reconcile(event, now: wellPastArchiveWindow)
+        #expect(event.status == .awaitingOutcome)
+    }
+
+    // Kue 2.0 Phase 10.1 — docs/25 "B.": a legacy fixture whose persisted `status` is already
+    // `.completed` from the old auto-completion policy, but was never manually completed,
+    // naturally re-derives to Awaiting Outcome on the next reconciliation — no migration, no
+    // bulk rewrite, just `derive(for:)` being asked again.
+    @Test func legacyAutoCompletedFixtureBecomesAwaitingOutcomeOnReconcile() {
+        let start = Date(timeIntervalSince1970: 1_000_000_000)
+        let event = makeEvent(startDate: start, estimatedDurationMinutes: 60) // isManuallyCompleted: false
+        event.status = .completed // simulates a pre-Phase-10.1 persisted value
+        let changed = EventStatusEngine.reconcile(event, now: start.addingTimeInterval(61 * 60))
+        #expect(changed == true)
+        #expect(event.status == .awaitingOutcome)
     }
 
     @Test func reconcileAutoArchivesCancelledEventsFromCancelledAt() {
@@ -179,7 +222,7 @@ struct EventStatusEngineTests {
         let context = ModelContext(ModelContainerFactory.makeInMemory())
         let start = Date(timeIntervalSince1970: 1_000_000_000)
         let stale = makeEvent(startDate: start, estimatedDurationMinutes: 0)
-        stale.status = .upcoming // stale — should have completed by "now" below
+        stale.status = .upcoming // stale — should be Awaiting Outcome by "now" below
         let archived = makeEvent(startDate: start, estimatedDurationMinutes: 0)
         archived.status = .archived
 
@@ -190,7 +233,9 @@ struct EventStatusEngineTests {
         let now = start.addingTimeInterval(3600)
         EventStatusEngine.sweep(context: context, now: now)
 
-        #expect(stale.status == .completed)
+        // Kue 2.0 Phase 10.1 — docs/25 "F.": no explicit outcome, so Awaiting Outcome, not
+        // Completed.
+        #expect(stale.status == .awaitingOutcome)
         #expect(archived.status == .archived) // untouched
     }
 }

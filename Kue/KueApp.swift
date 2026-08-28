@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import UserNotifications
 
 @main
 struct KueApp: App {
@@ -51,7 +52,23 @@ struct KueApp: App {
         let outcome = ModelContainerFactory.makeDefaultOrDiagnostic()
         _openOutcome = State(initialValue: outcome)
 
+        // Kue 2.0 Phase 10.1 — docs/25 "K.": register the outcome-follow-up action category
+        // and install the delegate that routes those actions, regardless of whether the store
+        // opened (mirrors the background-task registration's own "always register, no-op if
+        // there's nothing to act on" shape immediately below). Deferred to a `Task` rather
+        // than called inline: `UNUserNotificationCenter` access is real system IPC with
+        // measurable launch-time cost — a real regression found via `KueUITests` timing (the
+        // whole suite's already-borderline `waitForExistence` windows started missing more
+        // often once this call sat in `init()`'s synchronous path). Nothing observes
+        // `NotificationActionDelegate.shared` before the next run loop tick regardless, so
+        // deferring it costs nothing correctness-wise.
+        Task { @MainActor in
+            NotificationActionHandler.registerCategories()
+            UNUserNotificationCenter.current().delegate = NotificationActionDelegate.shared
+        }
+
         if case .success(let container) = outcome {
+            NotificationActionDelegate.shared.context = container.mainContext
             // Kue 2.0 Phase 4 — requirement 42's missing-event/conflict presentations need one
             // already-linked `KueEvent` present at launch. Triple-gated (isolated store AND
             // the fake-calendar argument AND one of these two specific sub-arguments) the same

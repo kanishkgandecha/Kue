@@ -26,6 +26,11 @@ struct SettingsView: View {
     @Environment(\.liveActivityManager) private var liveActivityManager
     @State private var preference: UserPreference?
     @State private var authorizationStatus: UNAuthorizationStatus = .notDetermined
+    // Kue 2.0 Phase 10.1 — docs/25 "H.": the configurable pre-event reminder duration.
+    // App Group `UserDefaults`-backed (`ReminderPreference`), not `UserPreference`/SwiftData —
+    // same "avoid a schema change for a simple global setting" precedent
+    // `LiveActivityPrivacyPreference`/`SpotlightIndexingPreference` already establish below.
+    @State private var reminderMinutes: Int? = ReminderPreference.current.preEventMinutes
     @State private var isConfirmingDeleteEverything = false
     // Kue 2.0 Phase 4 — Calendar section (docs/18-calendar-integration.md "Settings").
     @State private var calendarAuthorizationState: CalendarAuthorizationState = .notDetermined
@@ -72,6 +77,26 @@ struct SettingsView: View {
                     .accessibilityIdentifier("notificationIntensityPicker")
                 } footer: {
                     Text(intensityDescription(preference.notificationIntensity))
+                }
+
+                Section {
+                    Picker("Event Reminder", selection: Binding(
+                        get: { reminderMinutes },
+                        set: { newValue in
+                            reminderMinutes = newValue
+                            ReminderPreference.setPreEventMinutes(newValue)
+                            Task { await reschedule(intensity: preference.notificationIntensity) }
+                        }
+                    )) {
+                        ForEach(ReminderPreference.availableOptions, id: \.self) { minutes in
+                            Text(ReminderPreference.displayName(forMinutes: minutes)).tag(minutes)
+                        }
+                    }
+                    .accessibilityIdentifier("reminderDurationPicker")
+                } footer: {
+                    // docs/25 "H.": a timed reminder before the event starts, separate from
+                    // the always-on "starting now" and "how did it go" notifications.
+                    Text("A reminder before each timed event starts, in addition to the notification when it actually begins.")
                 }
 
                 Section {
@@ -275,15 +300,18 @@ struct SettingsView: View {
     }
 
     private func intensityDescription(_ intensity: NotificationIntensity) -> String {
+        // Kue 2.0 Phase 10.1 — docs/25 "J.": event-start and "how did it go" are essentials
+        // that fire at every intensity, not just "today/urgent" — this copy has to say so
+        // honestly rather than imply Minimal silences them.
         switch intensity {
-        case .minimal: return "Only today/urgent reminders fire."
-        case .standard: return "Preparation, tomorrow, and today/urgent reminders fire."
+        case .minimal: return "Only the essentials fire: today/urgent, when an event starts, and its outcome follow-up."
+        case .standard: return "Preparation, tomorrow, and today/urgent reminders fire, plus the essentials."
         case .all: return "Every reminder fires, including one per task."
         }
     }
 
     private func reschedule(intensity: NotificationIntensity) async {
-        await NotificationEngine.reschedule(context: modelContext, intensity: intensity, scheduler: scheduler)
+        await NotificationEngine.reschedule(context: modelContext, intensity: intensity, scheduler: scheduler, reminderPreference: ReminderPreference.current)
     }
 }
 

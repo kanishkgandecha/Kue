@@ -253,12 +253,15 @@ struct DedicatedWidgetContentServiceTests {
         let event = makeEvent(startDate: now.addingTimeInterval(-3600), estimatedDurationMinutes: 30)
         let beforeCompletion = DedicatedWidgetContentService.resolve(event: event, now: now)
         guard case .tracking(let before) = beforeCompletion else { Issue.record("expected .tracking"); return }
-        #expect(before.phase == .completed) // already past effectiveEndDate
+        // Kue 2.0 Phase 10.1 — docs/25 "F.": past `effectiveEndDate` with no explicit outcome
+        // yet is Awaiting Outcome, not a silent Completed.
+        #expect(before.phase == .awaitingOutcome)
 
         event.isManuallyCompleted = true
         event.title = "CAT 2026 — Done"
         let afterCompletion = DedicatedWidgetContentService.resolve(event: event, now: now)
         guard case .tracking(let after) = afterCompletion else { Issue.record("expected .tracking"); return }
+        #expect(after.phase == .completed) // only the explicit mutation above produces this
         #expect(after.eventTitle == "CAT 2026 — Done")
     }
 

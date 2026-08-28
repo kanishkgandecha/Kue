@@ -35,7 +35,8 @@ enum NotificationEngine {
         intensity: NotificationIntensity,
         scheduler: NotificationScheduling,
         now: Date = .now,
-        requestPermissionIfNeeded: Bool = false
+        requestPermissionIfNeeded: Bool = false,
+        reminderPreference: ReminderPreference = .current
     ) async {
         var status = await scheduler.authorizationStatus()
         if status == .notDetermined && requestPermissionIfNeeded {
@@ -49,7 +50,7 @@ enum NotificationEngine {
 
         let events = (try? context.fetch(FetchDescriptor<KueEvent>())) ?? []
         let allKnownIdentifiers = Set(events.flatMap(NotificationCandidateBuilder.allIdentifiers))
-        let allCandidates = events.flatMap { NotificationCandidateBuilder.candidates(for: $0, now: now) }
+        let allCandidates = events.flatMap { NotificationCandidateBuilder.candidates(for: $0, now: now, reminderPreference: reminderPreference) }
         let desired = NotificationCandidateBuilder.prioritized(
             NotificationCandidateBuilder.filter(allCandidates, intensity: intensity)
         )

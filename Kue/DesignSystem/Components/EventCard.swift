@@ -49,7 +49,9 @@ struct EventCard: View {
     /// Requirement 13 — progress only shown where it's meaningful: an event with generated
     /// tasks, not yet fully complete, still upcoming enough to matter.
     private var showsProgress: Bool {
-        !event.tasks.isEmpty && status != .completed && status != .cancelled && status != .archived
+        // Kue 2.0 Phase 10.1 — docs/25 "D.": "how ready was I" stops being the relevant
+        // question once the event has already happened and is awaiting an outcome.
+        !event.tasks.isEmpty && status != .completed && status != .cancelled && status != .archived && status != .awaitingOutcome
     }
 
     var body: some View {

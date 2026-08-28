@@ -30,7 +30,19 @@ enum EventType: String, Codable, CaseIterable {
 /// `isCancelled`/`isManuallyCompleted` — the event engine that derives `status` from those
 /// (docs/04-event-types.md "Status transition rules") is Phase 2 work, not implemented here.
 enum EventStatus: String, Codable, CaseIterable {
-    case draft, upcoming, preparing, tomorrow, today, active, completed, cancelled, archived
+    case draft, upcoming, preparing, tomorrow, today, active
+    /// Kue 2.0 Phase 10.1 — docs/25-honest-event-outcomes-and-reminders.md. A non-terminal
+    /// event at or after `effectiveEndDate` with no explicit user-confirmed outcome yet.
+    /// Scheduled time passing is not proof an event happened as planned — this is the state
+    /// between "the clock says it's over" and "the user told Kue what actually happened."
+    /// User-facing label: "Needs Review" (Event Detail/notifications) — Home's own section for
+    /// these is titled "Needs Attention," a distinct but compatible UI label for the same
+    /// underlying status; see docs/25 "A." for why the two labels coexist deliberately.
+    /// Never set by anything except `EventStatusEngine.derive` — there is no
+    /// `EventActions.markAwaitingOutcome`, because nothing ever explicitly *chooses* this
+    /// state; it's purely what "time passed, nobody said what happened" derives to.
+    case awaitingOutcome
+    case completed, cancelled, archived
 }
 
 /// docs/03-data-model.md "KueEvent" — which input path produced this event.

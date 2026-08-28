@@ -90,6 +90,13 @@ final class FakeLiveActivityManager: LiveActivityManaging {
         case .tracking(let content) where content.phase == .completed || content.phase == .removed:
             endedEventIDs.append(focusedID)
             runningEventID = nil
+        // Kue 2.0 Phase 10.1 — docs/25 "G." — mirrors `SystemLiveActivityManager`'s own
+        // grace-period gate exactly, so fake-driven tests exercise the identical policy.
+        case .tracking(let content) where content.phase == .awaitingOutcome:
+            if now >= event.effectiveEndDate.addingTimeInterval(LiveActivityPolicy.awaitingOutcomeGracePeriod) {
+                endedEventIDs.append(focusedID)
+                runningEventID = nil
+            }
         case .cancelled, .skipped:
             endedEventIDs.append(focusedID)
             runningEventID = nil

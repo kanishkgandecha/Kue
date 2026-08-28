@@ -50,9 +50,10 @@ struct BackgroundRefreshHandlerTests {
         context.insert(event)
         try? context.save()
 
-        // One day after startDate — past `effectiveEndDate` (a 0-duration deadline completes
-        // instantly) but well inside the 3-day auto-archive grace window, so the sweep should
-        // land on `.completed`, not skip straight to `.archived`.
+        // One day after startDate — past `effectiveEndDate` (a 0-duration deadline reaches its
+        // end instantly), so the sweep should reconcile the stale `.upcoming` tag to Awaiting
+        // Outcome (Kue 2.0 Phase 10.1 — docs/25 "C.": passing time alone never lands on
+        // `.completed`, and never auto-archives from here either).
         await BackgroundRefreshHandler.handle(
             FakeBackgroundTask(),
             context: context,
@@ -61,7 +62,7 @@ struct BackgroundRefreshHandlerTests {
             now: Date(timeIntervalSince1970: 1_000_000 + 86_400)
         )
 
-        #expect(event.status == .completed)
+        #expect(event.status == .awaitingOutcome)
     }
 
     @Test func handleReplenishesNotificationsWhenAuthorized() async {
