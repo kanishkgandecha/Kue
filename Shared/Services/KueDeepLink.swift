@@ -45,6 +45,12 @@ nonisolated enum KueDeepLink {
         /// Opens Settings' Focus management surface (docs/23 "F.") — the one place a focused
         /// Live Activity can be reviewed/stopped outside Event Detail.
         case liveActivityFocus
+        /// Post-Phase-12 fix — the Lock Screen widget's own empty/unavailable-state tap target
+        /// (`.accessoryCircular`/`.accessoryRectangular`/`.accessoryInline` of the `KueWidget`
+        /// kind). Carries no event id itself — the in-app selection page reads
+        /// `LockScreenEventSelection.current` directly to decide "nothing chosen yet" vs
+        /// "chosen, but that event is gone" copy, so this one route covers both.
+        case lockScreenEventSelection
     }
 
     static func url(for destination: Destination) -> URL {
@@ -77,6 +83,8 @@ nonisolated enum KueDeepLink {
             return URL(string: "\(scheme)://templates")!
         case .liveActivityFocus:
             return URL(string: "\(scheme)://focus")!
+        case .lockScreenEventSelection:
+            return URL(string: "\(scheme)://widgets/lock-screen/select")!
         }
     }
 
@@ -107,6 +115,8 @@ nonisolated enum KueDeepLink {
             return .templates
         case "focus":
             return .liveActivityFocus
+        case "widgets":
+            return url.path == "/lock-screen/select" ? .lockScreenEventSelection : nil
         default:
             return nil
         }

@@ -88,6 +88,13 @@ struct KueDeepLinkTests {
         #expect(KueDeepLink.parse(url) == .liveActivityFocus)
     }
 
+    /// Post-Phase-12 fix — the Lock Screen widget's own empty/unavailable-state deep link.
+    @Test func lockScreenEventSelectionURLRoundTripsThroughParse() {
+        let url = KueDeepLink.url(for: .lockScreenEventSelection)
+        #expect(url.absoluteString == "kue://widgets/lock-screen/select")
+        #expect(KueDeepLink.parse(url) == .lockScreenEventSelection)
+    }
+
     /// Requirement J: "repeated URL delivery" — parsing the same URL twice must produce the
     /// identical result both times (no hidden mutable/one-shot state in `parse`).
     @Test func parsingTheSameURLTwiceProducesIdenticalResults() {

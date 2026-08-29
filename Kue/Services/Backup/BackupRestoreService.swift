@@ -83,10 +83,18 @@ nonisolated enum BackupRestoreService {
 
         // docs/26 "B./Q." precedent (`SyncCoordinator.applyRemoteChanges`) — any restored
         // event needs the same bounded reconciliation pass every other mutation surface
-        // triggers, so status/occurrence horizon/widget/Spotlight reflect the newly-restored
-        // data immediately rather than waiting for the next unrelated trigger.
+        // triggers, so status/occurrence horizon/Spotlight reflect the newly-restored data
+        // immediately rather than waiting for the next unrelated trigger.
         if summary.eventsInserted > 0 || summary.eventsUpdated > 0 {
             await EventReconciliation.run(context: context, now: now)
+        }
+        // Post-Phase-12 fix — `EventReconciliation.run` only reloads widgets itself when its
+        // own status/occurrence sweep detects a change, which a restore that inserts/updates
+        // rows without flipping any derived status would not trigger. A restore is its own
+        // real reason to reload regardless (the Lock Screen selection's own selected event, or
+        // any tracked event, could be exactly what a restore just brought back or changed).
+        if summary.eventsInserted > 0 || summary.eventsUpdated > 0 || summary.exclusionsInserted > 0 {
+            EventActions.reloadWidget()
         }
 
         return summary

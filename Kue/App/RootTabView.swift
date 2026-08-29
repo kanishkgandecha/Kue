@@ -51,6 +51,13 @@ struct RootTabView: View {
     @State private var pendingSearchQuery: String?
     @State private var quickAddFormInput: QuickAddFormInput?
     @State private var isShowingOnboarding = OnboardingPreference.shouldPresent
+    // Post-Phase-12 fix — the Lock Screen widget's own empty/unavailable-state deep link, and
+    // Settings → Widgets → Lock Screen Event, both land here. Seeded `true` at launch under
+    // `-uiTestOpenLockScreenSelection` (must match `UITestLaunchConfiguration.
+    // openLockScreenSelectionArgument` exactly) — a real `kue://` URL open from outside the
+    // app's own process has no supported UI-test API (same limitation
+    // `OnboardingPreference.shouldPresent`'s own launch-argument check works around).
+    @State private var isShowingLockScreenSelection = ProcessInfo.processInfo.arguments.contains("-uiTestOpenLockScreenSelection")
     @Environment(\.modelContext) private var modelContext
     @Environment(\.nlParser) private var nlParser
     @Environment(\.aiAvailabilityChecker) private var aiAvailabilityChecker
@@ -140,6 +147,8 @@ struct RootTabView: View {
                 selection = .templates
             case .liveActivityFocus:
                 selection = .settings
+            case .lockScreenEventSelection:
+                isShowingLockScreenSelection = true
             }
         }
         .sheet(item: $deepLinkedEvent) { event in
@@ -158,6 +167,11 @@ struct RootTabView: View {
         }
         .fullScreenCover(isPresented: $isShowingOnboarding) {
             OnboardingView()
+        }
+        .sheet(isPresented: $isShowingLockScreenSelection) {
+            NavigationStack {
+                LockScreenEventSelectionView()
+            }
         }
     }
 

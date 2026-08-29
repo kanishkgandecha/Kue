@@ -26,7 +26,7 @@ struct KueLiveActivityWidget: Widget {
                     LiveActivityDynamicIslandExpandedLeading(attributes: context.attributes, state: context.state)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    LiveActivityDynamicIslandExpandedTrailing(state: context.state)
+                    LiveActivityDynamicIslandExpandedTrailing(attributes: context.attributes, state: context.state)
                 }
                 DynamicIslandExpandedRegion(.center) {
                     LiveActivityDynamicIslandExpandedCenter(state: context.state)
@@ -35,11 +35,11 @@ struct KueLiveActivityWidget: Widget {
                     LiveActivityDynamicIslandExpandedBottom(attributes: context.attributes, state: context.state)
                 }
             } compactLeading: {
-                LiveActivityCompactLeading(state: context.state)
+                LiveActivityCompactLeading(attributes: context.attributes, state: context.state)
             } compactTrailing: {
                 LiveActivityCompactTrailing(state: context.state)
             } minimal: {
-                LiveActivityMinimal(state: context.state)
+                LiveActivityMinimal(attributes: context.attributes, state: context.state)
             }
             .widgetURL(KueDeepLink.url(for: .event(context.attributes.eventID)))
         }

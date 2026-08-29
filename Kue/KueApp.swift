@@ -84,6 +84,7 @@ struct KueApp: App {
             // executes at all when `ModelContainerFactory.isUITestIsolatedStore` is already
             // true, which is itself only ever set by `KueUITests`.
             Self.seedCalendarFixtureIfNeeded(context: container.mainContext)
+            Self.resetLockScreenSelectionIfNeeded()
             SystemBackgroundTaskScheduler.shared.register(identifier: BackgroundRefreshTask.identifier) { task in
                 Task { @MainActor in
                     await BackgroundRefreshHandler.handle(
@@ -262,6 +263,20 @@ struct KueApp: App {
     }
 
     /// Kue 2.0 Phase 4 — see the call site's own comment above for the full gating argument.
+    /// Post-Phase-12 fix — `LockScreenEventSelection` is real App Group `UserDefaults` state,
+    /// same as `SyncPreference`/`ReminderPreference`/etc.: `-uiTestIsolatedStore` wipes the
+    /// SwiftData store clean at every launch (`ModelContainerFactory`'s own header), but never
+    /// touched App-Group-`UserDefaults`-backed preferences, so a selection made by one
+    /// `KueUITests` case previously ran on this simulator could otherwise leak into a later,
+    /// unrelated test's launch (confirmed empirically — a stale selection from an earlier test
+    /// run showed as "no longer available" in a test that never selected anything itself).
+    /// Only this one preference needs clearing here: the others aren't yet read by anything a
+    /// UI test asserts against in a way that would be corrupted by residual state.
+    private static func resetLockScreenSelectionIfNeeded() {
+        guard ModelContainerFactory.isUITestIsolatedStore else { return }
+        LockScreenEventSelection.clear()
+    }
+
     private static func seedCalendarFixtureIfNeeded(context: ModelContext) {
         guard ModelContainerFactory.isUITestIsolatedStore else { return }
         let arguments = ProcessInfo.processInfo.arguments

@@ -1224,6 +1224,28 @@ detached-fault crash in `testEditingThisAndFutureOccurrencesOffersTheScopeAndSav
 post-save work must capture an event UUID + `ModelContainer`, then re-fetch in a fresh context;
 never carry a view-owned `KueEvent`/`ModelContext` across dismissal.
 
+Post-Phase-12 fix — Lock Screen widget event selection is app-managed, not WidgetKit's own
+long-press → Edit Widget picker. One global `UUID?` in App Group `UserDefaults`
+(`Shared/Services/LockScreenEventSelection.swift`, key `lockScreenWidget.selectedEventID`) —
+never a `WidgetConfigurationIntent` parameter, never a SwiftData model/schema change. Applies
+only to `KueWidget`'s `.accessoryCircular`/`.accessoryRectangular`/`.accessoryInline` families
+(Lock Screen); the Home Screen families of that same kind, and Dedicated Countdown's own
+per-instance accessory support, are untouched. Deep link: `kue://widgets/lock-screen/select`.
+Eligibility/resolution live in `WidgetContentService.isEligibleForLockScreenSelection`/
+`LockScreenWidgetContentService.resolve` — see docs/22 "K." for the full policy, including why
+an already-selected event never falls back to a different one. Never tell a user they need to
+long-press or Edit Widget to pick a Lock Screen event — that friction is exactly what this fix
+removed.
+
+Post-Phase-12 fix — Live Activity/Dynamic Island visual redesign, purely presentational: see
+docs/23 "M." Event-type accent comes from one shared mapper, `Shared/DesignSystem/
+EventTypeAccent.swift` — reuse it, never hardcode a raw color in a Live Activity view. The
+action row shown (active-with-task / active-no-task / awaiting-outcome / none) is decided once
+by `Shared/Services/LiveActivity/LiveActivityActionSet.swift`'s `actionSet(for:)`, read by both
+the Lock Screen and Dynamic Island Expanded Bottom views — don't re-derive that condition
+inline a third time. No lifecycle, App Intent, persistence, schema, or widget-selection behavior
+changed.
+
 ### A module-wide concurrency quirk worth knowing before you hit it
 
 Both the Kue and KueWidget targets set `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` — every

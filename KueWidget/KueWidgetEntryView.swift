@@ -45,6 +45,8 @@ struct KueWidgetEntryView: View {
                 message: "Open Kue to refresh.",
                 symbol: "exclamationmark.triangle"
             )
+        case .lockScreen(let resolution):
+            LockScreenAccessoryView(resolution: resolution, family: family)
         }
     }
 

@@ -22,6 +22,14 @@ enum UITestLaunchConfiguration {
     /// Leaves first-run onboarding visible; isolated UI tests suppress it by default.
     static let showOnboardingArgument = "-uiTestShowOnboarding"
 
+    /// Post-Phase-12 fix — simulates opening the app via the Lock Screen widget's own empty/
+    /// unavailable-state deep link (`kue://widgets/lock-screen/select`) at launch. A real
+    /// `kue://` URL open from outside the app's own process has no supported UI-test API (see
+    /// `SystemIntegrationSettingsUITests.swift`'s own header for the confirmed limitation this
+    /// mirrors) — `RootTabView` checks for this argument at launch and presents the selection
+    /// sheet directly, the same outcome the real deep link produces.
+    static let openLockScreenSelectionArgument = "-uiTestOpenLockScreenSelection"
+
     /// Kue 2.0 Phase 4 — must match `FakeCalendarProvider.uiTestLaunchArgument` exactly.
     /// `KueApp` installs a `FakeCalendarProvider` in place of `SystemCalendarProvider` when
     /// present — the same "shared literal, same rationale" as `isolatedStoreArgument` above, so

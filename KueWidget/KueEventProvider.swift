@@ -19,6 +19,12 @@ enum KueWidgetEntryContent: Equatable {
     /// docs/13-error-handling.md "Widget refresh failure" — the shared store couldn't be
     /// opened at all; never surface a raw error to the widget surface itself.
     case storeUnavailable
+    /// Post-Phase-12 fix — the app-managed Lock Screen selection's own resolution, used only
+    /// for `.accessoryCircular`/`.accessoryRectangular`/`.accessoryInline` (`context.family`
+    /// in `timeline(for:in:)`/`snapshot(for:in:)` below). `.systemSmall`/`.systemMedium`/
+    /// `.systemLarge` never produce this case — they keep the existing `.event`/
+    /// `.noEligibleEvent` configured-with-Next-Up-fallback behavior entirely unchanged.
+    case lockScreen(LockScreenWidgetResolution)
 }
 
 struct KueWidgetEntry: TimelineEntry {
@@ -56,10 +62,18 @@ struct KueEventProvider: AppIntentTimelineProvider {
         if context.isPreview {
             return placeholder(in: context)
         }
-        return currentEntry(for: configuration, now: .now)
+        return currentEntry(for: configuration, family: context.family, now: .now)
     }
 
     func timeline(for configuration: KueWidgetConfigurationIntent, in context: Context) async -> Timeline<KueWidgetEntry> {
+        // Post-Phase-12 fix — Lock Screen accessory families are app-managed selection
+        // (`LockScreenEventSelection`), entirely independent of `configuration.eventID`/Next
+        // Up. `.systemSmall`/`.systemMedium`/`.systemLarge` fall through to the existing
+        // configured-with-fallback timeline unchanged.
+        if isLockScreenAccessoryFamily(context.family) {
+            return lockScreenTimeline(now: .now)
+        }
+
         guard let container = ModelContainerFactory.makeDefaultOrNil() else {
             return Timeline(entries: [KueWidgetEntry(date: .now, content: .storeUnavailable)], policy: .after(.now.addingTimeInterval(15 * 60)))
         }
@@ -94,7 +108,10 @@ struct KueEventProvider: AppIntentTimelineProvider {
         return Timeline(entries: entries, policy: policy)
     }
 
-    private func currentEntry(for configuration: KueWidgetConfigurationIntent, now: Date) -> KueWidgetEntry {
+    private func currentEntry(for configuration: KueWidgetConfigurationIntent, family: WidgetFamily, now: Date) -> KueWidgetEntry {
+        if isLockScreenAccessoryFamily(family) {
+            return lockScreenEntry(now: now)
+        }
         guard let container = ModelContainerFactory.makeDefaultOrNil() else {
             return KueWidgetEntry(date: now, content: .storeUnavailable)
         }
@@ -106,6 +123,51 @@ struct KueEventProvider: AppIntentTimelineProvider {
             date: now,
             content: .event(WidgetContentService.displayContent(for: event, phase: WidgetContentService.currentPhase(for: event, now: now), now: now))
         )
+    }
+
+    // MARK: - Lock Screen accessory selection (post-Phase-12 fix)
+
+    private func isLockScreenAccessoryFamily(_ family: WidgetFamily) -> Bool {
+        family == .accessoryCircular || family == .accessoryRectangular || family == .accessoryInline
+    }
+
+    private func lockScreenEntry(now: Date) -> KueWidgetEntry {
+        guard let container = ModelContainerFactory.makeDefaultOrNil() else {
+            return KueWidgetEntry(date: now, content: .storeUnavailable)
+        }
+        let modelContext = ModelContext(container)
+        let selectedID = LockScreenEventSelection.current
+        let event = LockScreenWidgetContentService.resolveSelectedEvent(selectedEventID: selectedID, context: modelContext)
+        let resolution = LockScreenWidgetContentService.resolve(event: event, hasStoredSelection: selectedID != nil, now: now)
+        return KueWidgetEntry(date: now, content: .lockScreen(resolution))
+    }
+
+    private func lockScreenTimeline(now: Date) -> Timeline<KueWidgetEntry> {
+        guard let container = ModelContainerFactory.makeDefaultOrNil() else {
+            return Timeline(entries: [KueWidgetEntry(date: now, content: .storeUnavailable)], policy: .after(now.addingTimeInterval(15 * 60)))
+        }
+        let modelContext = ModelContext(container)
+        let selectedID = LockScreenEventSelection.current
+        let event = LockScreenWidgetContentService.resolveSelectedEvent(selectedEventID: selectedID, context: modelContext)
+        let resolution = LockScreenWidgetContentService.resolve(event: event, hasStoredSelection: selectedID != nil, now: now)
+
+        guard case .tracking = resolution else {
+            // Nothing date-driven to precompute for a cancelled/skipped/unselected/unavailable
+            // state — it only changes via an explicit app-side action, which already reloads
+            // this widget kind's timelines itself (`LockScreenEventSelectionView`). This
+            // periodic recheck is only a safety net.
+            return Timeline(entries: [KueWidgetEntry(date: now, content: .lockScreen(resolution))], policy: .after(now.addingTimeInterval(15 * 60)))
+        }
+
+        var entries = [KueWidgetEntry(date: now, content: .lockScreen(resolution))]
+        if let event {
+            for transition in WidgetContentService.transitionPlan(for: event, now: now) {
+                let transitionResolution = LockScreenWidgetContentService.resolve(event: event, hasStoredSelection: true, now: transition.date)
+                entries.append(KueWidgetEntry(date: transition.date, content: .lockScreen(transitionResolution)))
+            }
+        }
+        let policy: TimelineReloadPolicy = entries.count > 1 ? .after(entries.last!.date) : .after(now.addingTimeInterval(15 * 60))
+        return Timeline(entries: entries, policy: policy)
     }
 
     /// A configured instance is an explicit user choice and therefore resolves independently

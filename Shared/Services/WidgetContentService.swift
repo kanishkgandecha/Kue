@@ -92,6 +92,26 @@ enum WidgetContentService {
         isDateAndStatusLive(event, now: now)
     }
 
+    /// Post-Phase-12 fix — Lock Screen widget event selection's *new-selection* eligibility
+    /// (the in-app selector's own event list), a third independent policy alongside the two
+    /// above. Explicit about `isCancelled`/`isSkipped`/`isManuallyCompleted` rather than
+    /// leaning on `isDateAndStatusLive` alone: this feature's own spec names those three (plus
+    /// "not archived") as separate criteria, and — unlike either policy above — deliberately
+    /// *includes* `.awaitingOutcome` as eligible. Next Up/Dedicated exclude it because an
+    /// unconfirmed-outcome event needs a decision, not a fresh countdown pick; a Lock Screen
+    /// selection the user is *already* explicitly tracking should keep showing something
+    /// ("Needs Review," via the same accessory rendering `.awaitingOutcome` already gets)
+    /// rather than this eligibility check itself vetoing it. Never consulted by widget
+    /// *resolution* (`LockScreenWidgetContentService.resolve`) — an already-selected event
+    /// keeps resolving by UUID regardless of eligibility; this is only what the selector offers
+    /// for a *new* pick.
+    static func isEligibleForLockScreenSelection(_ event: KueEvent, now: Date = .now) -> Bool {
+        guard event.status != .archived else { return false }
+        guard !event.isCancelled, !event.isSkipped, !event.isManuallyCompleted else { return false }
+        let eligible: Set<EventStatus> = [.upcoming, .preparing, .tomorrow, .today, .active, .awaitingOutcome]
+        return eligible.contains(EventStatusEngine.derive(for: event, now: now))
+    }
+
     /// The unconfigured-widget default: soonest eligible event — deterministic, ties broken
     /// by id so the same input set always yields the same winner.
     static func nextUpEvent(from events: [KueEvent], now: Date = .now) -> KueEvent? {

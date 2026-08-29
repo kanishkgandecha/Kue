@@ -235,6 +235,31 @@ struct SettingsView: View {
                 Text("Kue tracks one event's Live Activity at a time, shown on the Lock Screen and Dynamic Island. The next task's title stays hidden until you turn it on.")
             }
 
+            // Post-Phase-12 fix — app-managed Lock Screen widget event selection, independent
+            // of WidgetKit's own long-press/Edit Widget flow.
+            Section {
+                NavigationLink {
+                    LockScreenEventSelectionView()
+                } label: {
+                    LabeledContent("Lock Screen Event") {
+                        if let id = LockScreenEventSelection.current, let event = try? modelContext.fetch(
+                            FetchDescriptor<KueEvent>(predicate: #Predicate { $0.id == id })
+                        ).first {
+                            Text(event.title)
+                        } else if LockScreenEventSelection.current != nil {
+                            Text("Unavailable")
+                        } else {
+                            Text("None")
+                        }
+                    }
+                }
+                .accessibilityIdentifier("lockScreenEventSettingsLink")
+            } header: {
+                Text("Widgets")
+            } footer: {
+                Text("Choose which event Kue's Lock Screen widgets show. This applies to every placed Lock Screen widget — they can't each track a different event.")
+            }
+
             Section {
                 #if KUE_PERSONAL_BUILD
                 // Kue 2.0 Phase 12 — docs/27: this build's entitlements structurally exclude
