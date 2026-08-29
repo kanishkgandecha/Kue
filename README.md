@@ -1,4 +1,4 @@
-```markdown
+
 # Kue 2.0
 
 A privacy-focused native iOS application for planning, tracking, and remembering important events.
