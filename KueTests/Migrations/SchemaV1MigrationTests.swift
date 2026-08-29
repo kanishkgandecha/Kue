@@ -24,6 +24,7 @@ import SwiftData
 @testable import Kue
 
 @MainActor
+@Suite(.serialized, .migrationStoreSerialized)
 struct SchemaV1MigrationTests {
     @Test func aRealV1StoreOpensWithoutLossThroughTheCurrentMigrationPlan() throws {
         let url = MigrationTestSupport.makeTemporaryStoreURL()

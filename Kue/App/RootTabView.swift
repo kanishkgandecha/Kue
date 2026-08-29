@@ -50,6 +50,7 @@ struct RootTabView: View {
     // Kue 2.0 Phase 10 — docs/24 "J." deep-link destinations.
     @State private var pendingSearchQuery: String?
     @State private var quickAddFormInput: QuickAddFormInput?
+    @State private var isShowingOnboarding = OnboardingPreference.shouldPresent
     @Environment(\.modelContext) private var modelContext
     @Environment(\.nlParser) private var nlParser
     @Environment(\.aiAvailabilityChecker) private var aiAvailabilityChecker
@@ -103,7 +104,9 @@ struct RootTabView: View {
 
             Tab("Settings", systemImage: "gearshape", value: RootDestination.settings) {
                 NavigationStack {
-                    SettingsView()
+                    SettingsView(showOnboarding: {
+                        isShowingOnboarding = true
+                    })
                 }
             }
             .accessibilityIdentifier("tab-settings")
@@ -152,6 +155,9 @@ struct RootTabView: View {
         }
         .sheet(item: $quickAddFormInput) { input in
             EventFormView(prefilledDraft: input.draft, ambiguities: input.ambiguities, source: .shortcuts)
+        }
+        .fullScreenCover(isPresented: $isShowingOnboarding) {
+            OnboardingView()
         }
     }
 

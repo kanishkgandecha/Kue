@@ -227,7 +227,12 @@ final class CalendarIntegrationUITests: XCTestCase {
         launch(extraArguments: [UITestLaunchConfiguration.fakeCalendarPreLinkedConflictArgument])
         app.staticTexts["Fake Prelinked Conflict Event"].tap()
 
-        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "calendarLinkStatusExternallyModified").firstMatch.waitForExistence(timeout: 5))
+        // Same pre-existing `Form`-materialization issue `scrollUpUntilHittable`'s own header
+        // documents (Phase 7) — the status label sits below what's rendered on first appearance
+        // for this fixture, same as `updateCalendarEventButton` below it.
+        let statusLabel = app.descendants(matching: .any).matching(identifier: "calendarLinkStatusExternallyModified").firstMatch
+        statusLabel.scrollUpUntilHittable(in: app)
+        XCTAssertTrue(statusLabel.waitForExistence(timeout: 5))
 
         let updateCalendarEventButton = app.buttons["updateCalendarEventButton"]
         updateCalendarEventButton.scrollUpUntilHittable(in: app)

@@ -7,17 +7,35 @@
 		<key>Kue.xcscheme_^#shared#^_</key>
 		<dict>
 			<key>orderHint</key>
-			<integer>0</integer>
+			<integer>2</integer>
 		</dict>
 		<key>KueShare.xcscheme_^#shared#^_</key>
 		<dict>
 			<key>orderHint</key>
-			<integer>1</integer>
+			<integer>0</integer>
 		</dict>
 		<key>KueWidget.xcscheme_^#shared#^_</key>
 		<dict>
 			<key>orderHint</key>
-			<integer>2</integer>
+			<integer>1</integer>
+		</dict>
+	</dict>
+	<key>SuppressBuildableAutocreation</key>
+	<dict>
+		<key>2678A5A6303DFB6300C1188B</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+		<key>51131C3C87C242E89BC3120D</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+		<key>959B72BFB1B17F264687FCC2</key>
+		<dict>
+			<key>primary</key>
+			<true/>
 		</dict>
 	</dict>
 </dict>

@@ -16,9 +16,12 @@
 import SwiftUI
 import SwiftData
 import UserNotifications
+import UIKit
 
 struct SettingsView: View {
+    var showOnboarding: (() -> Void)?
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.openURL) private var openURL
     @Environment(\.calendarProvider) private var calendarProvider
     // Kue 2.0 Phase 7 — requirement 32/34: the one destructive confirmation this screen has.
     @Environment(\.kueHaptics) private var haptics
@@ -48,15 +51,38 @@ struct SettingsView: View {
     @State private var syncPersistentState = SyncCoordinator.shared.stateStore.load()
     @State private var isReviewingAccountChange = false
 
+    // MARK: Kue 2.0 Phase 12 — Backup & Restore (docs/28)
+    @State private var isExportingBackup = false
+    @State private var backupExportDocument: BackupFileDocument?
+    @State private var isImportingBackup = false
+    @State private var pendingRestorePayload: BackupPayload?
+    @State private var pendingRestoreEnvelope: BackupEnvelope?
+    @State private var isConfirmingRestore = false
+    @State private var backupAlertMessage: String?
+
     /// Injected for tests (requirement 10) — the live default is what KueApp effectively
     /// uses everywhere else.
     var scheduler: NotificationScheduling = SystemNotificationScheduler.shared
     var widgetReloader: WidgetReloading = SystemWidgetReloader.shared
 
+    init(
+        showOnboarding: (() -> Void)? = nil,
+        scheduler: NotificationScheduling = SystemNotificationScheduler.shared,
+        widgetReloader: WidgetReloading = SystemWidgetReloader.shared
+    ) {
+        self.scheduler = scheduler
+        self.widgetReloader = widgetReloader
+        self.showOnboarding = showOnboarding
+    }
+
     var body: some View {
         Form {
             Section {
                 permissionStatusRow
+                if authorizationStatus == .denied {
+                    Button("Open Notification Settings") { openSystemSettings() }
+                        .accessibilityIdentifier("openNotificationSettingsButton")
+                }
             } header: {
                 Text("Notifications")
             } footer: {
@@ -136,6 +162,9 @@ struct SettingsView: View {
                     }
                     .accessibilityIdentifier("requestCalendarAccessButton")
                     .disabled(isRequestingCalendarAccess)
+                } else if calendarAuthorizationState == .denied {
+                    Button("Open Calendar Settings") { openSystemSettings() }
+                        .accessibilityIdentifier("openCalendarSettingsButton")
                 }
             } header: {
                 Text("Calendar")
@@ -207,6 +236,17 @@ struct SettingsView: View {
             }
 
             Section {
+                #if KUE_PERSONAL_BUILD
+                // Kue 2.0 Phase 12 — docs/27: this build's entitlements structurally exclude
+                // CloudKit (the free Apple Developer Personal Team can't provision it), so
+                // there's no working toggle to show — a disabled one that silently does
+                // nothing on tap would be dishonest. `SyncPreference` is also forced off at
+                // the source (see SyncPreference.swift), so this copy and that behavior can
+                // never drift apart.
+                Label("iCloud Sync Requires Apple Developer Program", systemImage: "icloud.slash")
+                    .foregroundStyle(KueColor.secondaryText)
+                    .accessibilityIdentifier("iCloudSyncUnavailableLabel")
+                #else
                 Toggle("iCloud Sync", isOn: Binding(
                     get: { isSyncEnabled },
                     set: { newValue in
@@ -264,14 +304,48 @@ struct SettingsView: View {
                             .accessibilityIdentifier("reviewAccountChangeButton")
                     }
                 }
+                #endif
             } header: {
                 Text("iCloud Sync")
             } footer: {
+                #if KUE_PERSONAL_BUILD
+                Text("This build was installed directly from source without a paid Apple Developer Program membership, which iCloud sync requires. Your events stay on this device only. Back up from Settings → Backup & Restore before reinstalling.")
+                #else
                 // docs/26 "K.": privacy explanation — never claims immediacy.
                 Text("Syncs your events privately through your own iCloud account — Kue has no server of its own and no one else can see your data. Sync timing depends on network and iCloud availability, not guaranteed immediate.")
+                #endif
             }
 
             Section {
+                Button("Export Backup") {
+                    do {
+                        let data = try BackupCoder.exportData(context: modelContext)
+                        backupExportDocument = BackupFileDocument(data: data)
+                        isExportingBackup = true
+                    } catch {
+                        backupAlertMessage = "Couldn't create a backup: \(error.localizedDescription)"
+                    }
+                }
+                .accessibilityIdentifier("exportBackupButton")
+
+                Button("Restore from Backup") {
+                    isImportingBackup = true
+                }
+                .accessibilityIdentifier("restoreBackupButton")
+            } header: {
+                Text("Backup & Restore")
+            } footer: {
+                // docs/28 — honest about what restore does: merges by matching event, never a
+                // silent full replace (see BackupRestoreService.swift for why).
+                Text("Export saves everything Kue knows about — events, tasks, templates, and settings — to a file you control. Restoring merges a backup into what's already on this device; it never deletes anything.")
+            }
+
+            Section {
+                if let showOnboarding {
+                    Button("Show Welcome Guide") { showOnboarding() }
+                        .accessibilityIdentifier("showOnboardingButton")
+                }
+
                 Button("Delete Everything", role: .destructive) {
                     isConfirmingDeleteEverything = true
                 }
@@ -324,6 +398,94 @@ struct SettingsView: View {
                 }
             }
             .accessibilityIdentifier("confirmAccountChangeButton")
+        }
+        // MARK: Kue 2.0 Phase 12 — Backup & Restore (docs/28)
+        .fileExporter(
+            isPresented: $isExportingBackup,
+            document: backupExportDocument,
+            contentType: .kueBackup,
+            defaultFilename: "Kue Backup \(Date().formatted(date: .numeric, time: .omitted))"
+        ) { result in
+            if case .failure(let error) = result {
+                backupAlertMessage = "Couldn't save the backup: \(error.localizedDescription)"
+            }
+        }
+        .fileImporter(isPresented: $isImportingBackup, allowedContentTypes: [.kueBackup]) { result in
+            switch result {
+            case .failure(let error):
+                backupAlertMessage = "Couldn't open that file: \(error.localizedDescription)"
+            case .success(let url):
+                let didStartAccessing = url.startAccessingSecurityScopedResource()
+                defer { if didStartAccessing { url.stopAccessingSecurityScopedResource() } }
+                do {
+                    let data = try Data(contentsOf: url)
+                    let (envelope, payload) = try BackupCoder.decodeAndValidate(data)
+                    pendingRestoreEnvelope = envelope
+                    pendingRestorePayload = payload
+                    isConfirmingRestore = true
+                } catch let error as BackupError {
+                    backupAlertMessage = restoreErrorMessage(for: error)
+                } catch {
+                    backupAlertMessage = "Couldn't read that backup file."
+                }
+            }
+        }
+        .confirmationDialog(
+            restoreConfirmationTitle,
+            isPresented: $isConfirmingRestore,
+            titleVisibility: .visible
+        ) {
+            Button("Restore") {
+                guard let payload = pendingRestorePayload else { return }
+                Task {
+                    do {
+                        let summary = try await BackupRestoreService.restore(payload: payload, context: modelContext)
+                        let eventCount = summary.eventsInserted + summary.eventsUpdated
+                        backupAlertMessage = "Restored \(eventCount) event\(eventCount == 1 ? "" : "s")."
+                        preference = UserPreferenceStore.current(context: modelContext)
+                    } catch {
+                        backupAlertMessage = "Restore failed: \(error.localizedDescription)"
+                    }
+                    pendingRestorePayload = nil
+                    pendingRestoreEnvelope = nil
+                }
+            }
+            .accessibilityIdentifier("confirmRestoreBackupButton")
+            Button("Cancel", role: .cancel) {
+                pendingRestorePayload = nil
+                pendingRestoreEnvelope = nil
+            }
+        }
+        .alert(
+            "Backup",
+            isPresented: Binding(get: { backupAlertMessage != nil }, set: { if !$0 { backupAlertMessage = nil } })
+        ) {
+            Button("OK") { backupAlertMessage = nil }
+        } message: {
+            Text(backupAlertMessage ?? "")
+        }
+    }
+
+    // MARK: Kue 2.0 Phase 12 — Backup & Restore helpers (docs/28)
+
+    private var restoreConfirmationTitle: String {
+        guard let payload = pendingRestorePayload, let envelope = pendingRestoreEnvelope else {
+            return "Restore this backup?"
+        }
+        let date = envelope.exportedAt.formatted(date: .abbreviated, time: .shortened)
+        return "Restore \(payload.events.count) event\(payload.events.count == 1 ? "" : "s") from a backup made \(date)? This merges into what's already on this device — nothing existing is deleted."
+    }
+
+    private func restoreErrorMessage(for error: BackupError) -> String {
+        switch error {
+        case .notABackupFile:
+            return "That file isn't a Kue backup."
+        case .checksumMismatch:
+            return "That backup file is corrupted or was edited outside Kue."
+        case .unsupportedFutureFormatVersion:
+            return "That backup was made by a newer version of Kue. Update Kue and try again."
+        case .malformedPayload:
+            return "That backup file is corrupted."
         }
     }
 
@@ -409,6 +571,15 @@ struct SettingsView: View {
         isRequestingCalendarAccess = true
         calendarAuthorizationState = await calendarProvider.requestAccess()
         isRequestingCalendarAccess = false
+    }
+
+    private func openSystemSettings() {
+        // Kue 2.0 Phase 12 — docs/28: `UIApplication.openSettingsURLString` is Apple's own
+        // documented constant for "this app's page in Settings.app," not a hardcoded literal —
+        // the exact scheme string isn't part of any public contract and has changed across iOS
+        // versions before.
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        openURL(url)
     }
 
     private func intensityDescription(_ intensity: NotificationIntensity) -> String {

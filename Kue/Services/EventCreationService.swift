@@ -83,6 +83,29 @@ enum EventCreationService {
         await spotlightIndexer.index([SpotlightEventPayloadBuilder.payload(for: event, now: now)])
     }
 
+    /// Fire-and-forget UI callers must not carry a view-owned `ModelContext` or a live
+    /// SwiftData model across dismissal. A recurring "This and Future" edit deletes and saves
+    /// sibling rows before the form closes; retaining the original model in an asynchronous
+    /// task can consequently leave unresolved faults backed by a detached context. Cross the
+    /// asynchronous boundary using the stable UUID instead, then refetch in a fresh context
+    /// owned by the task.
+    static func reconcileAfterWrite(
+        eventID: UUID,
+        container: ModelContainer,
+        now: Date = .now,
+        scheduler: NotificationScheduling = SystemNotificationScheduler.shared,
+        liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared,
+        spotlightIndexer: SpotlightIndexing = SystemSpotlightIndexer.shared
+    ) async {
+        let context = ModelContext(container)
+        let events = (try? context.fetch(FetchDescriptor<KueEvent>())) ?? []
+        guard let event = events.first(where: { $0.id == eventID }) else { return }
+        await reconcileAfterWrite(
+            event, context: context, now: now, scheduler: scheduler,
+            liveActivityManager: liveActivityManager, spotlightIndexer: spotlightIndexer
+        )
+    }
+
     /// Kue 2.0 Phase 3 — turns `event` into the origin of a brand-new series when the draft's
     /// recurrence controls are on, and materializes the rest of the initial horizon. A no-op
     /// (`draft.recurrenceRule == nil`) for every non-recurring create.

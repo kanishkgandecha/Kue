@@ -13,6 +13,21 @@ import Foundation
 import SwiftData
 @testable import Kue
 
+// Kue 2.0 Phase 12 — docs/28 regression audit: every `OccurrenceReconciliationService` call
+// this suite exercises (`applyEdit`/`materializeInitialOccurrences`/`replenishAll`) internally
+// calls `SyncOutbox.markEventDirty`/`markEventDeleted` with that function's *default* `store:`
+// parameter — the real, process-global, file-backed `SystemCloudSyncStateStore.shared`, not a
+// `FakeCloudSyncStateStore` (there's no way to inject one through `OccurrenceReconciliationService`'s
+// own API). With no `.serialized` trait, Swift Testing ran all 18 tests here fully in parallel
+// by default, all hammering that same real file concurrently — a genuine pre-existing race
+// (predates this phase; Phase 11 added the `SyncOutbox` calls into this Phase 3 service without
+// updating this suite) that a full combined-suite run surfaced. `.serialized` alone (this suite
+// against itself) was NOT sufficient — several other suites (`EventCRUDTests`,
+// `AppIntentMutationConsistencyTests`, `EventDuplicationServiceTests`,
+// `LiveActivityReconcilerTests`, `EventActionsNotificationTests`) call `EventActions` mutations
+// that hit the exact same real default file, so a plain per-suite fix still raced against those.
+// See EventActionsSyncOutboxTestLock.swift — the same cross-suite lock is applied to all of them.
+@Suite(.serialized, .eventActionsSyncOutboxSerialized)
 @MainActor
 struct OccurrenceReconciliationServiceTests {
     private func makeContext() -> ModelContext {

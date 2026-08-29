@@ -304,7 +304,9 @@ extension SystemCloudSyncTransport {
                 }
             }
 
-        case .fetchedDatabaseChanges, .willFetchChanges, .willSendChanges:
+        case .fetchedDatabaseChanges, .willFetchChanges, .willSendChanges,
+             .accountChange, .sentDatabaseChanges, .willFetchRecordZoneChanges,
+             .didFetchRecordZoneChanges:
             break
 
         case .didFetchChanges:

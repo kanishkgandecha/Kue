@@ -49,14 +49,37 @@ final class SyncCoordinator {
 
     init(
         stateStore: CloudSyncStatePersisting = SystemCloudSyncStateStore.shared,
-        transport: CloudSyncTransporting = SystemCloudSyncTransport.shared,
-        accountProvider: CloudAccountProviding = SystemCloudAccountProvider(),
+        transport: CloudSyncTransporting = SyncCoordinator.defaultTransport,
+        accountProvider: CloudAccountProviding = SyncCoordinator.defaultAccountProvider,
         clock: SyncClock = SystemSyncClock()
     ) {
         self.stateStore = stateStore
         self.transport = transport
         self.accountProvider = accountProvider
         self.clock = clock
+    }
+
+    /// Kue 2.0 Phase 12 — docs/27: the structural half of Personal-build CloudKit exclusion.
+    /// `KuePersonal.entitlements` already omits the CloudKit keys (so any real CloudKit call
+    /// would fail at the OS level), but the spec requires more than that: no `CKContainer`/
+    /// `CKDatabase`/`CKSyncEngine` may even be *instantiated* in this build. `SystemCloudSyncTransport.shared`
+    /// and `SystemCloudAccountProvider()` each construct a `CKContainer` the moment they're
+    /// evaluated as a default-parameter value — so the swap has to happen here, at the type
+    /// chosen for the default, not inside `sync(context:)`.
+    nonisolated private static var defaultTransport: CloudSyncTransporting {
+        #if KUE_PERSONAL_BUILD
+        NullCloudSyncTransport()
+        #else
+        SystemCloudSyncTransport.shared
+        #endif
+    }
+
+    nonisolated private static var defaultAccountProvider: CloudAccountProviding {
+        #if KUE_PERSONAL_BUILD
+        NullCloudAccountProvider()
+        #else
+        SystemCloudAccountProvider()
+        #endif
     }
 
     /// Must match `UITestLaunchConfiguration.fakeSyncArgument` (KueUITests/) exactly — same

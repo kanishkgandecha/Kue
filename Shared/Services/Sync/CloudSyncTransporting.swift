@@ -73,6 +73,24 @@ nonisolated struct SyncFetchResult: Equatable {
     var error: SyncTransportError?
 }
 
+/// Kue 2.0 Phase 12 — docs/27. The transport `SyncCoordinator` installs under
+/// `KUE_PERSONAL_BUILD` in place of `SystemCloudSyncTransport`: never constructs a
+/// `CKContainer`/`CKDatabase`/`CKSyncEngine` — there is nothing here that imports CloudKit.
+/// `SyncCoordinator` forces `SyncPreference.isEnabled` to `false` in this build, so none of
+/// these methods are ever actually reached; every one fails closed (reports "not
+/// authenticated") on the off chance something calls in directly.
+struct NullCloudSyncTransport: CloudSyncTransporting {
+    func ensureZoneExists() async -> Result<Void, SyncTransportError> { .failure(.notAuthenticated) }
+    func send(
+        eventSaves: [EventSyncRecord],
+        eventDeletions: [UUID],
+        exclusionSaves: [RecurrenceExclusionSyncRecord],
+        exclusionDeletions: [UUID]
+    ) async -> SyncSendResult { SyncSendResult() }
+    func fetchChanges() async -> SyncFetchResult { SyncFetchResult(error: .notAuthenticated) }
+    func resetEngineState() async {}
+}
+
 nonisolated protocol CloudSyncTransporting: Sendable {
     /// Idempotent — safe to call every launch. docs/26 "N.": zone-not-found/zone-busy are
     /// real possible outcomes here, not just at send/fetch time.

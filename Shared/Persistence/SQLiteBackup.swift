@@ -58,9 +58,22 @@ enum SQLiteBackup {
         guard let backup = sqlite3_backup_init(destinationDB, "main", sourceDB, "main") else {
             throw BackupError.cannotInitializeBackup
         }
-        // -1 == copy every remaining page in one step; small enough databases (this app's)
-        // that there's no benefit to chunking it with progress callbacks.
-        let stepResult = sqlite3_backup_step(backup, -1)
+        // Kue 2.0 Phase 12 — docs/28 regression audit: SQLite's own Online Backup API docs
+        // document `SQLITE_BUSY`/`SQLITE_LOCKED` as expected, transient outcomes of
+        // `sqlite3_backup_step` whenever the source is briefly locked by another connection —
+        // "it is recommended that the sleeper back off and retry." A full-suite test run (many
+        // SwiftData/Core Data stores opening concurrently) surfaced exactly this on a real
+        // on-disk store; treating either as a hard failure was always wrong, in tests and on a
+        // real device alike (a momentary lock during a real Kue 1.0 → 2.0 upgrade must not fail
+        // the whole recovery). -1 == copy every remaining page in one step; small enough
+        // databases (this app's) that there's no benefit to chunking it with progress callbacks.
+        var stepResult = sqlite3_backup_step(backup, -1)
+        var retriesRemaining = 5
+        while (stepResult == SQLITE_BUSY || stepResult == SQLITE_LOCKED), retriesRemaining > 0 {
+            retriesRemaining -= 1
+            Thread.sleep(forTimeInterval: 0.05)
+            stepResult = sqlite3_backup_step(backup, -1)
+        }
         let message = destinationDB.flatMap { String(cString: sqlite3_errmsg($0)) } ?? "unknown error"
         sqlite3_backup_finish(backup)
         guard stepResult == SQLITE_DONE else {

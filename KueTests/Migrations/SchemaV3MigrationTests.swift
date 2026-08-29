@@ -24,6 +24,7 @@ import SwiftData
 @testable import Kue
 
 @MainActor
+@Suite(.serialized, .migrationStoreSerialized)
 struct SchemaV3MigrationTests {
     @Test func migratedV1EventsGetNilCalendarLinkageFields() throws {
         let url = MigrationTestSupport.makeTemporaryStoreURL()

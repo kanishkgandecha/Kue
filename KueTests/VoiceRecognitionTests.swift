@@ -86,7 +86,7 @@ struct VoiceRecognitionTests {
         let (coordinator, _) = makeCoordinator(speechRecognizer: fake)
         await coordinator.startRecording()
 
-        try? await Task.sleep(nanoseconds: 200_000_000)
+        await fake.waitForAutomaticDelivery()
 
         #expect(coordinator.phase == .reviewing)
         #expect(coordinator.transcript == "Fake Voice Interview Friday at 10 AM")
@@ -126,7 +126,11 @@ struct VoiceRecognitionTests {
         fake.autoDeliverAfterNanoseconds = 50_000_000
         await coordinator.startRecording()
 
-        try? await Task.sleep(nanoseconds: 600_000_000) // long enough for both deliveries to have fired
+        // Waits for *both* the fresh delivery and the first (cancelled, still-pending) one —
+        // proving the stale result was correctly ignored needs the stale task to have actually
+        // run its course, not just elapsed wall-clock time (Task.sleep under a loaded suite is
+        // exactly what caused this test's own Phase 12 flake).
+        await fake.waitForAllAutomaticDeliveries()
 
         #expect(coordinator.transcript == "Fresh Result")
     }
@@ -158,7 +162,7 @@ struct VoiceRecognitionTests {
         let (coordinator, _) = makeCoordinator(speechRecognizer: fake)
         await coordinator.startRecording()
 
-        try? await Task.sleep(nanoseconds: 200_000_000)
+        await fake.waitForAutomaticDelivery()
 
         #expect(coordinator.phase == .noSpeechDetected)
     }
@@ -173,7 +177,7 @@ struct VoiceRecognitionTests {
         let (coordinator, _) = makeCoordinator(speechRecognizer: fake)
         await coordinator.startRecording()
 
-        try? await Task.sleep(nanoseconds: 200_000_000)
+        await fake.waitForAutomaticDelivery()
 
         if case .error = coordinator.phase {} else {
             Issue.record("expected .error, got \(coordinator.phase)")
@@ -190,7 +194,7 @@ struct VoiceRecognitionTests {
         let (coordinator, _) = makeCoordinator(speechRecognizer: fake)
         await coordinator.startRecording()
 
-        try? await Task.sleep(nanoseconds: 200_000_000)
+        await fake.waitForAutomaticDelivery()
 
         #expect(coordinator.phase == .reviewing)
         #expect(coordinator.transcript == "Partial before failure")

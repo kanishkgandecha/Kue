@@ -23,6 +23,7 @@ import SwiftData
 @testable import Kue
 
 @MainActor
+@Suite(.serialized, .migrationStoreSerialized)
 struct SchemaV2MigrationTests {
     @Test func migratedV1EventsGetNonRecurringDefaultsForEveryNewField() throws {
         let url = MigrationTestSupport.makeTemporaryStoreURL()

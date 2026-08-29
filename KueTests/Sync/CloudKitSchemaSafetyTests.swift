@@ -21,9 +21,10 @@ import Foundation
 import SwiftData
 @testable import Kue
 
-// `.serialized` — see `SyncCoordinatorTests`'s own header: `SyncPreference` is backed by the
-// real, process-global App Group `UserDefaults` suite.
-@Suite(.serialized)
+// `.syncPreferenceSerialized` — see `SyncPreferenceTestLock.swift`: `SyncPreference` is real,
+// process-global App Group `UserDefaults` state also mutated by the unrelated
+// `SyncCoordinatorTests` suite, and plain `.serialized` only serializes tests within one suite.
+@Suite(.syncPreferenceSerialized)
 struct CloudKitSchemaSafetyTests {
     @Test func everyModelConfigurationExplicitlyDisablesAutomaticCloudKitMirroring() {
         // docs/26 "A.": the literal enforcement point every `ModelConfiguration` in

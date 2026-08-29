@@ -13,6 +13,11 @@ import Foundation
 import SwiftData
 @testable import Kue
 
+// `.eventActionsSyncOutboxSerialized` — see EventActionsSyncOutboxTestLock.swift: `EventActions.
+// skip`/`complete`/`archive`/`unarchive`/`unskip` all touch the real, process-global
+// `SystemCloudSyncStateStore.shared`.
+@Suite(.eventActionsSyncOutboxSerialized)
+@MainActor
 struct EventCRUDTests {
 
     private func makeContext() -> ModelContext {
@@ -105,7 +110,13 @@ struct EventCRUDTests {
         context.insert(event)
         try context.save()
 
-        EventActions.skip(event, context: context)
+        EventActions.skip(
+            event,
+            context: context,
+            scheduler: FakeNotificationScheduler(),
+            liveActivityManager: FakeLiveActivityManager(),
+            spotlightIndexer: FakeSpotlightIndexer()
+        )
         #expect(event.isSkipped)
         #expect(event.skippedAt != nil)
         #expect(event.status == .cancelled)
@@ -122,7 +133,13 @@ struct EventCRUDTests {
         EventActions.complete(event, context: context)
         #expect(event.isManuallyCompleted)
 
-        EventActions.skip(event, context: context)
+        EventActions.skip(
+            event,
+            context: context,
+            scheduler: FakeNotificationScheduler(),
+            liveActivityManager: FakeLiveActivityManager(),
+            spotlightIndexer: FakeSpotlightIndexer()
+        )
         #expect(event.isSkipped)
         #expect(event.isManuallyCompleted == false)
     }
@@ -148,10 +165,22 @@ struct EventCRUDTests {
         try context.save()
         #expect(event.status == .upcoming)
 
-        EventActions.skip(event, context: context)
+        EventActions.skip(
+            event,
+            context: context,
+            scheduler: FakeNotificationScheduler(),
+            liveActivityManager: FakeLiveActivityManager(),
+            spotlightIndexer: FakeSpotlightIndexer()
+        )
         #expect(event.status == .cancelled)
 
-        await EventActions.unskip(event, context: context)
+        await EventActions.unskip(
+            event,
+            context: context,
+            scheduler: FakeNotificationScheduler(),
+            liveActivityManager: FakeLiveActivityManager(),
+            spotlightIndexer: FakeSpotlightIndexer()
+        )
         #expect(event.isSkipped == false)
         #expect(event.status == .upcoming)
     }
@@ -165,10 +194,22 @@ struct EventCRUDTests {
         try context.save()
         #expect(event.status == .upcoming)
 
-        await EventActions.archive(event, context: context)
+        EventActions.archive(
+            event,
+            context: context,
+            scheduler: FakeNotificationScheduler(),
+            liveActivityManager: FakeLiveActivityManager(),
+            spotlightIndexer: FakeSpotlightIndexer()
+        )
         #expect(event.status == .archived)
 
-        await EventActions.unarchive(event, context: context)
+        await EventActions.unarchive(
+            event,
+            context: context,
+            scheduler: FakeNotificationScheduler(),
+            liveActivityManager: FakeLiveActivityManager(),
+            spotlightIndexer: FakeSpotlightIndexer()
+        )
         #expect(event.status == .upcoming)
     }
 }

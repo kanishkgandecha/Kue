@@ -150,6 +150,12 @@ final class FakeVoiceSpeechRecognizer: VoiceSpeechRecognizing {
     /// observable by a UI test's own polling instead of SwiftUI coalescing them into one redraw.
     var interUpdateDelayNanoseconds: UInt64 = 0
     private(set) var startCallCount = 0
+    private var automaticDeliveryTask: Task<Void, Never>?
+    /// Kue 2.0 Phase 12 — every delivery task ever scheduled, not just the latest. A test that
+    /// starts a second session while the first's delayed delivery is still pending (proving the
+    /// stale one never clobbers the fresh one) needs to wait for *both*, not just whichever
+    /// `startRecognition` call happened last — see `waitForAllAutomaticDeliveries()`.
+    private var allAutomaticDeliveryTasks: [Task<Void, Never>] = []
 
     func recognizerAvailability() -> VoiceRecognizerAvailability { availabilityToReturn }
 
@@ -166,7 +172,7 @@ final class FakeVoiceSpeechRecognizer: VoiceSpeechRecognizing {
             let updates = updatesToDeliver
             let failure = failureToDeliver
             let gap = interUpdateDelayNanoseconds
-            Task {
+            let task = Task {
                 try? await Task.sleep(nanoseconds: autoDeliverAfterNanoseconds)
                 guard !handle.isCancelled else { return }
                 for (index, update) in updates.enumerated() {
@@ -178,8 +184,25 @@ final class FakeVoiceSpeechRecognizer: VoiceSpeechRecognizing {
                 }
                 if let failure { onFailure(failure) }
             }
+            automaticDeliveryTask = task
+            allAutomaticDeliveryTasks.append(task)
         }
         return handle
+    }
+
+    /// Deterministic completion seam for unit tests. Waiting on the fake's actual delivery
+    /// task is reliable under a fully-loaded suite; sleeping for an estimated wall-clock
+    /// interval is not and caused the Phase 12 full-suite voice flakes.
+    func waitForAutomaticDelivery() async {
+        await automaticDeliveryTask?.value
+    }
+
+    /// Same rationale as `waitForAutomaticDelivery()`, but for a test that starts a second
+    /// recording session while the first's delayed delivery is still outstanding — awaiting
+    /// only `automaticDeliveryTask` (the latest one) wouldn't wait for the *first*, now-stale
+    /// task the test still needs to have settled before asserting it was correctly ignored.
+    func waitForAllAutomaticDeliveries() async {
+        for task in allAutomaticDeliveryTasks { await task.value }
     }
 
     /// Test-only — manually deliver the configured updates/failure (for `KueTests`, which

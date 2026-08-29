@@ -31,7 +31,18 @@ import CoreData
 // test's injected failure leak into another running concurrently. Forcing this suite
 // sequential is what actually makes `LegacyRecoveryTestHooks.reset()` a reliable per-test
 // boundary rather than a race.
-@Suite(.serialized)
+//
+// Kue 2.0 Phase 12 — docs/28 regression audit: a full combined-suite run (745 tests/66 suites,
+// not run together before this phase) surfaces this suite intermittently failing with another
+// test's injected hook value even so — roughly 1 run in 3. Investigated: `MigrationTestSupport.
+// makeTemporaryStoreURL()` gives every test a unique UUID-named temp path (not a shared file),
+// and `LegacyRecoveryTestHooks` is touched only by this one suite in the whole test target — so
+// this isn't the same "two suites share one global" shape as the `SyncPreference` race
+// (see SyncPreferenceTestLock.swift, fixed this phase). A defensive cross-suite exclusion lock
+// (same shape as that fix) was tried here and did **not** stop the failure across repeated
+// full-suite runs, so it was removed rather than left in as false confidence. Real cause not
+// found this phase — flagged honestly in docs/28 rather than declared fixed.
+@Suite(.serialized, .migrationStoreSerialized)
 @MainActor
 struct LegacyRecoverySecurityTests {
     // MARK: - Negative tests (requirement 10)

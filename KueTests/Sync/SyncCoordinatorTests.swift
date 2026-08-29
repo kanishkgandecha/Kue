@@ -13,12 +13,14 @@ import Foundation
 import SwiftData
 @testable import Kue
 
-// `.serialized`: every test here reads/writes `SyncPreference`, which is backed by the real
-// App Group `UserDefaults` suite (process-global state, same as `LegacyRecoveryTestHooks`) —
-// Swift Testing parallelizes tests within a suite by default, which would let one test's
-// `SyncPreference.setEnabled` race another's concurrently. Forcing this suite sequential is
-// what makes each test's own `setEnabled` call a reliable precondition rather than a race.
-@Suite(.serialized)
+// `.syncPreferenceSerialized` (see SyncPreferenceTestLock.swift): every test here reads/writes
+// `SyncPreference`, real process-global App Group `UserDefaults` state (same as
+// `LegacyRecoveryTestHooks`) also mutated by the unrelated `CloudKitSchemaSafetyTests` suite.
+// Plain `.serialized` only serializes tests *within* this suite — it doesn't stop a
+// concurrently-running different suite's `SyncPreference.setEnabled` from racing these tests,
+// which a real combined run of both suites reproduced 100% of the time before this trait was
+// added (see SyncPreferenceTestLock.swift's header for the exact failure).
+@Suite(.syncPreferenceSerialized)
 @MainActor
 struct SyncCoordinatorTests {
     private let now = Date(timeIntervalSince1970: 1_700_000_000)

@@ -56,6 +56,7 @@ import SwiftData
 @testable import Kue
 
 @MainActor
+@Suite(.serialized, .migrationStoreSerialized)
 struct RealV1SchemaRegressionTests {
     /// Real `ZKUEEVENT` columns (from the incident's store, excluding CoreData/SwiftData's own
     /// `Z_PK`/`Z_ENT`/`Z_OPT` bookkeeping), mapped to their Swift property names. This is the

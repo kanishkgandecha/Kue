@@ -15,6 +15,9 @@ import Foundation
 import SwiftData
 @testable import Kue
 
+// `.eventActionsSyncOutboxSerialized` — see EventActionsSyncOutboxTestLock.swift: `EventActions.
+// complete` touches the real, process-global `SystemCloudSyncStateStore.shared`.
+@Suite(.eventActionsSyncOutboxSerialized)
 @MainActor
 struct LiveActivityReconcilerTests {
     private let now = Date(timeIntervalSince1970: 1_780_000_000)

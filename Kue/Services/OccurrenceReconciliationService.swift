@@ -181,6 +181,12 @@ enum OccurrenceReconciliationService {
         // Every non-exception future occurrence is about to be regenerated fresh under the new
         // template/rule — delete and re-plan rather than reconcile field-by-field.
         for member in futureNonExceptionMembers {
+            // SwiftUI can still be rendering one of these materialized siblings behind the
+            // edit sheet. Resolve its stored values before deletion so SwiftData does not
+            // detach an unresolved fault that the existing view hierarchy may read while it
+            // processes the save. Without this, editing "This and Future Occurrences" can
+            // trap in BackingData.swift (most often at `eventType`) during dismissal.
+            resolveStoredValuesBeforeDeletion(member)
             staleIdentifiers += NotificationCandidateBuilder.allIdentifiers(for: member)
             SyncOutbox.markEventDeleted(member.id, now: now) // Kue 2.0 Phase 11 — docs/26 "E."
             context.delete(member)
@@ -210,6 +216,48 @@ enum OccurrenceReconciliationService {
         for event in affected { SyncOutbox.markEventDirty(event.id) }
 
         return EditOutcome(staleNotificationIdentifiers: staleIdentifiers, affectedOccurrences: affected)
+    }
+
+    /// SwiftData invalidates a deleted model's backing data on save. Views that were already
+    /// handed that model may finish one final render during navigation dismissal, so every
+    /// stored value they can legitimately display must be faulted in before the row is
+    /// detached. Keep this list aligned with `KueEvent`'s persisted properties.
+    private static func resolveStoredValuesBeforeDeletion(_ event: KueEvent) {
+        _ = event.id
+        _ = event.title
+        _ = event.eventType
+        _ = event.startDate
+        _ = event.endDate
+        _ = event.estimatedDurationMinutes
+        _ = event.isAllDay
+        _ = event.timeZoneIdentifier
+        _ = event.location
+        _ = event.notes
+        _ = event.source
+        _ = event.priority
+        _ = event.status
+        _ = event.isCancelled
+        _ = event.cancelledAt
+        _ = event.isManuallyCompleted
+        _ = event.manuallyCompletedAt
+        _ = event.recurrence
+        _ = event.schemaVersion
+        _ = event.seriesID
+        _ = event.recurrenceAnchorDate
+        _ = event.isRecurrenceException
+        _ = event.isSkipped
+        _ = event.skippedAt
+        _ = event.externalCalendarEventIdentifier
+        _ = event.externalCalendarIdentifier
+        _ = event.externalCalendarTitle
+        _ = event.externalCalendarLastSyncedAt
+        _ = event.externalCalendarLastKnownModifiedAt
+        _ = event.tasks.count
+        _ = event.schedule?.id
+        _ = event.widgetConfiguration?.id
+        _ = event.widgetState?.id
+        _ = event.createdAt
+        _ = event.updatedAt
     }
 
     private static func applyEditableFields(_ values: EventDraft, to occurrence: KueEvent, now: Date) {

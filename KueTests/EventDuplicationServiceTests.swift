@@ -13,6 +13,9 @@ import Foundation
 import SwiftData
 @testable import Kue
 
+// `.eventActionsSyncOutboxSerialized` — see EventActionsSyncOutboxTestLock.swift: `EventActions.
+// delete` touches the real, process-global `SystemCloudSyncStateStore.shared`.
+@Suite(.eventActionsSyncOutboxSerialized)
 @MainActor
 struct EventDuplicationServiceTests {
     private let now = Date(timeIntervalSince1970: 1_000_000_000)

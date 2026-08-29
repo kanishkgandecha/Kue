@@ -19,6 +19,8 @@ import XCTest
 enum UITestLaunchConfiguration {
     /// Must match `ModelContainerFactory.uiTestLaunchArgument` exactly.
     static let isolatedStoreArgument = "-uiTestIsolatedStore"
+    /// Leaves first-run onboarding visible; isolated UI tests suppress it by default.
+    static let showOnboardingArgument = "-uiTestShowOnboarding"
 
     /// Kue 2.0 Phase 4 — must match `FakeCalendarProvider.uiTestLaunchArgument` exactly.
     /// `KueApp` installs a `FakeCalendarProvider` in place of `SystemCalendarProvider` when

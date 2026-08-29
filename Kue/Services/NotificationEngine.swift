@@ -36,8 +36,9 @@ enum NotificationEngine {
         scheduler: NotificationScheduling,
         now: Date = .now,
         requestPermissionIfNeeded: Bool = false,
-        reminderPreference: ReminderPreference = .current
+        reminderPreference: ReminderPreference? = nil
     ) async {
+        let reminderPreference = reminderPreference ?? .current
         var status = await scheduler.authorizationStatus()
         if status == .notDetermined && requestPermissionIfNeeded {
             _ = await scheduler.requestAuthorization()

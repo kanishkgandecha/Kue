@@ -81,7 +81,7 @@ import CoreData
 
 enum ModelContainerFactory {
     /// Must match the App Group entitlement on the Kue, KueWidget, and KueShare targets.
-    static let appGroupIdentifier = "group.com.kanishkgandecha.Kue"
+    nonisolated static let appGroupIdentifier = "group.com.kanishkgandecha.Kue"
 
     private static let storeFileName = "Kue.sqlite"
 
@@ -371,8 +371,18 @@ enum ModelContainerFactory {
     /// through `migrationPlan` (a currently-empty stage list is a no-op for a store that was
     /// just created from scratch), so tests exercise the same construction path production
     /// does — requirement 4.
+    ///
+    /// Kue 2.0 Phase 12 — docs/28 regression audit: `ModelConfiguration`'s in-memory
+    /// initializer takes an *optional* leading `name` (SwiftData derives `ModelConfiguration.id`,
+    /// a `URL`, from it) — every call here previously left it `nil`, so every "separate"
+    /// in-memory container this factory ever produced shared the exact same configuration
+    /// identity. A full `KueTests` run (hundreds of `makeInMemory()` calls across dozens of
+    /// concurrently-scheduled suites) surfaced this as a genuine, intermittent cross-test data
+    /// bleed — one test's fetch occasionally observing another's in-memory objects — never
+    /// reproducible with any one suite run alone, and gone entirely once each call got its own
+    /// identity below. A random per-call name guarantees two containers can never collide.
     static func makeInMemory() -> ModelContainer {
-        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: cloudKitDatabase)
+        let configuration = ModelConfiguration(UUID().uuidString, schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: cloudKitDatabase)
         do {
             return try ModelContainer(for: schema, migrationPlan: migrationPlan, configurations: [configuration])
         } catch {

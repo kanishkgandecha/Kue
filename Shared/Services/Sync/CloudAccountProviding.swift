@@ -34,6 +34,18 @@ nonisolated protocol CloudAccountProviding: Sendable {
 /// Kue/Services/Sync/SystemCloudAccountProvider.swift (app-only, imports CloudKit) is the
 /// real implementation — declared there, not here, so this file stays CloudKit-free.
 
+/// Kue 2.0 Phase 12 — docs/27. The account provider `SyncCoordinator` installs under
+/// `KUE_PERSONAL_BUILD` in place of `SystemCloudAccountProvider`: never constructs a
+/// `CKContainer`, never asks anything CloudKit-related — there is nothing to ask, this type
+/// doesn't import CloudKit. Distinct from `FakeCloudAccountProvider` below, which simulates a
+/// *working* account for tests; `SyncCoordinator` also forces `SyncPreference.isEnabled` to
+/// `false` in this build, so `currentState()` is never actually called in practice — this
+/// exists purely so the default-parameter type itself never touches CloudKit.
+struct NullCloudAccountProvider: CloudAccountProviding {
+    func currentState() async -> CloudAccountState { .noAccount }
+    func currentAccountFingerprint() async -> String? { nil }
+}
+
 final class FakeCloudAccountProvider: CloudAccountProviding, @unchecked Sendable {
     var state: CloudAccountState
     var fingerprint: String?

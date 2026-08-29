@@ -44,13 +44,14 @@ final class FakeCloudSyncTransport: CloudSyncTransporting, @unchecked Sendable {
     var resetCallCount = 0
 
     func ensureZoneExists() async -> Result<Void, SyncTransportError> {
-        lock.lock(); defer { lock.unlock() }
-        ensureZoneCallCount += 1
-        if let error = nextEnsureZoneError {
-            nextEnsureZoneError = nil
-            return .failure(error)
+        lock.withLock {
+            ensureZoneCallCount += 1
+            if let error = nextEnsureZoneError {
+                nextEnsureZoneError = nil
+                return .failure(error)
+            }
+            return .success(())
         }
-        return .success(())
     }
 
     func send(
@@ -59,59 +60,60 @@ final class FakeCloudSyncTransport: CloudSyncTransporting, @unchecked Sendable {
         exclusionSaves: [RecurrenceExclusionSyncRecord],
         exclusionDeletions: [UUID]
     ) async -> SyncSendResult {
-        lock.lock(); defer { lock.unlock() }
-        sendCallCount += 1
-        if let error = nextSendError {
-            nextSendError = nil
-            if case .rateLimited(let seconds) = error {
-                return SyncSendResult(retryNotBefore: Date().addingTimeInterval(seconds))
+        lock.withLock {
+            sendCallCount += 1
+            if let error = nextSendError {
+                nextSendError = nil
+                if case .rateLimited(let seconds) = error {
+                    return SyncSendResult(retryNotBefore: Date().addingTimeInterval(seconds))
+                }
+                let failedEvents = eventSaves.map { SyncFailedItem(id: $0.id, error: error) }
+                let failedExclusions = exclusionSaves.map { SyncFailedItem(id: $0.id, error: error) }
+                return SyncSendResult(failedEvents: failedEvents, failedExclusions: failedExclusions)
             }
-            let failedEvents = eventSaves.map { SyncFailedItem(id: $0.id, error: error) }
-            let failedExclusions = exclusionSaves.map { SyncFailedItem(id: $0.id, error: error) }
-            return SyncSendResult(failedEvents: failedEvents, failedExclusions: failedExclusions)
+
+            for record in eventSaves { events[record.id] = record; deletedEventIDs.remove(record.id) }
+            for id in eventDeletions { events.removeValue(forKey: id); deletedEventIDs.insert(id) }
+            for record in exclusionSaves { exclusions[record.id] = record; deletedExclusionIDs.remove(record.id) }
+            for id in exclusionDeletions { exclusions.removeValue(forKey: id); deletedExclusionIDs.insert(id) }
+
+            return SyncSendResult(
+                succeededEventIDs: Set(eventSaves.map(\.id)),
+                succeededEventDeletionIDs: Set(eventDeletions),
+                succeededExclusionIDs: Set(exclusionSaves.map(\.id)),
+                succeededExclusionDeletionIDs: Set(exclusionDeletions)
+            )
         }
-
-        for record in eventSaves { events[record.id] = record; deletedEventIDs.remove(record.id) }
-        for id in eventDeletions { events.removeValue(forKey: id); deletedEventIDs.insert(id) }
-        for record in exclusionSaves { exclusions[record.id] = record; deletedExclusionIDs.remove(record.id) }
-        for id in exclusionDeletions { exclusions.removeValue(forKey: id); deletedExclusionIDs.insert(id) }
-
-        return SyncSendResult(
-            succeededEventIDs: Set(eventSaves.map(\.id)),
-            succeededEventDeletionIDs: Set(eventDeletions),
-            succeededExclusionIDs: Set(exclusionSaves.map(\.id)),
-            succeededExclusionDeletionIDs: Set(exclusionDeletions)
-        )
     }
 
     func fetchChanges() async -> SyncFetchResult {
-        lock.lock(); defer { lock.unlock() }
-        fetchCallCount += 1
-        if let error = nextFetchError {
-            nextFetchError = nil
-            return SyncFetchResult(error: error)
+        lock.withLock {
+            fetchCallCount += 1
+            if let error = nextFetchError {
+                nextFetchError = nil
+                return SyncFetchResult(error: error)
+            }
+
+            let quarantinedEvents = pendingRemoteEvents.filter { futureVersionEventIDs.contains($0.id) }
+            let applicableEvents = pendingRemoteEvents.filter { !futureVersionEventIDs.contains($0.id) }
+
+            let result = SyncFetchResult(
+                changedEvents: applicableEvents,
+                deletedEventIDs: Array(pendingRemoteEventDeletions),
+                changedExclusions: pendingRemoteExclusions,
+                deletedExclusionIDs: Array(pendingRemoteExclusionDeletions),
+                quarantinedEventIDs: quarantinedEvents.map(\.id)
+            )
+            pendingRemoteEvents = []
+            pendingRemoteEventDeletions = []
+            pendingRemoteExclusions = []
+            pendingRemoteExclusionDeletions = []
+            return result
         }
-
-        let quarantinedEvents = pendingRemoteEvents.filter { futureVersionEventIDs.contains($0.id) }
-        let applicableEvents = pendingRemoteEvents.filter { !futureVersionEventIDs.contains($0.id) }
-
-        let result = SyncFetchResult(
-            changedEvents: applicableEvents,
-            deletedEventIDs: Array(pendingRemoteEventDeletions),
-            changedExclusions: pendingRemoteExclusions,
-            deletedExclusionIDs: Array(pendingRemoteExclusionDeletions),
-            quarantinedEventIDs: quarantinedEvents.map(\.id)
-        )
-        pendingRemoteEvents = []
-        pendingRemoteEventDeletions = []
-        pendingRemoteExclusions = []
-        pendingRemoteExclusionDeletions = []
-        return result
     }
 
     func resetEngineState() async {
-        lock.lock(); defer { lock.unlock() }
-        resetCallCount += 1
+        lock.withLock { resetCallCount += 1 }
     }
 
     // MARK: - Test setup helpers

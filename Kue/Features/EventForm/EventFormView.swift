@@ -531,10 +531,11 @@ struct EventFormView: View {
         // Kue 2.0 Phase 9/10 — "event saved/edited" is an explicit reconciliation trigger for
         // both the focused Live Activity and Spotlight's copy of this event; fire-and-forget
         // so the sheet dismisses instantly rather than waiting on these round trips.
-        if let createdEvent {
+        if let eventID = createdEvent?.id {
+            let container = modelContext.container
             Task {
                 await EventCreationService.reconcileAfterWrite(
-                    createdEvent, context: modelContext, now: now,
+                    eventID: eventID, container: container, now: now,
                     liveActivityManager: liveActivityManager, spotlightIndexer: spotlightIndexer
                 )
             }

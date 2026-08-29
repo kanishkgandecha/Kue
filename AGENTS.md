@@ -1191,6 +1191,39 @@ Deployment target is iOS 26.5, set in Phase 1 — this is what backs the on-devi
 requirement above; don't lower it without updating `docs/14-open-questions.md`'s
 deployment-target entry.
 
+Kue 2.0 Phase 12 is the Personal-build release-readiness pass. `Kue Personal` uses the
+`Debug-Personal` configuration and `Kue/KuePersonal.entitlements`, which retain the existing
+bundle ID/App Group but structurally omit CloudKit for free-team signing. Never solve a
+Personal-team provisioning failure by changing the bundle ID or App Group: that would strand
+the Kue 1.0 store. `Shared/Services/Backup/` defines the checksummed `.kuebackup` format and
+`Kue/Services/Backup/BackupRestoreService.swift` applies validated backups by UUID merge only,
+never replace/delete. First-run education is versioned `UserDefaults` presentation state in
+`OnboardingPreference`, not SwiftData. See `docs/27-personal-device-installation.md` for the
+backup-first, never-delete physical upgrade procedure and `docs/28-kue-2-release-readiness.md`
+for the verified/deferred boundary.
+
+**Always run the full `KueTests`/`KueUITests` targets with `-parallel-testing-enabled NO`.**
+Phase 12 found this the hard way: the full `KueTests` target (747 tests) intermittently failed
+different, unrelated tests on different runs — always reproducible in the full run, never once
+reproducible running any single affected suite alone, even across a dozen isolated retries and
+a fresh simulator boot. Root cause: `xcodebuild`'s own outer parallel-clone test execution
+(multiple simulator-clone processes racing against real shared on-disk state — the App Group
+container, `SystemCloudSyncStateStore.shared`'s file, SQLite's own busy/locked handling), not a
+Swift concurrency bug in this codebase. `-parallel-testing-enabled NO` made 5/5 full runs clean.
+Several genuine, independently-worthwhile fixes came out of chasing this before finding the
+real cause (a bounded SQLite `SQLITE_BUSY`/`SQLITE_LOCKED` retry in
+`Shared/Persistence/SQLiteBackup.swift`, unique per-call `ModelConfiguration` identity in
+`ModelContainerFactory.makeInMemory()`, cross-suite locks for tests that touch real
+`SyncPreference`/`SystemCloudSyncStateStore` state) — keep all of them; they're real robustness
+improvements regardless of the flag, just not sufficient alone.
+
+The Phase 3 recurring split has an important SwiftData invariant discovered during Phase 12:
+before deleting materialized future occurrences, resolve every persisted value that SwiftUI
+may still read during dismissal. Removing `resolveStoredValuesBeforeDeletion` recreates a
+detached-fault crash in `testEditingThisAndFutureOccurrencesOffersTheScopeAndSaves`. Async
+post-save work must capture an event UUID + `ModelContainer`, then re-fetch in a fresh context;
+never carry a view-owned `KueEvent`/`ModelContext` across dismissal.
+
 ### A module-wide concurrency quirk worth knowing before you hit it
 
 Both the Kue and KueWidget targets set `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` — every
