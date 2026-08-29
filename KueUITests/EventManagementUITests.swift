@@ -21,22 +21,33 @@ private extension XCUIElement {
     }
 }
 
+// `scrollUpUntilHittable(in:maxSwipes:)` moved to `UITestLaunchConfiguration.swift` once more
+// than this one file needed it (Event Detail's "Actions" section — Calendar/Duplicate/Delete —
+// isn't always already materialized/hittable the instant the detail view appears).
+
 final class EventManagementUITests: XCTestCase {
     private var app: XCUIApplication!
 
     override func setUpWithError() throws {
         continueAfterFailure = false
+        UITestLaunchConfiguration.resetDeviceOrientation()
         app = XCUIApplication()
+        app.launchArguments = [UITestLaunchConfiguration.isolatedStoreArgument]
         app.launch()
     }
 
     private func createEvent(title: String) {
-        app.buttons["addEventButton"].tap()
+        app.openManualAddForm()
         let titleField = app.textFields["eventTitleField"]
         XCTAssertTrue(titleField.waitForExistence(timeout: 5))
         titleField.tap()
         titleField.typeText(title)
         app.buttons["saveEventButton"].tap()
+        // Kue 2.0 Phase 7 — saving dismisses back to the Add tab, not Home; every caller below
+        // immediately looks for the new event's row, so land back on Home the same way a user
+        // would.
+        app.selectTab("tab-home")
+        app.revealHomeEventIfInsideCollapsedCompletedSection(titled: title)
     }
 
     /// Unique per invocation — the app's real on-disk store persists across UI test runs,
@@ -72,7 +83,13 @@ final class EventManagementUITests: XCTestCase {
         createEvent(title: title)
 
         app.staticTexts[title].tap()
-        app.buttons["archiveEventButton"].tap()
+        // Kue 2.0 Phase 10.1 — docs/25 "E." added an outcome card above the Actions section
+        // for events awaiting outcome (this fixture's default zero-duration type reaches that
+        // state immediately), pushing Archive further down; scroll first, same as the
+        // existing `deleteButton`/Calendar/Live-Activity buttons below already do.
+        let archiveButton = app.buttons["archiveEventButton"]
+        archiveButton.scrollUpUntilHittable(in: app)
+        archiveButton.tap()
         XCTAssertTrue(app.buttons["unarchiveEventButton"].waitForExistence(timeout: 5))
 
         app.navigationBars.buttons.element(boundBy: 0).tap() // back to Home
@@ -84,7 +101,9 @@ final class EventManagementUITests: XCTestCase {
         createEvent(title: title)
 
         app.staticTexts[title].tap()
-        app.buttons["deleteEventButton"].tap()
+        let deleteButton = app.buttons["deleteEventButton"]
+        deleteButton.scrollUpUntilHittable(in: app)
+        deleteButton.tap()
         // `.confirmationDialog` duplicates its action button in the accessibility tree
         // (a SwiftUI quirk, not app behavior) — `.firstMatch` avoids an ambiguous-match error.
         app.buttons["confirmDeleteButton"].firstMatch.tap()

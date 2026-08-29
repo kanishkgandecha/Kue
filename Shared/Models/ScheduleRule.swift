@@ -9,7 +9,11 @@
 
 import Foundation
 
-struct ScheduleRule: Codable {
+/// `Equatable` added in Kue 2.0 Phase 1 for migration-fixture comparison
+/// (KueTests/Migrations/) — a pure Swift-level conformance on a plain value type, not a
+/// stored-property change, so it doesn't touch the persisted shape and needs no schema
+/// version bump (see docs/15-schema-migrations.md "What counts as a shape change").
+struct ScheduleRule: Codable, Equatable {
     /// e.g. 3 days before startDate.
     var offset: DateComponents
     var taskTitle: String

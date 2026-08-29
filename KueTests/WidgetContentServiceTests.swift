@@ -77,6 +77,29 @@ struct WidgetContentServiceTests {
         #expect(first?.id == second?.id) // same winner regardless of array order
     }
 
+    // MARK: - isEligibleForAutomaticSelection (Kue 2.0 Phase 8 extraction — see
+    // docs/22-expanded-and-dedicated-widgets.md "C.": `nextUpEvent` and the Dedicated
+    // Countdown picker's default-suggestion list now share this one predicate.)
+
+    @Test func eligibilityPredicateMatchesEveryCaseNextUpAlreadyExcludes() {
+        let now = Date(timeIntervalSince1970: 1_000_000_000)
+        let disabled = makeEvent(startDate: now.addingTimeInterval(86_400), isEnabled: false)
+        let archived: KueEvent = {
+            let event = makeEvent(startDate: now.addingTimeInterval(86_400))
+            event.status = .archived
+            return event
+        }()
+        let cancelled = makeEvent(startDate: now.addingTimeInterval(86_400), isCancelled: true)
+        let completed = makeEvent(startDate: now.addingTimeInterval(-86_400), estimatedDurationMinutes: 0)
+        let eligible = makeEvent(startDate: now.addingTimeInterval(3 * 86_400))
+
+        #expect(!WidgetContentService.isEligibleForAutomaticSelection(disabled, now: now))
+        #expect(!WidgetContentService.isEligibleForAutomaticSelection(archived, now: now))
+        #expect(!WidgetContentService.isEligibleForAutomaticSelection(cancelled, now: now))
+        #expect(!WidgetContentService.isEligibleForAutomaticSelection(completed, now: now))
+        #expect(WidgetContentService.isEligibleForAutomaticSelection(eligible, now: now))
+    }
+
     // MARK: - Lifecycle phase thresholds
 
     @Test func phaseIsCountdownWhenFarOut() {
@@ -128,9 +151,18 @@ struct WidgetContentServiceTests {
         return event
     }
 
-    @Test func phaseIsCompletedAfterEffectiveEnd() {
+    // Kue 2.0 Phase 10.1 — docs/25 "F.": past effective end with no explicit outcome is
+    // Awaiting Outcome, never a silent Completed.
+    @Test func phaseIsAwaitingOutcomeAfterEffectiveEndWithNoExplicitOutcome() {
         let now = Date(timeIntervalSince1970: 1_000_000_000)
         let event = makeEvent(startDate: now.addingTimeInterval(-3600), estimatedDurationMinutes: 30)
+        #expect(WidgetContentService.currentPhase(for: event, now: now) == .awaitingOutcome)
+    }
+
+    @Test func phaseIsCompletedOnlyAfterExplicitManualCompletion() {
+        let now = Date(timeIntervalSince1970: 1_000_000_000)
+        let event = makeEvent(startDate: now.addingTimeInterval(-3600), estimatedDurationMinutes: 30)
+        event.isManuallyCompleted = true
         #expect(WidgetContentService.currentPhase(for: event, now: now) == .completed)
     }
 
@@ -149,8 +181,23 @@ struct WidgetContentServiceTests {
         let plan = WidgetContentService.transitionPlan(for: event, now: now)
         #expect(plan.map(\.date) == plan.map(\.date).sorted())
         #expect(plan.allSatisfy { $0.date > now })
-        #expect(plan.last?.phase == .removed) // auto-archive is always the final boundary
-        #expect(plan.contains { $0.phase == .completed })
+        // Kue 2.0 Phase 10.1 — docs/25 "C.": with no explicit outcome yet, `.removed` isn't a
+        // knowable future boundary — the plan's last precomputed boundary is Awaiting Outcome
+        // (reaching effective end), not an auto-archive date nothing has earned yet.
+        #expect(plan.last?.phase == .awaitingOutcome)
+        #expect(!plan.contains { $0.phase == .removed })
+    }
+
+    // Kue 2.0 Phase 10.1 — docs/25 "C.": `.removed` only reappears as a real future boundary
+    // once the event is already in an explicit terminal state that runs the auto-archive
+    // countdown.
+    @Test func transitionPlanIncludesRemovedOnlyForExplicitTerminalEvents() {
+        let now = Date(timeIntervalSince1970: 1_000_000_000)
+        let event = makeEvent(startDate: now.addingTimeInterval(-20 * 86_400), estimatedDurationMinutes: 30)
+        event.isManuallyCompleted = true
+        event.manuallyCompletedAt = now
+        let plan = WidgetContentService.transitionPlan(for: event, now: now)
+        #expect(plan.last?.phase == .removed)
     }
 
     @Test func transitionPlanIsEmptyForArchivedEvents() {

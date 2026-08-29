@@ -108,15 +108,20 @@ struct KueEventProvider: AppIntentTimelineProvider {
         )
     }
 
-    /// docs/07-widget-engine.md "Widget instances vs. event eligibility" — a configured
-    /// instance shows its picked event (if it's still `isEnabled`); an unconfigured one
-    /// falls back to "Next Up".
+    /// A configured instance is an explicit user choice and therefore resolves independently
+    /// of the automatic Next-Up `isEnabled` gate. An unconfigured (or deleted/skipped)
+    /// selection still falls back to Next Up, preserving this widget kind's existing policy.
     private func resolveEvent(for configuration: KueWidgetConfigurationIntent, context: ModelContext) -> KueEvent? {
         let events = (try? context.fetch(FetchDescriptor<KueEvent>())) ?? []
 
-        if let selectedID = configuration.event?.id,
+        // Kue 2.0 Phase 3: a configured selection that's since been skipped is "unavailable"
+        // the same way a disabled/deleted one already was — fall back to "Next Up" instead of
+        // showing a skipped occurrence's stale content (docs/17-recurring-events.md "Downstream
+        // consumers").
+        if let selectedIDString = configuration.eventID,
+           let selectedID = UUID(uuidString: selectedIDString),
            let selected = events.first(where: { $0.id == selectedID }),
-           selected.widgetConfiguration?.isEnabled == true {
+           !selected.isSkipped {
             return selected
         }
         return WidgetContentService.nextUpEvent(from: events)

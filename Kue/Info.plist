@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.kanishkgandecha.Kue.refresh</string>
@@ -9,6 +11,57 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>
+	</array>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.kanishkgandecha.Kue.deeplink</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>kue</string>
+			</array>
+		</dict>
+	</array>
+	<!-- Kue 2.0 Phase 12 — docs/28. The `.kuebackup` file type (Shared/Services/Backup/), so
+	     Restore's file picker filters to backup files and Files app / AirDrop offer "Open in
+	     Kue" for one. -->
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.kanishkgandecha.Kue.backup</string>
+			<key>UTTypeDescription</key>
+			<string>Kue Backup</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.json</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>kuebackup</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Kue Backup</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.kanishkgandecha.Kue.backup</string>
+			</array>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+		</dict>
 	</array>
 </dict>
 </plist>

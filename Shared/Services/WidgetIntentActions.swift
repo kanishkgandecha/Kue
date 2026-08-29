@@ -72,8 +72,9 @@ enum WidgetIntentActions {
         context: ModelContext,
         scheduler: NotificationScheduling,
         widgetReloader: WidgetReloading,
+        liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared,
         now: Date = .now
-    ) throws -> TaskCompletionResult {
+    ) async throws -> TaskCompletionResult {
         guard let task = try? context.fetch(FetchDescriptor<KueTask>(predicate: #Predicate { $0.id == taskID })).first else {
             throw WidgetIntentError.taskNotFound
         }
@@ -83,13 +84,23 @@ enum WidgetIntentActions {
 
         task.isCompleted = true
         task.completedAt = now
+        // Kue 2.0 Phase 11 — docs/26 "H.": every explicit mutation to an event's graph (this
+        // task belongs to `event`) must bump the parent's `updatedAt`, the conflict-resolution
+        // timestamp CloudKit sync compares. A real pre-Phase-11 gap found during the sync
+        // audit — this whole file's three actions never touched it.
+        event.updatedAt = now
         try? context.save()
+        SyncOutbox.markEventDirty(event.id)
 
         let identifier = "\(event.id)-\(NotificationTransitionKind.taskDue(taskID: task.id).identifierSuffix)"
         scheduler.removePendingNotificationRequests(withIdentifiers: [identifier])
 
         EventStatusEngine.sweep(context: context, now: now)
-        widgetReloader.reloadTimelines(ofKind: WidgetKind.kue)
+        reloadAllWidgetKinds(widgetReloader)
+        // Kue 2.0 Phase 9 — section H: a completed task can change preparation progress/next-
+        // task on a focused Live Activity; awaited (not fire-and-forget) since a widget
+        // extension process can be suspended the instant `perform()` returns.
+        await LiveActivityReconciler.reconcile(context: context, manager: liveActivityManager, now: now)
 
         return TaskCompletionResult(taskTitle: task.title)
     }
@@ -112,6 +123,7 @@ enum WidgetIntentActions {
         context: ModelContext,
         scheduler: NotificationScheduling,
         widgetReloader: WidgetReloading,
+        liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared,
         now: Date = .now
     ) async throws -> TaskSnoozeResult {
         guard let task = try? context.fetch(FetchDescriptor<KueTask>(predicate: #Predicate { $0.id == taskID })).first else {
@@ -134,7 +146,9 @@ enum WidgetIntentActions {
         )
         task.dueDate = newDueDate
         task.offsetLabel = newLabel
+        event.updatedAt = now // Kue 2.0 Phase 11 — see `completeTask`'s own comment above.
         try? context.save()
+        SyncOutbox.markEventDirty(event.id)
 
         let identifier = "\(event.id)-\(NotificationTransitionKind.taskDue(taskID: task.id).identifierSuffix)"
         scheduler.removePendingNotificationRequests(withIdentifiers: [identifier])
@@ -147,7 +161,8 @@ enum WidgetIntentActions {
         }
 
         EventStatusEngine.sweep(context: context, now: now)
-        widgetReloader.reloadTimelines(ofKind: WidgetKind.kue)
+        reloadAllWidgetKinds(widgetReloader)
+        await LiveActivityReconciler.reconcile(context: context, manager: liveActivityManager, now: now)
 
         return TaskSnoozeResult(newDueDate: newDueDate, offsetLabel: newLabel)
     }
@@ -165,8 +180,10 @@ enum WidgetIntentActions {
         context: ModelContext,
         scheduler: NotificationScheduling,
         widgetReloader: WidgetReloading,
+        liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared,
+        spotlightIndexer: SpotlightIndexing = SystemSpotlightIndexer.shared,
         now: Date = .now
-    ) throws -> EventCompletionResult {
+    ) async throws -> EventCompletionResult {
         guard let event = try? context.fetch(FetchDescriptor<KueEvent>(predicate: #Predicate { $0.id == eventID })).first else {
             throw WidgetIntentError.eventNotFound
         }
@@ -175,7 +192,9 @@ enum WidgetIntentActions {
         event.manuallyCompletedAt = now
         event.isCancelled = false
         event.cancelledAt = nil
+        event.updatedAt = now // Kue 2.0 Phase 11 — see `completeTask`'s own comment above.
         try? context.save()
+        SyncOutbox.markEventDirty(event.id)
 
         let identifiers = NotificationCandidateBuilder.allIdentifiers(for: event)
         if !identifiers.isEmpty {
@@ -183,8 +202,25 @@ enum WidgetIntentActions {
         }
 
         EventStatusEngine.sweep(context: context, now: now)
-        widgetReloader.reloadTimelines(ofKind: WidgetKind.kue)
+        reloadAllWidgetKinds(widgetReloader)
+        // Completing the focused event ends its Live Activity via the terminal-state policy
+        // (`.completed` phase → `LiveActivityPolicy.completedGracePeriod`), never leaving it
+        // showing a stale "still counting down" state.
+        await LiveActivityReconciler.reconcile(context: context, manager: liveActivityManager, now: now)
+        // Kue 2.0 Phase 10 — a status change is exactly the field Spotlight's copy needs kept
+        // current (docs/24 "G."); awaited for the same widget-extension-suspension-risk reason
+        // the Live Activity reconcile above already is.
+        await spotlightIndexer.index([SpotlightEventPayloadBuilder.payload(for: event, now: now)])
 
         return EventCompletionResult(eventTitle: event.title)
+    }
+
+    /// Kue 2.0 Phase 8 — a `KueEvent` mutation triggered from either widget kind's own button
+    /// can affect a Dedicated Countdown instance pinned to that same event too (and vice
+    /// versa), so every write path here reloads both kinds rather than just the one the
+    /// triggering button happened to live on. See docs/22-expanded-and-dedicated-widgets.md.
+    private static func reloadAllWidgetKinds(_ reloader: WidgetReloading) {
+        reloader.reloadTimelines(ofKind: WidgetKind.kue)
+        reloader.reloadTimelines(ofKind: WidgetKind.dedicatedCountdown)
     }
 }

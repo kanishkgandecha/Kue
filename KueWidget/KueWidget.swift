@@ -2,8 +2,9 @@
 //  KueWidget.swift
 //  KueWidget
 //
-//  See docs/07-widget-engine.md — small/medium only per V1 ("Large is a stretch goal, not a
-//  blocker for shipping V1" — docs/01-vision-and-scope.md). No Lock Screen families.
+//  See docs/07-widget-engine.md and, for the family expansion below, docs/22-expanded-and-
+//  dedicated-widgets.md "B." — Kue 2.0 Phase 8 added systemLarge and the three Lock Screen/
+//  StandBy accessory families; small/medium behavior is unchanged.
 //
 
 import WidgetKit
@@ -25,6 +26,9 @@ struct KueWidget: Widget {
         }
         .configurationDisplayName("Kue")
         .description("Track an upcoming event, or see what's next automatically.")
-        .supportedFamilies([.systemSmall, .systemMedium])
+        .supportedFamilies([
+            .systemSmall, .systemMedium, .systemLarge,
+            .accessoryCircular, .accessoryRectangular, .accessoryInline,
+        ])
     }
 }

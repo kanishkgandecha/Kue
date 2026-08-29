@@ -51,20 +51,20 @@ struct WidgetIntentActionsTests {
 
     // MARK: - CompleteTaskIntent
 
-    @Test func completeTaskPersistsCompletionFields() throws {
+    @Test func completeTaskPersistsCompletionFields() async throws {
         let context = makeContext()
         let event = insertEvent(in: context, startDate: now.addingTimeInterval(10 * 86_400))
         let task = insertTask(event, in: context, dueDate: now.addingTimeInterval(5 * 86_400))
 
         let scheduler = FakeNotificationScheduler()
         let reloader = FakeWidgetReloader()
-        _ = try WidgetIntentActions.completeTask(taskID: task.id, context: context, scheduler: scheduler, widgetReloader: reloader, now: now)
+        _ = try await WidgetIntentActions.completeTask(taskID: task.id, context: context, scheduler: scheduler, widgetReloader: reloader, now: now)
 
         #expect(task.isCompleted)
         #expect(task.completedAt == now)
     }
 
-    @Test func completeTaskRemovesOnlyThatTasksNotificationIdentifier() throws {
+    @Test func completeTaskRemovesOnlyThatTasksNotificationIdentifier() async throws {
         let context = makeContext()
         let event = insertEvent(in: context, startDate: now.addingTimeInterval(10 * 86_400))
         let task = insertTask(event, in: context, dueDate: now.addingTimeInterval(5 * 86_400))
@@ -72,7 +72,7 @@ struct WidgetIntentActionsTests {
 
         let scheduler = FakeNotificationScheduler()
         let reloader = FakeWidgetReloader()
-        _ = try WidgetIntentActions.completeTask(taskID: task.id, context: context, scheduler: scheduler, widgetReloader: reloader, now: now)
+        _ = try await WidgetIntentActions.completeTask(taskID: task.id, context: context, scheduler: scheduler, widgetReloader: reloader, now: now)
 
         let expectedIdentifier = "\(event.id)-task-\(task.id.uuidString)"
         let otherIdentifier = "\(event.id)-task-\(otherTask.id.uuidString)"
@@ -81,18 +81,21 @@ struct WidgetIntentActionsTests {
         #expect(!scheduler.allRemovedIdentifiers.contains("\(event.id)-tomorrow"))
     }
 
-    @Test func completeTaskInvokesTheInjectableWidgetReloader() throws {
+    @Test func completeTaskInvokesTheInjectableWidgetReloader() async throws {
         let context = makeContext()
         let event = insertEvent(in: context, startDate: now.addingTimeInterval(10 * 86_400))
         let task = insertTask(event, in: context, dueDate: now.addingTimeInterval(5 * 86_400))
 
         let reloader = FakeWidgetReloader()
-        _ = try WidgetIntentActions.completeTask(taskID: task.id, context: context, scheduler: FakeNotificationScheduler(), widgetReloader: reloader, now: now)
+        _ = try await WidgetIntentActions.completeTask(taskID: task.id, context: context, scheduler: FakeNotificationScheduler(), widgetReloader: reloader, now: now)
 
-        #expect(reloader.reloadedKinds == [WidgetKind.kue])
+        // Kue 2.0 Phase 8 — a mutation from either widget kind's own button can affect a
+        // Dedicated Countdown instance pinned to the same event, so both kinds reload now;
+        // see docs/22-expanded-and-dedicated-widgets.md and WidgetIntentActions.reloadAllWidgetKinds.
+        #expect(reloader.reloadedKinds == [WidgetKind.kue, WidgetKind.dedicatedCountdown])
     }
 
-    @Test func completeTaskDoesNotChangeEventStatus() throws {
+    @Test func completeTaskDoesNotChangeEventStatus() async throws {
         let context = makeContext()
         let event = insertEvent(in: context, startDate: now.addingTimeInterval(10 * 86_400))
         let taskA = insertTask(event, in: context, dueDate: now.addingTimeInterval(5 * 86_400))
@@ -101,21 +104,21 @@ struct WidgetIntentActionsTests {
 
         // Requirement: task/event status separation — completing *every* task on the event
         // still doesn't complete the event (docs/04 "Status transition rules").
-        _ = try WidgetIntentActions.completeTask(taskID: taskA.id, context: context, scheduler: FakeNotificationScheduler(), widgetReloader: FakeWidgetReloader(), now: now)
-        _ = try WidgetIntentActions.completeTask(taskID: taskB.id, context: context, scheduler: FakeNotificationScheduler(), widgetReloader: FakeWidgetReloader(), now: now)
+        _ = try await WidgetIntentActions.completeTask(taskID: taskA.id, context: context, scheduler: FakeNotificationScheduler(), widgetReloader: FakeWidgetReloader(), now: now)
+        _ = try await WidgetIntentActions.completeTask(taskID: taskB.id, context: context, scheduler: FakeNotificationScheduler(), widgetReloader: FakeWidgetReloader(), now: now)
 
         #expect(event.status == statusBefore)
         #expect(event.isManuallyCompleted == false)
     }
 
-    @Test func completeTaskThrowsForAMissingTask() {
+    @Test func completeTaskThrowsForAMissingTask() async {
         let context = makeContext()
-        #expect(throws: WidgetIntentError.taskNotFound) {
-            try WidgetIntentActions.completeTask(taskID: UUID(), context: context, scheduler: FakeNotificationScheduler(), widgetReloader: FakeWidgetReloader(), now: now)
+        await #expect(throws: WidgetIntentError.taskNotFound) {
+            try await WidgetIntentActions.completeTask(taskID: UUID(), context: context, scheduler: FakeNotificationScheduler(), widgetReloader: FakeWidgetReloader(), now: now)
         }
     }
 
-    @Test func completeTaskThrowsForAnOrphanedTask() {
+    @Test func completeTaskThrowsForAnOrphanedTask() async {
         let context = makeContext()
         // A task with no `event` relationship — shouldn't occur in practice, but a stale
         // widget button tap must still be handled, not crash.
@@ -123,8 +126,8 @@ struct WidgetIntentActionsTests {
         context.insert(task)
         try? context.save()
 
-        #expect(throws: WidgetIntentError.taskEventUnavailable) {
-            try WidgetIntentActions.completeTask(taskID: task.id, context: context, scheduler: FakeNotificationScheduler(), widgetReloader: FakeWidgetReloader(), now: now)
+        await #expect(throws: WidgetIntentError.taskEventUnavailable) {
+            try await WidgetIntentActions.completeTask(taskID: task.id, context: context, scheduler: FakeNotificationScheduler(), widgetReloader: FakeWidgetReloader(), now: now)
         }
     }
 
@@ -188,14 +191,14 @@ struct WidgetIntentActionsTests {
 
     // MARK: - CompleteEventIntent
 
-    @Test func completeEventPersistsManualCompletionAndClearsCancellation() throws {
+    @Test func completeEventPersistsManualCompletionAndClearsCancellation() async throws {
         let context = makeContext()
         let event = insertEvent(in: context, startDate: now.addingTimeInterval(10 * 86_400))
         event.isCancelled = true
         event.cancelledAt = now
         try? context.save()
 
-        _ = try WidgetIntentActions.completeEvent(eventID: event.id, context: context, scheduler: FakeNotificationScheduler(), widgetReloader: FakeWidgetReloader(), now: now)
+        _ = try await WidgetIntentActions.completeEvent(eventID: event.id, context: context, scheduler: FakeNotificationScheduler(), widgetReloader: FakeWidgetReloader(), now: now)
 
         #expect(event.isManuallyCompleted)
         #expect(event.manuallyCompletedAt == now)
@@ -204,31 +207,34 @@ struct WidgetIntentActionsTests {
         #expect(event.cancelledAt == nil)
     }
 
-    @Test func completeEventRemovesEveryPendingIdentifierNotJustOne() throws {
+    @Test func completeEventRemovesEveryPendingIdentifierNotJustOne() async throws {
         let context = makeContext()
         let event = insertEvent(in: context, startDate: now.addingTimeInterval(10 * 86_400))
         let task = insertTask(event, in: context, dueDate: now.addingTimeInterval(5 * 86_400))
 
         let scheduler = FakeNotificationScheduler()
-        _ = try WidgetIntentActions.completeEvent(eventID: event.id, context: context, scheduler: scheduler, widgetReloader: FakeWidgetReloader(), now: now)
+        _ = try await WidgetIntentActions.completeEvent(eventID: event.id, context: context, scheduler: scheduler, widgetReloader: FakeWidgetReloader(), now: now)
 
         let expected = Set(NotificationCandidateBuilder.allIdentifiers(for: event))
         #expect(expected.isSubset(of: Set(scheduler.allRemovedIdentifiers)))
         #expect(expected.contains("\(event.id)-task-\(task.id.uuidString)"))
     }
 
-    @Test func completeEventInvokesTheInjectableWidgetReloader() throws {
+    @Test func completeEventInvokesTheInjectableWidgetReloader() async throws {
         let context = makeContext()
         let event = insertEvent(in: context, startDate: now.addingTimeInterval(10 * 86_400))
         let reloader = FakeWidgetReloader()
-        _ = try WidgetIntentActions.completeEvent(eventID: event.id, context: context, scheduler: FakeNotificationScheduler(), widgetReloader: reloader, now: now)
-        #expect(reloader.reloadedKinds == [WidgetKind.kue])
+        _ = try await WidgetIntentActions.completeEvent(eventID: event.id, context: context, scheduler: FakeNotificationScheduler(), widgetReloader: reloader, now: now)
+        // Kue 2.0 Phase 8 — a mutation from either widget kind's own button can affect a
+        // Dedicated Countdown instance pinned to the same event, so both kinds reload now;
+        // see docs/22-expanded-and-dedicated-widgets.md and WidgetIntentActions.reloadAllWidgetKinds.
+        #expect(reloader.reloadedKinds == [WidgetKind.kue, WidgetKind.dedicatedCountdown])
     }
 
-    @Test func completeEventThrowsForAMissingEvent() {
+    @Test func completeEventThrowsForAMissingEvent() async {
         let context = makeContext()
-        #expect(throws: WidgetIntentError.eventNotFound) {
-            try WidgetIntentActions.completeEvent(eventID: UUID(), context: context, scheduler: FakeNotificationScheduler(), widgetReloader: FakeWidgetReloader(), now: now)
+        await #expect(throws: WidgetIntentError.eventNotFound) {
+            try await WidgetIntentActions.completeEvent(eventID: UUID(), context: context, scheduler: FakeNotificationScheduler(), widgetReloader: FakeWidgetReloader(), now: now)
         }
     }
 }

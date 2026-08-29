@@ -15,33 +15,39 @@
 import SwiftUI
 
 struct TemplatesView: View {
-    @Environment(\.dismiss) private var dismiss
-    /// Selecting a template dismisses this screen and hands the chosen type back to the
-    /// caller (HomeView), which presents the Add form itself once this sheet has fully
-    /// closed — see HomeView's `onDismiss` chaining for why this isn't presented from here.
+    /// Hands the chosen type back to the caller. Kue 2.0 Phase 7 — Templates is its own
+    /// bottom-navigation destination (`RootTabView`) rather than a sheet presented from Home,
+    /// so `onSelect` now pushes the prefilled form onto Templates' *own* `NavigationStack`
+    /// (see `RootTabView`'s `.navigationDestination(item:)`) instead of the old "dismiss this
+    /// sheet, then have Home present another one" dance.
     let onSelect: (EventType) -> Void
 
     /// Built-in only, in the order docs/09-screens-and-ux.md lists them. `.generic` isn't a
-    /// template — it's the Add screen's own default when nothing else applies.
+    /// template — it's the Add screen's own default when nothing else applies. Requirement:
+    /// "distinction between built-in templates and future user-created templates" — every row
+    /// here is built-in by construction (this phase still doesn't implement user-created
+    /// ones); the section header says so explicitly rather than leaving it implicit.
     private let templateTypes: [EventType] = [.interview, .exam, .trip, .deadline]
 
     var body: some View {
-        NavigationStack {
-            List(templateTypes, id: \.self) { type in
-                Button {
-                    onSelect(type)
-                } label: {
-                    TemplateRow(eventType: type)
+        List {
+            Section {
+                ForEach(templateTypes, id: \.self) { type in
+                    Button {
+                        onSelect(type)
+                    } label: {
+                        TemplateRow(eventType: type)
+                    }
+                    .accessibilityIdentifier("template-\(type.rawValue)")
                 }
-                .accessibilityIdentifier("template-\(type.rawValue)")
-            }
-            .navigationTitle("Templates")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
-                }
+            } header: {
+                Text("Built-In Templates")
+            } footer: {
+                Text("Each one pre-fills the event type and its default preparation schedule — everything stays editable before you save.")
             }
         }
+        .navigationTitle("Templates")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -57,8 +63,8 @@ private struct TemplateRow: View {
                     .font(.headline)
             }
             Text(taskSummary)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(KueTypography.footnote)
+                .foregroundStyle(KueColor.secondaryText)
                 .lineLimit(2)
         }
         .padding(.vertical, 2)
@@ -83,6 +89,15 @@ private struct TemplateRow: View {
     }
 }
 
-#Preview {
-    TemplatesView { _ in }
+#Preview("Templates — Light") {
+    NavigationStack {
+        TemplatesView { _ in }
+    }
+}
+
+#Preview("Templates — Dark") {
+    NavigationStack {
+        TemplatesView { _ in }
+    }
+    .preferredColorScheme(.dark)
 }

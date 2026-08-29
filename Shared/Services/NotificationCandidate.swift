@@ -21,6 +21,17 @@ nonisolated enum NotificationTransitionKind: Equatable, Hashable {
     case preparationStart
     case tomorrow
     case today
+    /// Kue 2.0 Phase 10.1 — docs/25 "H." concept 4: the configurable pre-event reminder,
+    /// fired `ReminderPreference.preEventMinutes` before `startDate`. No associated value —
+    /// exactly one pre-event reminder exists per event at a time, so a fixed identifier means
+    /// changing the configured duration naturally replaces the old pending request under the
+    /// same identifier rather than needing its own stale-identifier cleanup.
+    case preEvent
+    /// docs/25 "H." concept 5 — fires at the event's actual `startDate` (or a pinned-timezone
+    /// morning time for all-day events), not at midnight.
+    case eventStart
+    /// docs/25 "H." concept 6 — "How did it go?", fired at `effectiveEndDate`.
+    case outcomeFollowUp
     case taskDue(taskID: UUID)
 
     /// e.g. "preparation", "tomorrow", "today", "task-<taskID>" — matches docs/08's own
@@ -30,6 +41,9 @@ nonisolated enum NotificationTransitionKind: Equatable, Hashable {
         case .preparationStart: return "preparation"
         case .tomorrow: return "tomorrow"
         case .today: return "today"
+        case .preEvent: return "pre-event"
+        case .eventStart: return "event-start"
+        case .outcomeFollowUp: return "outcome-follow-up"
         case .taskDue(let taskID): return "task-\(taskID.uuidString)"
         }
     }
@@ -54,10 +68,17 @@ nonisolated struct NotificationCandidate: Equatable {
     var identifier: String { "\(eventID)-\(kind.identifierSuffix)" }
 
     /// docs/08-notifications.md "Priority-ordered fill": "today/urgent > tomorrow >
-    /// preparation start > per-task task due." Lower sorts first (higher priority).
+    /// preparation start > per-task task due." Lower sorts first (higher priority). Kue 2.0
+    /// Phase 10.1 (docs/25 "J.") — event-start, the configured pre-event reminder, and the
+    /// outcome follow-up join tier 0: "near-term start reminders must outrank distant
+    /// preparation/task reminders" and "outcome follow-up must not be starved by low-priority
+    /// distant reminders." All three are also the ones `.minimal` intensity still shows
+    /// (`NotificationCandidateBuilder.filter`'s `priorityTier == 0` gate) — deliberately: a
+    /// user who wants only the essentials should still get "it's starting" and "how did it
+    /// go," not just today's morning summary.
     var priorityTier: Int {
         switch kind {
-        case .today: return 0
+        case .today, .eventStart, .preEvent, .outcomeFollowUp: return 0
         case .tomorrow: return isUrgentTier ? 0 : 1
         case .preparationStart: return 2
         case .taskDue: return 3
@@ -74,6 +95,12 @@ nonisolated struct NotificationCandidate: Equatable {
         content.title = title
         content.body = body
         content.sound = .default
+        // Kue 2.0 Phase 10.1 — docs/25 "K.": only the outcome follow-up offers the Mark
+        // Completed/Reschedule/Skip/Cancel action set; every other kind keeps its existing
+        // plain-tap-to-open behavior.
+        if kind == .outcomeFollowUp {
+            content.categoryIdentifier = NotificationActionIdentifiers.outcomeFollowUpCategory
+        }
 
         let interval = max(fireDate.timeIntervalSinceNow, 1)
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)

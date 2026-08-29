@@ -14,6 +14,9 @@ import SwiftData
 import UserNotifications
 @testable import Kue
 
+// `.eventActionsSyncOutboxSerialized` — see EventActionsSyncOutboxTestLock.swift: every
+// `EventActions` call here touches the real, process-global `SystemCloudSyncStateStore.shared`.
+@Suite(.eventActionsSyncOutboxSerialized)
 @MainActor
 struct EventActionsNotificationTests {
     private let now = Date(timeIntervalSince1970: 1_000_000_000)

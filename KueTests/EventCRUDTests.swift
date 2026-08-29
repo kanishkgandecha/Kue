@@ -13,6 +13,11 @@ import Foundation
 import SwiftData
 @testable import Kue
 
+// `.eventActionsSyncOutboxSerialized` — see EventActionsSyncOutboxTestLock.swift: `EventActions.
+// skip`/`complete`/`archive`/`unarchive`/`unskip` all touch the real, process-global
+// `SystemCloudSyncStateStore.shared`.
+@Suite(.eventActionsSyncOutboxSerialized)
+@MainActor
 struct EventCRUDTests {
 
     private func makeContext() -> ModelContext {
@@ -97,6 +102,89 @@ struct EventCRUDTests {
         #expect(event.status == .completed)
     }
 
+    // MARK: - Kue 2.0 Phase 3 — skip (docs/17-recurring-events.md "Occurrence actions")
+
+    @Test func skipReusesCancelledAsItsDerivedStatusButSetsItsOwnField() throws {
+        let context = makeContext()
+        let event = KueEvent(title: "E", eventType: .generic, startDate: .distantFuture, estimatedDurationMinutes: 0, source: .manual)
+        context.insert(event)
+        try context.save()
+
+        EventActions.skip(
+            event,
+            context: context,
+            scheduler: FakeNotificationScheduler(),
+            liveActivityManager: FakeLiveActivityManager(),
+            spotlightIndexer: FakeSpotlightIndexer()
+        )
+        #expect(event.isSkipped)
+        #expect(event.skippedAt != nil)
+        #expect(event.status == .cancelled)
+        #expect(event.isCancelled == false)
+        #expect(event.isManuallyCompleted == false)
+    }
+
+    @Test func skipClearsCancelAndManualCompletion() throws {
+        let context = makeContext()
+        let event = KueEvent(title: "E", eventType: .generic, startDate: .distantFuture, estimatedDurationMinutes: 0, source: .manual)
+        context.insert(event)
+        try context.save()
+
+        EventActions.complete(event, context: context)
+        #expect(event.isManuallyCompleted)
+
+        EventActions.skip(
+            event,
+            context: context,
+            scheduler: FakeNotificationScheduler(),
+            liveActivityManager: FakeLiveActivityManager(),
+            spotlightIndexer: FakeSpotlightIndexer()
+        )
+        #expect(event.isSkipped)
+        #expect(event.isManuallyCompleted == false)
+    }
+
+    @Test func cancelWinsOverSkipWhenBothAreSomehowSet() throws {
+        let context = makeContext()
+        let event = KueEvent(title: "E", eventType: .generic, startDate: .distantFuture, estimatedDurationMinutes: 0, source: .manual)
+        context.insert(event)
+        try context.save()
+
+        EventActions.skip(event, context: context)
+        EventActions.cancel(event, context: context)
+        // `cancel` doesn't itself clear `isSkipped` (only `skip`/`complete`/`cancel` clear each
+        // OTHER's field), but derive()'s precedence still resolves to cancelled either way —
+        // this documents the precedence rather than depending on cancel clearing skip.
+        #expect(EventStatusEngine.derive(for: event) == .cancelled)
+    }
+
+    @Test func unskipRestoresDerivedStatus() async throws {
+        let context = makeContext()
+        let event = KueEvent(title: "E", eventType: .generic, startDate: .distantFuture, estimatedDurationMinutes: 0, source: .manual)
+        context.insert(event)
+        try context.save()
+        #expect(event.status == .upcoming)
+
+        EventActions.skip(
+            event,
+            context: context,
+            scheduler: FakeNotificationScheduler(),
+            liveActivityManager: FakeLiveActivityManager(),
+            spotlightIndexer: FakeSpotlightIndexer()
+        )
+        #expect(event.status == .cancelled)
+
+        await EventActions.unskip(
+            event,
+            context: context,
+            scheduler: FakeNotificationScheduler(),
+            liveActivityManager: FakeLiveActivityManager(),
+            spotlightIndexer: FakeSpotlightIndexer()
+        )
+        #expect(event.isSkipped == false)
+        #expect(event.status == .upcoming)
+    }
+
     // MARK: - Archive / unarchive
 
     @Test func archiveThenUnarchiveRestoresDerivedStatus() async throws {
@@ -106,10 +194,22 @@ struct EventCRUDTests {
         try context.save()
         #expect(event.status == .upcoming)
 
-        await EventActions.archive(event, context: context)
+        EventActions.archive(
+            event,
+            context: context,
+            scheduler: FakeNotificationScheduler(),
+            liveActivityManager: FakeLiveActivityManager(),
+            spotlightIndexer: FakeSpotlightIndexer()
+        )
         #expect(event.status == .archived)
 
-        await EventActions.unarchive(event, context: context)
+        await EventActions.unarchive(
+            event,
+            context: context,
+            scheduler: FakeNotificationScheduler(),
+            liveActivityManager: FakeLiveActivityManager(),
+            spotlightIndexer: FakeSpotlightIndexer()
+        )
         #expect(event.status == .upcoming)
     }
 }

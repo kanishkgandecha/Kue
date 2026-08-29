@@ -10,8 +10,12 @@ import Foundation
 import SwiftData
 
 /// docs/07-widget-engine.md "Widget lifecycle state machine" — a fixed, forward-only sequence.
+/// Kue 2.0 Phase 10.1 — `.completed` used to fire the instant `now >= effectiveEndDate`,
+/// regardless of whether the user ever confirmed the event happened; `.awaitingOutcome` now
+/// sits between `.today`/`.countdown` and `.completed` for exactly that gap — see
+/// docs/25-honest-event-outcomes-and-reminders.md.
 enum WidgetLifecyclePhase: String, Codable, CaseIterable {
-    case countdown, preparation, tomorrow, today, completed, removed
+    case countdown, preparation, tomorrow, today, awaitingOutcome, completed, removed
 }
 
 @Model

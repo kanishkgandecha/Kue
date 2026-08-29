@@ -28,13 +28,25 @@ struct EventFormView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.nlParser) private var nlParser
     @Environment(\.aiAvailabilityChecker) private var aiAvailabilityChecker
+    // Kue 2.0 Phase 10 — read through the environment (not the bare singleton) so a UI test's
+    // fakes are honored here too; `save()` previously called `SystemLiveActivityManager.shared`
+    // directly, a real inconsistency with every other Live-Activity-reading call site.
+    @Environment(\.liveActivityManager) private var liveActivityManager
+    @Environment(\.spotlightIndexer) private var spotlightIndexer
+    // Kue 2.0 Phase 7 — requirement 32/34: a successful create/save gets one restrained
+    // confirmation haptic; never the real Taptic Engine under `KueUITests`.
+    @Environment(\.kueHaptics) private var haptics
     @Query private var allEvents: [KueEvent]
 
     @State private var draft: EventDraft
     @State private var draftSource: EventSource = .manual
     @State private var errors: [EventValidationError] = []
+    @State private var recurrenceErrors: [RecurrenceValidationError] = []
     @State private var duplicate: KueEvent?
     @State private var isViewingDuplicate = false
+    /// Kue 2.0 Phase 3 — only meaningful when editing an occurrence that already belongs to a
+    /// series (`event.seriesID != nil`); see docs/17-recurring-events.md "Editing scope."
+    @State private var editScope: RecurrenceEditScope = .thisOccurrence
 
     // MARK: NL parsing state (requirements 5-9) — `.add` mode only.
     @State private var nlText = ""
@@ -52,7 +64,7 @@ struct EventFormView: View {
         case .add(let initialEventType):
             _draft = State(initialValue: EventDraft(eventType: initialEventType))
         case .edit(let event):
-            _draft = State(initialValue: EventDraft(
+            var initialDraft = EventDraft(
                 title: event.title,
                 eventType: event.eventType,
                 startDate: event.startDate,
@@ -62,7 +74,11 @@ struct EventFormView: View {
                 notes: event.notes ?? "",
                 priority: event.priority,
                 timeZoneIdentifier: event.timeZoneIdentifier
-            ))
+            )
+            // Kue 2.0 Phase 3 — pre-fill the recurrence controls from the current rule so "This
+            // and Future Occurrences" defaults to "change nothing" if the user just taps Save.
+            initialDraft.applyRecurrenceRule(event.recurrence)
+            _draft = State(initialValue: initialDraft)
         }
     }
 
@@ -83,6 +99,16 @@ struct EventFormView: View {
         return false
     }
 
+    /// Kue 2.0 Phase 3 — the occurrence being edited, if any (nil in `.add` mode).
+    private var editingEvent: KueEvent? {
+        if case .edit(let event) = mode { return event }
+        return nil
+    }
+
+    private var isEditingSeriesOccurrence: Bool {
+        editingEvent?.seriesID != nil
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -91,13 +117,14 @@ struct EventFormView: View {
                 }
 
                 if let duplicate {
+                    // Kue 2.0 Phase 7 — one shared banner treatment (KueBanner) rather than a
+                    // bespoke orange `Label` — same identifier, same "tap to view" affordance.
                     Section {
-                        Button {
-                            isViewingDuplicate = true
-                        } label: {
-                            Label("You already have \"\(duplicate.title)\" on this date.", systemImage: "exclamationmark.triangle")
-                                .foregroundStyle(.orange)
-                        }
+                        KueBanner(
+                            kind: .warning,
+                            message: "You already have \"\(duplicate.title)\" on this date.",
+                            action: ("View Event", { isViewingDuplicate = true })
+                        )
                         .accessibilityIdentifier("duplicateWarning")
                     }
                 }
@@ -161,6 +188,8 @@ struct EventFormView: View {
                         .lineLimit(3...6)
                 }
 
+                recurrenceSection
+
                 // Anything the model flagged that isn't tied to a field rendered above.
                 let unplacedAmbiguities = ambiguities.filter { !["startDate", "endDate", "eventType"].contains($0.field) }
                 if !unplacedAmbiguities.isEmpty {
@@ -172,11 +201,19 @@ struct EventFormView: View {
                     .accessibilityIdentifier("generalAmbiguities")
                 }
 
-                if !errors.isEmpty {
+                if !errors.isEmpty || !recurrenceErrors.isEmpty {
                     Section {
                         ForEach(errors) { error in
                             Label(error.errorDescription ?? "", systemImage: "xmark.octagon")
-                                .foregroundStyle(.red)
+                                .foregroundStyle(KueColor.error)
+                                .font(KueTypography.footnote)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        ForEach(recurrenceErrors) { error in
+                            Label(error.errorDescription ?? "", systemImage: "xmark.octagon")
+                                .foregroundStyle(KueColor.error)
+                                .font(KueTypography.footnote)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     .accessibilityIdentifier("validationErrors")
@@ -221,6 +258,91 @@ struct EventFormView: View {
     private var isAddingNewEvent: Bool {
         if case .add = mode { return true }
         return false
+    }
+
+    // MARK: - Recurrence (Kue 2.0 Phase 3 — docs/17-recurring-events.md "UI")
+
+    @ViewBuilder
+    private var recurrenceSection: some View {
+        Section("Repeat") {
+            if isEditingSeriesOccurrence {
+                Picker("Applies To", selection: $editScope) {
+                    Text("This Occurrence").tag(RecurrenceEditScope.thisOccurrence)
+                    Text("This and Future Occurrences").tag(RecurrenceEditScope.thisAndFuture)
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("recurrenceEditScopePicker")
+
+                if editScope == .thisOccurrence {
+                    if let rule = editingEvent?.recurrence {
+                        Text(rule.summary(startDate: editingEvent?.recurrenceAnchorDate ?? draft.startDate))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    recurrenceControls
+                }
+            } else {
+                Toggle("Repeats", isOn: $draft.isRecurring)
+                    .accessibilityIdentifier("recurrenceToggle")
+                if draft.isRecurring {
+                    recurrenceControls
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var recurrenceControls: some View {
+        Picker("Frequency", selection: $draft.recurrenceFrequency) {
+            ForEach(RecurrenceRule.Frequency.allCases, id: \.self) { frequency in
+                Text(frequency.displayName).tag(frequency)
+            }
+        }
+        .accessibilityIdentifier("recurrenceFrequencyPicker")
+
+        Stepper("Every \(draft.recurrenceInterval) \(intervalUnitLabel)", value: $draft.recurrenceInterval, in: 1...365)
+            .accessibilityIdentifier("recurrenceIntervalStepper")
+
+        Picker("Ends", selection: $draft.recurrenceEndKind) {
+            ForEach(RecurrenceEndKind.allCases) { kind in
+                Text(kind.displayName).tag(kind)
+            }
+        }
+        .pickerStyle(.segmented)
+        .accessibilityIdentifier("recurrenceEndKindPicker")
+
+        switch draft.recurrenceEndKind {
+        case .never:
+            EmptyView()
+        case .onDate:
+            DatePicker("End Date", selection: $draft.recurrenceEndDate, displayedComponents: [.date])
+                .accessibilityIdentifier("recurrenceEndDatePicker")
+        case .afterCount:
+            Stepper("\(draft.recurrenceOccurrenceCount) occurrences", value: $draft.recurrenceOccurrenceCount, in: 1...999)
+                .accessibilityIdentifier("recurrenceOccurrenceCountStepper")
+        }
+
+        // Requirement 11: a clear, human-readable summary before saving.
+        if let rule = draft.recurrenceRule {
+            Text(rule.summary(startDate: draft.startDate))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("recurrenceSummary")
+        }
+    }
+
+    private var intervalUnitLabel: String {
+        let base = draft.recurrenceFrequency.displayName.lowercased()
+        return draft.recurrenceInterval == 1 ? base : "\(base)s"
+    }
+
+    /// Recurrence-shape controls are only actually being edited (and so only need validating)
+    /// in `.add` mode, when editing a plain non-recurring event, or when editing a series
+    /// occurrence under "This and Future Occurrences" scope — never for a bare "This
+    /// Occurrence" edit, where the rule itself isn't touched.
+    private var isRecurrenceRuleEditable: Bool {
+        isAddingNewEvent || !isEditingSeriesOccurrence || editScope == .thisAndFuture
     }
 
     // MARK: - NL input (requirements 4-6)
@@ -310,16 +432,12 @@ struct EventFormView: View {
     }
 
     private func ambiguityRow(_ ambiguity: DraftAmbiguity) -> some View {
-        HStack(alignment: .top) {
-            Label(ambiguity.question, systemImage: "questionmark.circle")
-                .foregroundStyle(.orange)
-                .font(.footnote)
-            Spacer()
-            Button("Resolved") {
-                ambiguities.removeAll { $0.id == ambiguity.id }
-            }
-            .font(.footnote)
-        }
+        KueBanner(
+            kind: .notice,
+            message: ambiguity.question,
+            systemImage: "questionmark.circle",
+            action: ("Resolved", { ambiguities.removeAll { $0.id == ambiguity.id } })
+        )
         .accessibilityIdentifier("ambiguity-\(ambiguity.field)")
     }
 
@@ -333,13 +451,18 @@ struct EventFormView: View {
             startDate: draft.startDate,
             timeZoneIdentifier: draft.timeZoneIdentifier,
             excluding: excludedID,
+            excludingSeriesID: editingEvent?.seriesID,
             in: allEvents
         )
     }
 
     private func save() {
         errors = EventValidator.validate(draft)
-        guard errors.isEmpty, ambiguities.isEmpty else { return }
+        recurrenceErrors = isRecurrenceRuleEditable ? EventValidator.validateRecurrence(draft) : []
+        guard errors.isEmpty, recurrenceErrors.isEmpty, ambiguities.isEmpty else {
+            haptics.play(.actionFailed)
+            return
+        }
 
         let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let now = Date()
@@ -351,49 +474,48 @@ struct EventFormView: View {
         // this is the only point that can still name them.
         var staleIdentifiers: [String] = []
 
+        var createdEvent: KueEvent?
         switch mode {
         case .add(_):
-            let event = KueEvent(
-                title: title,
-                eventType: draft.eventType,
-                startDate: draft.startDate,
-                endDate: draft.eventType == .trip ? draft.endDate : nil,
-                estimatedDurationMinutes: draft.eventType.defaultEstimatedDurationMinutes,
-                isAllDay: draft.isAllDay,
-                location: draft.location.isEmpty ? nil : draft.location,
-                notes: draft.notes.isEmpty ? nil : draft.notes,
-                source: draftSource,
-                priority: draft.priority
-            )
-            EventStatusEngine.reconcile(event, now: now)
-            modelContext.insert(event)
-            let widgetConfiguration = WidgetConfiguration(
-                event: event,
-                widgetType: defaultWidgetType(for: draft.eventType)
-            )
-            modelContext.insert(widgetConfiguration)
-            event.widgetConfiguration = widgetConfiguration
-            SchedulingEngine.regenerateTasks(for: event, context: modelContext, now: now)
+            // Kue 2.0 Phase 10 — shared with App Intents (`EventCreationService.swift`), so
+            // Siri/Shortcuts-created events go through the identical construction sequence.
+            createdEvent = EventCreationService.create(from: draft, source: draftSource, context: modelContext, now: now)
         case .edit(let event):
-            event.title = title
-            event.eventType = draft.eventType
-            event.startDate = draft.startDate
-            event.endDate = draft.eventType == .trip ? draft.endDate : nil
-            event.isAllDay = draft.isAllDay
-            event.location = draft.location.isEmpty ? nil : draft.location
-            event.notes = draft.notes.isEmpty ? nil : draft.notes
-            event.priority = draft.priority
-            event.timeZoneIdentifier = draft.timeZoneIdentifier
-            event.updatedAt = now
-            EventStatusEngine.reconcile(event, now: now)
-            staleIdentifiers = NotificationCandidateBuilder.allIdentifiers(for: event)
-            // Regenerates from event.schedule.rules per docs/05-scheduling-engine.md
-            // "Editing an event after its schedule is generated" — safe to call
-            // unconditionally since it's a no-op for anything a completed task already covers.
-            SchedulingEngine.regenerateTasks(for: event, context: modelContext, now: now)
+            if event.seriesID != nil {
+                // Kue 2.0 Phase 3 — route through the This Occurrence / This and Future split.
+                let outcome = OccurrenceReconciliationService.applyEdit(
+                    scope: editScope, to: event, values: draft, context: modelContext, now: now
+                )
+                staleIdentifiers = outcome.staleNotificationIdentifiers
+            } else {
+                event.title = title
+                event.eventType = draft.eventType
+                event.startDate = draft.startDate
+                event.endDate = draft.eventType == .trip ? draft.endDate : nil
+                event.isAllDay = draft.isAllDay
+                event.location = draft.location.isEmpty ? nil : draft.location
+                event.notes = draft.notes.isEmpty ? nil : draft.notes
+                event.priority = draft.priority
+                event.timeZoneIdentifier = draft.timeZoneIdentifier
+                event.updatedAt = now
+                EventStatusEngine.reconcile(event, now: now)
+                staleIdentifiers = NotificationCandidateBuilder.allIdentifiers(for: event)
+                // Regenerates from event.schedule.rules per docs/05-scheduling-engine.md
+                // "Editing an event after its schedule is generated" — safe to call
+                // unconditionally since it's a no-op for anything a completed task already covers.
+                SchedulingEngine.regenerateTasks(for: event, context: modelContext, now: now)
+                // Kue 2.0 Phase 3 — a plain event can start a fresh series from an edit too.
+                startSeriesIfNeeded(for: event, now: now)
+            }
+            createdEvent = event
         }
 
         try? modelContext.save()
+        // Kue 2.0 Phase 11 — docs/26 "E.": covers both the `.add` and `.edit` (including
+        // occurrence-scoped edits, which can touch more than one materialized row) paths —
+        // `OccurrenceReconciliationService.applyEdit` marks any *additional* occurrences it
+        // touches itself; this covers the primary `createdEvent`.
+        if let createdEvent { SyncOutbox.markEventDirty(createdEvent.id) }
         // docs/07-widget-engine.md "Refresh strategy" — a placed widget won't otherwise
         // notice this write until its own precomputed timeline next reloads.
         EventActions.reloadWidget()
@@ -406,29 +528,48 @@ struct EventFormView: View {
         if !staleIdentifiers.isEmpty {
             SystemNotificationScheduler.shared.removePendingNotificationRequests(withIdentifiers: staleIdentifiers)
         }
-        Task {
-            let intensity = UserPreferenceStore.current(context: modelContext).notificationIntensity
-            await NotificationEngine.reschedule(
-                context: modelContext,
-                intensity: intensity,
-                scheduler: SystemNotificationScheduler.shared,
-                requestPermissionIfNeeded: true
-            )
+        // Kue 2.0 Phase 9/10 — "event saved/edited" is an explicit reconciliation trigger for
+        // both the focused Live Activity and Spotlight's copy of this event; fire-and-forget
+        // so the sheet dismisses instantly rather than waiting on these round trips.
+        if let eventID = createdEvent?.id {
+            let container = modelContext.container
+            Task {
+                await EventCreationService.reconcileAfterWrite(
+                    eventID: eventID, container: container, now: now,
+                    liveActivityManager: liveActivityManager, spotlightIndexer: spotlightIndexer
+                )
+            }
         }
+        haptics.play(.eventCreated)
         dismiss()
     }
 
-    /// docs/07-widget-engine.md "Widget types (V1)" default-per-event-type mapping.
-    private func defaultWidgetType(for eventType: EventType) -> WidgetType {
-        switch eventType {
-        case .interview, .exam, .deadline: return .preparation
-        case .trip: return .timeline
-        case .generic: return .countdown
-        }
+    /// Kue 2.0 Phase 3 — turns `event` into the origin of a brand-new series when the draft's
+    /// recurrence controls are on, and materializes the rest of the initial horizon. A no-op
+    /// (`draft.recurrenceRule == nil`) for every non-recurring create/edit — unchanged
+    /// behavior.
+    private func startSeriesIfNeeded(for event: KueEvent, now: Date) {
+        guard let rule = draft.recurrenceRule else { return }
+        event.recurrence = rule
+        event.seriesID = UUID()
+        event.recurrenceAnchorDate = event.startDate
+        OccurrenceReconciliationService.materializeInitialOccurrences(from: event, context: modelContext, now: now)
     }
 }
 
-#Preview {
+#Preview("Event Form — Light") {
     EventFormView(mode: .add(initialEventType: .generic))
         .modelContainer(ModelContainerFactory.makeInMemory())
+}
+
+#Preview("Event Form — Dark") {
+    EventFormView(mode: .add(initialEventType: .generic))
+        .modelContainer(ModelContainerFactory.makeInMemory())
+        .preferredColorScheme(.dark)
+}
+
+#Preview("Event Form — Large Dynamic Type") {
+    EventFormView(mode: .add(initialEventType: .generic))
+        .modelContainer(ModelContainerFactory.makeInMemory())
+        .environment(\.sizeCategory, .accessibilityExtraExtraExtraLarge)
 }

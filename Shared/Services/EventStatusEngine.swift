@@ -30,10 +30,21 @@ enum EventStatusEngine {
     /// date-derived (see `reconcile(_:now:)` for archive handling).
     static func derive(for event: KueEvent, now: Date = .now) -> EventStatus {
         if event.isCancelled { return .cancelled }
+        // Kue 2.0 Phase 3 — docs/17-recurring-events.md "Occurrence actions": skip reuses
+        // `.cancelled` as its derived status (every existing consumer that already excludes
+        // cancelled events excludes a skip for free); `isSkipped` remains the real field UI
+        // reads to show "Skipped" instead of "Cancelled" copy. Precedence: cancel > skip >
+        // manual-complete, extending the existing documented cancel-wins-over-manual-complete
+        // rule by one more case.
+        if event.isSkipped { return .cancelled }
         if event.isManuallyCompleted { return .completed }
 
+        // Kue 2.0 Phase 10.1 — docs/25 "A.": scheduled time passing is not proof the event
+        // happened. `.completed` now only ever comes from the `isManuallyCompleted` check
+        // above; a non-terminal event at/after its own end is `.awaitingOutcome` until the
+        // user explicitly says what happened (Complete/Reschedule/Skip/Cancel).
         let end = event.effectiveEndDate
-        if now >= end { return .completed }
+        if now >= end { return .awaitingOutcome }
         // All-day events never pass through `.active` — they stay `.today` for the whole
         // calendar day and jump straight to `.completed` at the following midnight (the `end`
         // check above). Without this guard, `now >= event.startDate` alone would wrongly
@@ -57,6 +68,18 @@ enum EventStatusEngine {
     /// this function never reverts (an archived event stays archived until an explicit
     /// `EventActions.unarchive`). Applies the auto-archive threshold on top of the derived
     /// status. Returns whether `status` actually changed.
+    ///
+    /// Kue 2.0 Phase 11 — docs/26 "H./I.": deliberately does *not* touch `event.updatedAt`.
+    /// `status` here is a cached, purely time-derived value (docs/04 "Status transition
+    /// rules": "purely a performance/query optimization"), not a fact CloudKit's conflict
+    /// resolver should ever treat as a competing explicit edit — a passive reconciliation
+    /// sweep on one device must never let its `status` cache flip outrank a genuine explicit
+    /// mutation made on another device merely because it ran more recently. `updatedAt` is
+    /// reserved for the six `EventActions` mutations (and their `WidgetIntentActions`
+    /// equivalents) that represent actual user intent. This was a real pre-Phase-11 bug
+    /// (found during the sync audit, fixed here) even before CloudKit existed: it silently
+    /// bumped `updatedAt` — read by `EventListQueryEngine`'s "recently updated" sort — merely
+    /// because a background sweep noticed time had passed.
     @discardableResult
     static func reconcile(_ event: KueEvent, now: Date = .now) -> Bool {
         guard event.status != .archived else { return false }
@@ -66,7 +89,6 @@ enum EventStatusEngine {
 
         guard newStatus != event.status else { return false }
         event.status = newStatus
-        event.updatedAt = now
         return true
     }
 
@@ -99,6 +121,8 @@ enum EventStatusEngine {
         let referenceDate: Date
         if event.isCancelled {
             referenceDate = event.cancelledAt ?? .distantFuture
+        } else if event.isSkipped {
+            referenceDate = event.skippedAt ?? .distantFuture
         } else if event.isManuallyCompleted {
             referenceDate = event.manuallyCompletedAt ?? .distantFuture
         } else {

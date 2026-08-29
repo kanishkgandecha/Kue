@@ -26,6 +26,8 @@ enum PrivacyActions {
         context: ModelContext,
         scheduler: NotificationScheduling = SystemNotificationScheduler.shared,
         widgetReloader: WidgetReloading = SystemWidgetReloader.shared,
+        liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared,
+        spotlightIndexer: SpotlightIndexing = SystemSpotlightIndexer.shared,
         now: Date = .now
     ) -> Bool {
         let events = (try? context.fetch(FetchDescriptor<KueEvent>())) ?? []
@@ -49,6 +51,14 @@ enum PrivacyActions {
             scheduler.removePendingNotificationRequests(withIdentifiers: identifiers)
         }
         widgetReloader.reloadTimelines(ofKind: WidgetKind.kue)
+        widgetReloader.reloadTimelines(ofKind: WidgetKind.dedicatedCountdown)
+        // Kue 2.0 Phase 10 — docs/24 "I.": nothing left to focus or find once every event is
+        // gone. `endAll()`'s own doc comment (Phase 9) already names this exact call site as
+        // its intended use — never wired in until now.
+        Task {
+            await liveActivityManager.endAll()
+            await spotlightIndexer.removeAll()
+        }
         return true
     }
 }

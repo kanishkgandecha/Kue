@@ -30,12 +30,46 @@ enum EventType: String, Codable, CaseIterable {
 /// `isCancelled`/`isManuallyCompleted` — the event engine that derives `status` from those
 /// (docs/04-event-types.md "Status transition rules") is Phase 2 work, not implemented here.
 enum EventStatus: String, Codable, CaseIterable {
-    case draft, upcoming, preparing, tomorrow, today, active, completed, cancelled, archived
+    case draft, upcoming, preparing, tomorrow, today, active
+    /// Kue 2.0 Phase 10.1 — docs/25-honest-event-outcomes-and-reminders.md. A non-terminal
+    /// event at or after `effectiveEndDate` with no explicit user-confirmed outcome yet.
+    /// Scheduled time passing is not proof an event happened as planned — this is the state
+    /// between "the clock says it's over" and "the user told Kue what actually happened."
+    /// User-facing label: "Needs Review" (Event Detail/notifications) — Home's own section for
+    /// these is titled "Needs Attention," a distinct but compatible UI label for the same
+    /// underlying status; see docs/25 "A." for why the two labels coexist deliberately.
+    /// Never set by anything except `EventStatusEngine.derive` — there is no
+    /// `EventActions.markAwaitingOutcome`, because nothing ever explicitly *chooses* this
+    /// state; it's purely what "time passed, nobody said what happened" derives to.
+    case awaitingOutcome
+    case completed, cancelled, archived
 }
 
 /// docs/03-data-model.md "KueEvent" — which input path produced this event.
 enum EventSource: String, Codable, CaseIterable {
     case manual, naturalLanguage, shareSheet
+    /// Kue 2.0 Phase 4 — docs/18-calendar-integration.md. An explicit, user-confirmed
+    /// import from Apple Calendar via `CalendarImportPipeline`; never set by anything
+    /// running silently in the background.
+    case calendarImport
+    /// Kue 2.0 Phase 5 — docs/19-screenshot-ocr-input.md. Text recognized on-device from a
+    /// user-selected image, reviewed/edited by the user, then routed through the exact same
+    /// `NLParsingPipeline` typed natural-language text uses — not a separate OCR-specific
+    /// parser (requirement 24).
+    case ocr
+    /// Kue 2.0 Phase 6 — docs/20-voice-input.md. Text transcribed on-device from spoken audio,
+    /// reviewed/edited by the user, then routed through the exact same `NLParsingPipeline`
+    /// typed natural-language text uses — not a separate voice-specific parser (requirement 43).
+    case voice
+    /// Kue 2.0 Phase 10 — docs/24-siri-shortcuts-spotlight-and-controls.md. Created via an App
+    /// Intent (Siri, the Shortcuts app, or a Control Center/Lock Screen control), structured or
+    /// natural-language alike — a surface-based case, same precedent as `.shareSheet` (the
+    /// Share Extension's own NL-parsed events get `.shareSheet`, not `.naturalLanguage`, for
+    /// the identical "which entry surface" reason). Not a schema change: `EventSource` is a
+    /// plain `Codable` enum field, not itself frozen/versioned by `KueSchemaV1`'s nested
+    /// `KueEvent` copy (that copy references this live type directly), so a new case needs no
+    /// migration stage.
+    case shortcuts
 }
 
 enum Priority: String, Codable, CaseIterable {
@@ -70,11 +104,53 @@ final class KueEvent {
     /// User-forceable "mark complete" — see "Manual completion"; false by default.
     var isManuallyCompleted: Bool
     var manuallyCompletedAt: Date?
-    /// Post-V1: always nil in V1, field reserved. See RecurrenceRule.swift.
+    /// Kue 2.0 Phase 3 — real as of `KueSchemaV2`. Set identically on every occurrence sharing
+    /// `seriesID`; nil for a non-recurring event. See docs/17-recurring-events.md.
     var recurrence: RecurrenceRule?
     /// Semantic payload marker, starts at 1 — see "Schema versioning". Distinct from SwiftData's
     /// own VersionedSchema/SchemaMigrationPlan, which govern the @Model shape itself.
     var schemaVersion: Int
+
+    // MARK: - Kue 2.0 Phase 3 (KueSchemaV2) — recurrence occurrence identity, see
+    // docs/17-recurring-events.md. Nil/false for every non-recurring event.
+
+    /// Shared across every occurrence produced by one recurrence rule segment. Nil for a
+    /// non-recurring event.
+    var seriesID: UUID?
+    /// This occurrence's slot per the rule, independent of `startDate` — the replenishment
+    /// dedup key, and what a "This Occurrence" edit that moves `startDate` leaves untouched.
+    var recurrenceAnchorDate: Date?
+    /// True once this occurrence's fields were edited independently of the rule (a "This
+    /// Occurrence" edit, or a skip) — reconciliation never regenerates or overwrites this row.
+    var isRecurrenceException: Bool = false
+    /// The third mutually-exclusive user-forceable state, alongside `isCancelled`/
+    /// `isManuallyCompleted` — "this occurrence doesn't happen, the series continues."
+    var isSkipped: Bool = false
+    var skippedAt: Date?
+
+    // MARK: - Kue 2.0 Phase 4 (KueSchemaV3) — Apple Calendar linkage, see
+    // docs/18-calendar-integration.md. All nil for every event never exported/imported
+    // through Calendar. Kue remains the source of truth: these fields only ever record
+    // "what Calendar object this Kue event is explicitly linked to," never anything that
+    // drives Kue's own scheduling/status/recurrence logic.
+
+    /// `EKEvent.calendarItemExternalIdentifier` — stable across devices/re-syncs, unlike
+    /// `eventIdentifier`. Set on successful export or import-from-an-existing-EKEvent;
+    /// cleared by unlinking. Non-nil is exactly "this Kue event is linked to a Calendar event."
+    var externalCalendarEventIdentifier: String?
+    /// `EKCalendar.calendarIdentifier` of the calendar the linked event lives in (the
+    /// destination calendar chosen at export, or the source calendar at import time).
+    var externalCalendarIdentifier: String?
+    /// Cached display name of `externalCalendarIdentifier`'s calendar, so the UI can show
+    /// "Linked to Home" without re-fetching from EventKit just to render a label.
+    var externalCalendarTitle: String?
+    /// When Kue last successfully wrote to (exported or updated) the linked Calendar event.
+    var externalCalendarLastSyncedAt: Date?
+    /// `EKEvent.lastModifiedDate` as observed at that same successful write — the baseline
+    /// `CalendarExportService.status(for:)` compares a freshly-fetched `EKEvent` against to
+    /// detect an external change requiring an explicit conflict choice (never a silent
+    /// overwrite).
+    var externalCalendarLastKnownModifiedAt: Date?
 
     @Relationship(deleteRule: .cascade, inverse: \KueTask.event)
     var tasks: [KueTask]
@@ -111,6 +187,16 @@ final class KueEvent {
         manuallyCompletedAt: Date? = nil,
         recurrence: RecurrenceRule? = nil,
         schemaVersion: Int = 1,
+        seriesID: UUID? = nil,
+        recurrenceAnchorDate: Date? = nil,
+        isRecurrenceException: Bool = false,
+        isSkipped: Bool = false,
+        skippedAt: Date? = nil,
+        externalCalendarEventIdentifier: String? = nil,
+        externalCalendarIdentifier: String? = nil,
+        externalCalendarTitle: String? = nil,
+        externalCalendarLastSyncedAt: Date? = nil,
+        externalCalendarLastKnownModifiedAt: Date? = nil,
         tasks: [KueTask] = [],
         schedule: KueSchedule? = nil,
         widgetConfiguration: WidgetConfiguration? = nil,
@@ -137,6 +223,16 @@ final class KueEvent {
         self.manuallyCompletedAt = manuallyCompletedAt
         self.recurrence = recurrence
         self.schemaVersion = schemaVersion
+        self.seriesID = seriesID
+        self.recurrenceAnchorDate = recurrenceAnchorDate
+        self.isRecurrenceException = isRecurrenceException
+        self.isSkipped = isSkipped
+        self.skippedAt = skippedAt
+        self.externalCalendarEventIdentifier = externalCalendarEventIdentifier
+        self.externalCalendarIdentifier = externalCalendarIdentifier
+        self.externalCalendarTitle = externalCalendarTitle
+        self.externalCalendarLastSyncedAt = externalCalendarLastSyncedAt
+        self.externalCalendarLastKnownModifiedAt = externalCalendarLastKnownModifiedAt
         self.tasks = tasks
         self.schedule = schedule
         self.widgetConfiguration = widgetConfiguration
