@@ -1,3 +1,4 @@
+```markdown
 # Kue 2.0
 
 A privacy-focused native iOS application for planning, tracking, and remembering important events.
@@ -257,3 +258,145 @@ Kue
 ├── Share extension
 ├── Live Activities
 └── Unit and UI tests
+```
+
+External Apple frameworks are isolated behind protocols with System and Fake implementations.
+
+Examples include:
+
+- Calendar providers
+- OCR recognizers
+- Voice authorization and recognition
+- Cloud synchronization transport
+- Spotlight indexing
+- Live Activity management
+- Notification scheduling
+
+This keeps domain behavior deterministic and testable without requiring physical hardware for every automated test.
+
+## Technology Stack
+
+### Interface
+
+- SwiftUI
+- WidgetKit
+- ActivityKit
+- Dynamic Island
+- Control Widgets
+
+### Persistence and Data
+
+- SwiftData
+- VersionedSchema
+- SQLite C API
+- App Group storage
+- CloudKit-ready synchronization
+- Versioned JSON backups
+
+### Apple Integrations
+
+- App Intents
+- Siri and Shortcuts
+- Core Spotlight
+- EventKit
+- Vision
+- Speech
+- AVFoundation
+- UserNotifications
+- PhotosUI
+
+### Quality
+
+- Swift Testing
+- XCTest and XCUITest
+- Dependency injection
+- In-memory test stores
+- Isolated UI-test stores
+- Deterministic fake services
+- Serial test execution where required
+
+## Verification
+
+Final automated verification:
+
+| Check | Result |
+|---|---:|
+| Unit and integration tests | 749 passed |
+| UI tests | 98 passed |
+| UI-test failures | 0 |
+| UI-test skips | 0 |
+| Kue build warnings | 0 |
+| Kue build errors | 0 |
+| Kue Personal build warnings | 0 |
+| Kue Personal build errors | 0 |
+
+Real-device verification confirmed:
+
+- Kue 1.0 events migrated intact
+- Existing data remained available
+- A post-migration event could be created
+- Data survived termination and relaunch
+- A post-migration `.kuebackup` could be exported
+
+## Testing Notes
+
+The test suites are run with parallel test execution disabled:
+
+```bash
+-parallel-testing-enabled NO
+```
+
+This avoids nondeterministic failures caused by Xcode simulator clones interacting with persistence-heavy tests.
+
+Example commands:
+
+```bash
+xcodebuild clean build \
+  -project Kue.xcodeproj \
+  -scheme Kue \
+  -destination 'platform=iOS Simulator,name=iPhone 17'
+```
+
+```bash
+xcodebuild test \
+  -project Kue.xcodeproj \
+  -scheme Kue \
+  -destination 'platform=iOS Simulator,name=iPhone 17' \
+  -only-testing:KueTests \
+  -parallel-testing-enabled NO
+```
+
+```bash
+xcodebuild test \
+  -project Kue.xcodeproj \
+  -scheme Kue \
+  -destination 'platform=iOS Simulator,name=iPhone 17' \
+  -only-testing:KueUITests \
+  -parallel-testing-enabled NO
+```
+
+
+## Current Status
+
+Kue 2.0 is complete for its planned personal-build scope and has been installed over Kue 1.0 successfully on a real iPhone.
+
+Some Apple system integrations still require broader physical-device and long-term real-world validation. The project should not currently be described as publicly released on the App Store.
+
+## Privacy
+
+Kue is designed around local-first data handling.
+
+- OCR source text is not persisted
+- Voice audio is not written to temporary files
+- Voice recognition requires on-device availability
+- Widget accessory views limit sensitive information
+- Diagnostic logging avoids event titles, notes, tasks, and locations
+- Restore operations validate data before importing it
+- The Personal build does not construct a CloudKit container
+
+## Author
+
+**Kanishk Gandecha**
+
+Built as a native iOS engineering project focused on product design, system integration, data safety, migration reliability, and extensive automated testing.
+```
