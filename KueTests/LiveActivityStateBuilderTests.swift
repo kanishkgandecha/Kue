@@ -67,6 +67,18 @@ struct LiveActivityStateBuilderTests {
         #expect(state.terminal == nil)
     }
 
+    // Kue 3.0 Phase 2 (docs/30) fix — these two fields previously always carried `now` (dead
+    // placeholder data), leaving `LiveActivityCompactCountdown` nothing real to format an
+    // "3h"/"Now" countdown from. Confirms they now carry the event's own real window.
+    @Test func trackingStateCarriesTheEventsRealStartAndEffectiveEndDateNotNow() {
+        let start = now.addingTimeInterval(2 * 86_400)
+        let event = makeEvent(startDate: start, estimatedDurationMinutes: 180)
+        let state = LiveActivityStateBuilder.contentState(for: event, now: now)
+        #expect(state.effectiveStartDate == start)
+        #expect(state.effectiveEndDate == event.effectiveEndDate)
+        #expect(state.effectiveStartDate != now)
+    }
+
     @Test func allDayEventUsesCalendarDaySemanticsSameAsTheDedicatedWidget() {
         let event = makeEvent(startDate: now, isAllDay: true, timeZoneIdentifier: "UTC")
         let state = LiveActivityStateBuilder.contentState(for: event, now: now)

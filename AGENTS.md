@@ -330,8 +330,11 @@ terminal-state precedence, and the deferred manual placement/StandBy/Lock-Screen
 `LiveActivityReconciler`/`LiveActivityPrivacyPreference`) plus `Kue/Features/LiveActivity/`
 (`LiveActivityFocusCoordinator`, app-only — the one-event focus policy — and
 `LiveActivityEnvironment`'s `\.liveActivityManager` DI seam) plus `KueWidget/
-KueLiveActivityWidget.swift`/`LiveActivityViews.swift` (the `ActivityConfiguration`/
-`DynamicIsland` declaration and every Lock Screen/Dynamic Island region). Exactly one
+KueLiveActivityWidget.swift` (the `ActivityConfiguration`/`DynamicIsland` declaration) and
+`LiveActivitySharedHelpers.swift`/`LiveActivityLockScreenView.swift`/
+`LiveActivityDynamicIslandViews.swift` (every Lock Screen/Dynamic Island region — split into
+three files during the Post-Phase-12 redesign below, rebuilt again in Kue 3.0 Phase 2 further
+below). Exactly one
 Kue-owned `Activity` runs at a time, pinned to one event chosen explicitly from Event Detail —
 a separate policy from automatic "Next Up" and from Dedicated Countdown's own pinning, which
 never interact with it. `LiveActivityStateBuilder` reuses `DedicatedWidgetContentService
@@ -1311,12 +1314,40 @@ removed.
 
 Post-Phase-12 fix — Live Activity/Dynamic Island visual redesign, purely presentational: see
 docs/23 "M." Event-type accent comes from one shared mapper, `Shared/DesignSystem/
-EventTypeAccent.swift` — reuse it, never hardcode a raw color in a Live Activity view. The
-action row shown (active-with-task / active-no-task / awaiting-outcome / none) is decided once
-by `Shared/Services/LiveActivity/LiveActivityActionSet.swift`'s `actionSet(for:)`, read by both
-the Lock Screen and Dynamic Island Expanded Bottom views — don't re-derive that condition
-inline a third time. No lifecycle, App Intent, persistence, schema, or widget-selection behavior
-changed.
+EventTypeAccent.swift` — reuse it, never hardcode a raw color in a Live Activity view.
+(Superseded by Kue 3.0 Phase 2 below: the action-set API this paragraph originally described,
+`actionSet(for:)`, no longer exists — see that section for its replacement.) No lifecycle, App
+Intent, persistence, schema, or widget-selection behavior changed by either round.
+
+**Kue 3.0 Phase 2 ("Live Activities and Dynamic Island Rebuild") is done** — see
+docs/30-kue-3-live-activities-and-dynamic-island.md for the full contract. A real-device
+screenshot showed the Post-Phase-12 fix above still clipped (a crowded three-button row; a
+`KueMark` wordmark that could contest space with the status label at small widths/large Dynamic
+Type) — this phase replaces the single fixed Lock Screen layout with three explicit,
+`ViewThatFits`-chosen tiers (Full/Compact/Minimal, `LiveActivityLockScreenView.swift`) and
+rebuilds every Dynamic Island region independently (`LiveActivityDynamicIslandViews.swift`) —
+branding is the first thing dropped under pressure, never the source of a clip.
+`Shared/Services/LiveActivity/LiveActivityActionSet.swift` now exposes
+`LiveActivityActionPolicy.plan(for:eventID:) -> LiveActivityActionPlan` (`primary`/`secondary`,
+both `LiveActivityAction?`) instead of the old four-case `actionSet(for:)` — the old shape
+could offer three buttons at once (Complete Task + Snooze + Mark Complete), exactly the defect
+being fixed; the new one is structurally capped at two. `Shared/Services/LiveActivity/
+LiveActivityCompactCountdown.swift` (new) formats a short countdown/state word ("19d," "3h,"
+"Now," "Review," "Done," "Cancelled") for Dynamic Island Compact Trailing and the Lock Screen's
+own Compact/Minimal tiers — this only became possible after a real, disclosed bug fix in
+`LiveActivityStateBuilder.swift`: `ContentState.effectiveStartDate`/`effectiveEndDate` were
+previously always stubbed to `now` (dead data), now carry the event's real start/effective-end
+timestamps. `actionControl(_:style:)`/`primaryActionTint(for:accent:)` (in
+`LiveActivitySharedHelpers.swift`) are the one place a `LiveActivityAction` becomes an actual
+`Button`/`Link`, reused by every region so the same action never looks or behaves differently
+in two places. A new `#if DEBUG`-only `Kue/Features/LiveActivity/LiveActivityDebugGalleryView
+.swift` (reachable from Settings' own `#if DEBUG` section only — excluded from Release at
+compile time, not just hidden) lets the owner start/end every lifecycle-state and edge-case
+fixture as a real Live Activity on a physical device — every fixture is a plain in-memory
+`KueEvent`/`KueTask`, never inserted into any `ModelContext`; a real, disclosed ActivityKit
+limitation (no sandboxed "test" Activity namespace) means starting one still ends whatever real
+activity is currently focused, which the tool's own UI says up front. No lifecycle, App Intent,
+persistence, schema, or widget-selection behavior changed.
 
 Kue 3.0 Phase 1 — a fourth target, `KueMac`, a native macOS app; see docs/29 for the full
 contract. Several files moved from `Kue/Services/` into `Shared/Services/` (unchanged logic,

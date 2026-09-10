@@ -35,7 +35,14 @@ enum LiveActivityStateBuilder {
         now: Date = .now,
         privacy: LiveActivityPrivacyPreference = .current
     ) -> KueLiveActivityAttributes.ContentState {
-        contentState(from: DedicatedWidgetContentService.resolve(event: event, now: now), fallbackEventType: event.eventType, now: now, privacy: privacy)
+        contentState(
+            from: DedicatedWidgetContentService.resolve(event: event, now: now),
+            fallbackEventType: event.eventType,
+            eventStartDate: event.startDate,
+            eventEffectiveEndDate: event.effectiveEndDate,
+            now: now,
+            privacy: privacy
+        )
     }
 
     /// The event no longer exists in the shared store — there's no `KueEvent` left to read,
@@ -73,6 +80,8 @@ enum LiveActivityStateBuilder {
     private static func contentState(
         from resolution: DedicatedWidgetResolution,
         fallbackEventType: EventType,
+        eventStartDate: Date,
+        eventEffectiveEndDate: Date,
         now: Date,
         privacy: LiveActivityPrivacyPreference
     ) -> KueLiveActivityAttributes.ContentState {
@@ -84,8 +93,15 @@ enum LiveActivityStateBuilder {
                 eventTypeDisplayName: content.eventTypeDisplayName,
                 phase: content.phase,
                 isUrgent: content.isUrgent,
-                effectiveStartDate: now,
-                effectiveEndDate: now,
+                // Kue 3.0 Phase 2 fix — these two fields previously always carried `now` (a
+                // decorative placeholder, never the real event window), which left no data
+                // for a compact "3h"/"Now" countdown to be computed from. They now carry the
+                // real, already-known event timestamps `LiveActivityCompactCountdown` (Shared/)
+                // formats — still not a new status derivation: `phase`/`terminal` above remain
+                // the one source of lifecycle truth, this is presentation math over dates the
+                // event already had.
+                effectiveStartDate: eventStartDate,
+                effectiveEndDate: eventEffectiveEndDate,
                 countdownSubline: content.subline,
                 tasksCompleted: content.tasksCompleted,
                 tasksTotal: content.tasksTotal,
@@ -106,8 +122,8 @@ enum LiveActivityStateBuilder {
                 eventTypeDisplayName: fallbackEventType.displayName,
                 phase: .today,
                 isUrgent: false,
-                effectiveStartDate: now,
-                effectiveEndDate: now,
+                effectiveStartDate: eventStartDate,
+                effectiveEndDate: eventEffectiveEndDate,
                 countdownSubline: nil,
                 tasksCompleted: 0,
                 tasksTotal: 0,

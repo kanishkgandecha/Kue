@@ -2,12 +2,13 @@
 //  LiveActivityDynamicIslandViews.swift
 //  KueWidget
 //
-//  See docs/23-live-activities-and-focus-mode.md "D./E." — every Dynamic Island region.
-//  Post-Phase-12 fix — visual redesign (docs/23 "K."): event-type accent, one clear purpose
-//  per region, no duplicated title/countdown across regions. Shared helpers (`ContentState`,
-//  `statusLine`/`statusSymbol`/`activeAccentColor`, `KueMark`) live in
-//  `LiveActivitySharedHelpers.swift`, used identically by the Lock Screen's own file — no
-//  lifecycle policy is re-derived here.
+//  Kue 3.0 Phase 2 rebuild (docs/30-kue-3-live-activities-and-dynamic-island.md). Each
+//  presentation is rebuilt independently per its own real constraints, rather than reusing the
+//  Lock Screen's layout squeezed down — docs/30 "Dynamic Island" is explicit about this.
+//  Content: `statusLine`/`statusSymbol`/`activeAccentColor`/`LiveActivityCompactCountdown`
+//  (Shared/) are read, never re-derived; which action(s) apply comes from the one shared
+//  `LiveActivityActionPolicy.plan(for:eventID:)` this file and the Lock Screen's own file both
+//  read — so the two presentations can never disagree about which control shows.
 //
 
 import SwiftUI
@@ -31,13 +32,15 @@ struct LiveActivityDynamicIslandExpandedLeading: View {
             Image(systemName: statusSymbol(state))
                 .font(.caption)
                 .foregroundStyle(activeAccentColor(eventType: attributes.eventType, state: state))
-                .accessibilityLabel(statusLine(state))
+                .accessibilityHidden(true) // meaning already carried by the text label below
             Text(state.eventTypeDisplayName)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(state.eventTypeDisplayName), \(statusLine(state))")
     }
 }
 
@@ -45,16 +48,16 @@ struct LiveActivityDynamicIslandExpandedTrailing: View {
     let attributes: KueLiveActivityAttributes
     let state: ContentState
 
-    // Trailing carries the countdown/lifecycle text (the same `accessorySafeStatus` string
-    // Compact Trailing shows), tinted with the event accent — this struct has `attributes`,
-    // `ExpandedCenter` doesn't, so the accent naturally lives here rather than on the status
-    // line below the title. Center's own status line therefore stays a plain secondary
-    // caption: the state description reads in exactly one tinted place, not two.
+    // Trailing owns the countdown/lifecycle word — the compact form
+    // (`LiveActivityCompactCountdown`), tinted with the event accent. Center (below) shows the
+    // title only; the state description reads in exactly one place, not two, per docs/30 "Do
+    // not repeat the title or countdown in multiple regions."
     var body: some View {
-        Text(WidgetAccessoryLabels.accessorySafeStatus(phase: state.phase, subline: state.countdownSubline))
+        Text(LiveActivityCompactCountdown.label(for: state))
             .font(.caption)
             .fontWeight(.semibold)
             .foregroundStyle(activeAccentColor(eventType: attributes.eventType, state: state))
+            .monospacedDigit()
             .lineLimit(1)
             .minimumScaleFactor(0.7)
             .accessibilityLabel(statusLine(state))
@@ -64,22 +67,15 @@ struct LiveActivityDynamicIslandExpandedTrailing: View {
 struct LiveActivityDynamicIslandExpandedCenter: View {
     let state: ContentState
 
-    // No `attributes` here, so no event accent to apply — by design, per `ExpandedTrailing`'s
-    // own comment above: the tinted state text already lives in Trailing, so this stays a
-    // plain secondary caption rather than a second, redundant emphasis.
+    // Title only, per docs/30's own region contract — the countdown/state word already lives
+    // in Trailing; repeating it here (even as plain secondary text, the pre-rebuild shape) is
+    // exactly the duplication docs/30 rules out.
     var body: some View {
-        VStack(spacing: 2) {
-            Text(state.displayTitle)
-                .font(.subheadline)
-                .fontWeight(.semibold)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-            Text(statusLine(state))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-        }
+        Text(state.displayTitle)
+            .font(.subheadline)
+            .fontWeight(.semibold)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
     }
 }
 
@@ -87,87 +83,42 @@ struct LiveActivityDynamicIslandExpandedBottom: View {
     let attributes: KueLiveActivityAttributes
     let state: ContentState
 
+    private var accent: Color { activeAccentColor(eventType: attributes.eventType, state: state) }
+    private var plan: LiveActivityActionPlan { LiveActivityActionPolicy.plan(for: state, eventID: attributes.eventID) }
+    private var showsTaskProgress: Bool { state.terminal == nil && state.tasksTotal > 0 }
+
+    // Sits below Leading/Trailing/Center, which already reserve the space the system's own
+    // TrueDepth-camera cutout needs at the top of the expanded presentation — this region only
+    // ever spans its own row underneath, never anything positioned to collide with it.
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if state.terminal == nil, state.tasksTotal > 0 {
-                ProgressView(value: Double(state.tasksCompleted), total: Double(state.tasksTotal))
-                    .tint(activeAccentColor(eventType: attributes.eventType, state: state))
-                Text("\(state.tasksCompleted) of \(state.tasksTotal) tasks · \(state.remainingTaskCount) left")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+            if showsTaskProgress {
+                HStack(spacing: 8) {
+                    ProgressView(value: Double(state.tasksCompleted), total: Double(state.tasksTotal))
+                        .tint(accent)
+                    Text("\(state.tasksCompleted) of \(state.tasksTotal)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
             }
-            // `actionSet(for:)` (Shared/) is the one place this decision is stated — the Lock
-            // Screen's own actions section reads the same function.
-            switch actionSet(for: state) {
-            case .activeWithNextTask, .activeNoNextTask:
-                actionRow
-            case .awaitingOutcome:
-                Link(destination: KueDeepLink.url(for: .event(attributes.eventID))) {
-                    Label("Confirm Outcome", systemImage: "questionmark.circle")
+            if plan.primary != nil || plan.secondary != nil {
+                HStack(spacing: 8) {
+                    if let primary = plan.primary {
+                        actionControl(primary, style: .compact)
+                            .buttonStyle(.borderedProminent)
+                            .tint(primaryActionTint(for: primary, accent: accent))
+                    }
+                    Spacer(minLength: 4)
+                    if let secondary = plan.secondary {
+                        actionControl(secondary, style: .iconOnly)
+                            .buttonStyle(.bordered)
+                    }
                 }
                 .font(.caption2)
-                .buttonStyle(.bordered)
                 .controlSize(.mini)
-                .tint(.orange)
-            case .none:
-                EmptyView()
             }
         }
-    }
-
-    // Complete Task (when there's a next task) or Mark Complete (when there isn't) is the
-    // primary action — `.borderedProminent` tinted with the event's own accent — the other
-    // stays a plain `.bordered` secondary. `ViewThatFits` falls back from full labeled
-    // buttons to icon-only ones (each carrying its own `.accessibilityLabel`) rather than ever
-    // dropping an action to make the row fit this narrow region.
-    @ViewBuilder
-    private var actionRow: some View {
-        let accent = activeAccentColor(eventType: attributes.eventType, state: state)
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) {
-                if let nextTaskID = state.nextTaskID {
-                    Button(intent: CompleteTaskIntent(taskID: nextTaskID)) {
-                        Label("Complete Task", systemImage: "checkmark.circle")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(accent)
-                    Button(intent: CompleteEventIntent(eventID: attributes.eventID)) {
-                        Label("Mark Complete", systemImage: "flag.checkered")
-                    }
-                    .buttonStyle(.bordered)
-                } else {
-                    Button(intent: CompleteEventIntent(eventID: attributes.eventID)) {
-                        Label("Mark Complete", systemImage: "flag.checkered")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(accent)
-                }
-            }
-            HStack(spacing: 8) {
-                if let nextTaskID = state.nextTaskID {
-                    Button(intent: CompleteTaskIntent(taskID: nextTaskID)) {
-                        Image(systemName: "checkmark.circle")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(accent)
-                    .accessibilityLabel("Complete Task")
-                    Button(intent: CompleteEventIntent(eventID: attributes.eventID)) {
-                        Image(systemName: "flag.checkered")
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityLabel("Mark Complete")
-                } else {
-                    Button(intent: CompleteEventIntent(eventID: attributes.eventID)) {
-                        Image(systemName: "flag.checkered")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(accent)
-                    .accessibilityLabel("Mark Complete")
-                }
-            }
-        }
-        .font(.caption2)
-        .controlSize(.mini)
     }
 }
 
@@ -185,21 +136,23 @@ struct LiveActivityCompactLeading: View {
 }
 
 struct LiveActivityCompactTrailing: View {
+    let attributes: KueLiveActivityAttributes
     let state: ContentState
 
-    // No `attributes` on this struct (its call site only ever passes `state:`), so there's no
-    // `eventType` to build an accent from here — `.primary` also simply reads clearest against
-    // the system's own compact-trailing background in this famously tiny, high-contrast-
-    // required region. `.monospacedDigit()` keeps a shrinking day count ("128d" → "3d") from
-    // jittering the pill's width, and the scale factor guards the 3-digit case.
+    // Compact Trailing is the tightest, highest-contrast-required region in this whole
+    // feature — `LiveActivityCompactCountdown` gives it a short, deterministic word ("19d,"
+    // "3h," "Now," "Review," "Done") that already accounts for terminal states, not just the
+    // old day-count-only compaction. `.monospacedDigit()` keeps a shrinking count from
+    // jittering the pill's width; the scale factor guards a 3-digit-or-more case.
     var body: some View {
-        Text(WidgetAccessoryLabels.accessorySafeStatus(phase: state.phase, subline: state.countdownSubline))
+        Text(LiveActivityCompactCountdown.label(for: state))
             .font(.caption2)
             .fontWeight(.semibold)
-            .foregroundStyle(.primary)
+            .foregroundStyle(activeAccentColor(eventType: attributes.eventType, state: state))
             .monospacedDigit()
             .lineLimit(1)
-            .minimumScaleFactor(0.7)
+            .minimumScaleFactor(0.6)
+            .accessibilityLabel(statusLine(state))
     }
 }
 
@@ -207,8 +160,9 @@ struct LiveActivityMinimal: View {
     let attributes: KueLiveActivityAttributes
     let state: ContentState
 
-    // A single small tinted icon — no background fill — is enough at this size; the color
-    // stays sparing while still carrying the event's own accent identity.
+    // docs/30 "Minimal": icon over text — at this region's fixed circular size, an SF Symbol
+    // scales cleanly with zero clipping risk, where any text has none of that margin. A single
+    // small tinted icon, no background fill, still carries the event's own accent identity.
     var body: some View {
         Image(systemName: statusSymbol(state))
             .foregroundStyle(activeAccentColor(eventType: attributes.eventType, state: state))

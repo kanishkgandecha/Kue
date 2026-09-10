@@ -37,7 +37,7 @@ struct KueLiveActivityWidget: Widget {
             } compactLeading: {
                 LiveActivityCompactLeading(attributes: context.attributes, state: context.state)
             } compactTrailing: {
-                LiveActivityCompactTrailing(state: context.state)
+                LiveActivityCompactTrailing(attributes: context.attributes, state: context.state)
             } minimal: {
                 LiveActivityMinimal(attributes: context.attributes, state: context.state)
             }

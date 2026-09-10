@@ -381,6 +381,21 @@ struct SettingsView: View {
                 // docs/11-privacy-and-offline.md "Privacy principles" — required, not optional.
                 Text("Deletes every event and resets all settings. This can't be undone.")
             }
+
+            #if DEBUG
+            // Kue 3.0 Phase 2 (docs/30 "Debug validation gallery") — compiled out of every
+            // Release build entirely (not merely hidden), since `#if DEBUG` excludes both the
+            // section below and `LiveActivityDebugGalleryView` itself from that configuration.
+            Section {
+                NavigationLink("Live Activity Gallery") {
+                    LiveActivityDebugGalleryView()
+                }
+            } header: {
+                Text("Developer")
+            } footer: {
+                Text("Debug builds only. Lets you preview every Live Activity/Dynamic Island fixture on this device without touching real events.")
+            }
+            #endif
         }
         .navigationTitle("Settings")
         .task {
