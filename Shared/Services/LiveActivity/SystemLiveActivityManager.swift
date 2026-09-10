@@ -10,7 +10,20 @@
 //  `WidgetIntentActions`, Shared/), which is exactly why this class lives in `Shared/`
 //  rather than being app-only.
 //
+//  Kue 3.0 Phase 1 (macOS Foundation) — ActivityKit doesn't exist on macOS (no Lock Screen/
+//  Dynamic Island there). `EventActions`/`EventCreationService`/`EventReconciliation`/
+//  `PrivacyActions`/`OccurrenceReconciliationService` (Shared/) all default a
+//  `liveActivityManager: LiveActivityManaging` parameter to `SystemLiveActivityManager.shared`
+//  — for that to keep compiling into every target unmodified (no separate Mac-only mutation
+//  logic, per Kue 3.0 Phase 1's own "do not duplicate domain logic" requirement), this *type*
+//  must exist on every platform even though its real ActivityKit-backed behavior can't. The
+//  `#else` branch below is a structural no-op, not a stub-to-fill-in-later: `isAvailable` is
+//  always `false` (so a Mac UI that checks it before offering "Start" correctly never does),
+//  every other method does nothing, and no Live-Activity-shaped Mac feature exists to build
+//  against it — see docs/29-kue-3-macos-foundation.md.
+//
 
+#if os(iOS)
 import Foundation
 import ActivityKit
 
@@ -136,3 +149,24 @@ enum LiveActivityPolicy {
     /// cancelled/skipped one does.
     static let awaitingOutcomeGracePeriod: TimeInterval = 6 * 60 * 60
 }
+
+#else
+
+import Foundation
+
+/// See this file's header — the no-ActivityKit fallback that keeps
+/// `SystemLiveActivityManager.shared` a valid default parameter value on every platform.
+nonisolated final class SystemLiveActivityManager: LiveActivityManaging {
+    static let shared = SystemLiveActivityManager()
+    private init() {}
+
+    var isAvailable: Bool { false }
+    func focusedEventID() async -> UUID? { nil }
+    func start(for event: KueEvent, now: Date) async -> LiveActivityStartResult { .failed(.unsupported) }
+    func update(for event: KueEvent, now: Date) async {}
+    func end(eventID: UUID, dismissalPolicy: LiveActivityDismissalPolicy) async {}
+    func endAll() async {}
+    func reconcileFocusedActivity(with event: KueEvent?, now: Date) async {}
+}
+
+#endif

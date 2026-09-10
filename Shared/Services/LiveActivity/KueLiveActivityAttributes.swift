@@ -9,7 +9,15 @@
 //  computes one from a real `KueEvent`, reusing `DedicatedWidgetContentService`/
 //  `WidgetContentService` rather than re-deriving lifecycle rules here.
 //
+//  Kue 3.0 Phase 1 (macOS Foundation) — ActivityKit doesn't exist on macOS at all (no Lock
+//  Screen/Dynamic Island there), so this whole declaration is guarded with
+//  `#if os(iOS)`. `SystemLiveActivityManager.swift`'s own `#else` branch is the
+//  only other file that needs to know this type doesn't exist on that platform — see its
+//  header for how `EventActions`/`EventReconciliation`/etc.'s `LiveActivityManaging`-typed
+//  default parameters still compile everywhere without ever referencing this struct directly.
+//
 
+#if os(iOS)
 import Foundation
 import ActivityKit
 
@@ -73,3 +81,4 @@ nonisolated struct KueLiveActivityAttributes: ActivityAttributes {
     var isAllDay: Bool
     var timeZoneIdentifier: String
 }
+#endif

@@ -74,6 +74,15 @@
 //  URL, so production data is unreachable from it by construction, not merely "supposed to
 //  be." See `AGENTS.md` "Build & test" for how the UI test target wires this in.
 //
+//  Kue 3.0 Phase 1 (macOS Foundation, docs/29) — `storeURL()` gained one `#if os(macOS)`
+//  branch (never `containerURL(forSecurityApplicationGroupIdentifier:)`, the iOS App Group
+//  path above): Mac Personal builds are structurally local-only, by design, not by omission —
+//  there is no code path from this factory back to the iPhone's real App Group store on any
+//  platform. `openThroughMigrationPlan(at:)`/`makeDefaultThrowing()`/every migration-recovery
+//  helper below is otherwise untouched and reused as-is; a fresh Mac store simply never
+//  matches `shouldAttemptLegacyRecovery`'s V1-store signature check, so that whole path stays
+//  a correct, harmless no-op on this platform, exactly as it already is for any V2/V3 store.
+//
 
 import SwiftData
 import Foundation
@@ -186,7 +195,9 @@ enum ModelContainerFactory {
             // `uiTestStoreURL()` (see `storeURL()`), never the real App Group path.
             resetUITestStore(at: url)
         } else {
+            #if !os(macOS)
             migrateLegacyStore(from: legacyApplicationSupportDirectory(), to: url)
+            #endif
         }
         return try openThroughMigrationPlan(at: url)
     }
@@ -401,11 +412,30 @@ enum ModelContainerFactory {
         if isUITestIsolatedStore {
             return uiTestStoreURL()
         }
+        #if os(macOS)
+        return macApplicationSupportDirectory().appendingPathComponent(storeFileName)
+        #else
         guard let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier) else {
             return legacyApplicationSupportDirectory().appendingPathComponent(storeFileName)
         }
         return containerURL.appendingPathComponent(storeFileName)
+        #endif
     }
+
+    #if os(macOS)
+    /// `~/Library/Application Support/Kue/Kue.sqlite`, created on first access — deliberately
+    /// never the iOS App Group container (see this file's header). Kue 3.0 Phase 1 keeps the
+    /// Mac Personal build's data entirely local; moving data between platforms happens only
+    /// through an explicit `.kuebackup` export/import, never a shared file.
+    private static func macApplicationSupportDirectory() -> URL {
+        let base = (try? FileManager.default.url(
+            for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
+        )) ?? FileManager.default.temporaryDirectory
+        let directory = base.appendingPathComponent("Kue", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+    #endif
 
     /// Entirely outside the App Group container — under the process's own temporary
     /// directory, keyed by `uiTestLaunchArgument` so it can never collide with (or be

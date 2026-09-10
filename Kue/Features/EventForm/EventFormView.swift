@@ -464,96 +464,33 @@ struct EventFormView: View {
             return
         }
 
-        let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let now = Date()
-        // docs/08-notifications.md "Deduplication": "the event engine first calls
-        // removePendingNotificationRequests(withIdentifiers:) for that event's prior
-        // identifiers, then re-schedules from the new timeline." Captured *before*
-        // `regenerateTasks` deletes the old (non-completed) tasks below — their per-task
-        // `-task-<taskID>` identifiers become unreconstructable once those rows are gone, so
-        // this is the only point that can still name them.
-        var staleIdentifiers: [String] = []
-
-        var createdEvent: KueEvent?
+        // Kue 3.0 Phase 1 (docs/29) — the actual save orchestration (dispatch add vs.
+        // plain-edit vs. recurring-scoped-edit, persist, sync outbox, widget reload, stale-
+        // notification cleanup) moved to `EventSaveService` (Shared/) so the new Mac editor
+        // shares it byte-for-byte instead of duplicating it — behavior below is unchanged.
+        let saveMode: EventSaveMode
         switch mode {
-        case .add(_):
-            // Kue 2.0 Phase 10 — shared with App Intents (`EventCreationService.swift`), so
-            // Siri/Shortcuts-created events go through the identical construction sequence.
-            createdEvent = EventCreationService.create(from: draft, source: draftSource, context: modelContext, now: now)
+        case .add:
+            saveMode = .add(source: draftSource)
         case .edit(let event):
-            if event.seriesID != nil {
-                // Kue 2.0 Phase 3 — route through the This Occurrence / This and Future split.
-                let outcome = OccurrenceReconciliationService.applyEdit(
-                    scope: editScope, to: event, values: draft, context: modelContext, now: now
-                )
-                staleIdentifiers = outcome.staleNotificationIdentifiers
-            } else {
-                event.title = title
-                event.eventType = draft.eventType
-                event.startDate = draft.startDate
-                event.endDate = draft.eventType == .trip ? draft.endDate : nil
-                event.isAllDay = draft.isAllDay
-                event.location = draft.location.isEmpty ? nil : draft.location
-                event.notes = draft.notes.isEmpty ? nil : draft.notes
-                event.priority = draft.priority
-                event.timeZoneIdentifier = draft.timeZoneIdentifier
-                event.updatedAt = now
-                EventStatusEngine.reconcile(event, now: now)
-                staleIdentifiers = NotificationCandidateBuilder.allIdentifiers(for: event)
-                // Regenerates from event.schedule.rules per docs/05-scheduling-engine.md
-                // "Editing an event after its schedule is generated" — safe to call
-                // unconditionally since it's a no-op for anything a completed task already covers.
-                SchedulingEngine.regenerateTasks(for: event, context: modelContext, now: now)
-                // Kue 2.0 Phase 3 — a plain event can start a fresh series from an edit too.
-                startSeriesIfNeeded(for: event, now: now)
-            }
-            createdEvent = event
+            saveMode = .edit(event: event, editScope: editScope)
         }
+        let result = EventSaveService.save(draft: draft, mode: saveMode, context: modelContext, now: now)
 
-        try? modelContext.save()
-        // Kue 2.0 Phase 11 — docs/26 "E.": covers both the `.add` and `.edit` (including
-        // occurrence-scoped edits, which can touch more than one materialized row) paths —
-        // `OccurrenceReconciliationService.applyEdit` marks any *additional* occurrences it
-        // touches itself; this covers the primary `createdEvent`.
-        if let createdEvent { SyncOutbox.markEventDirty(createdEvent.id) }
-        // docs/07-widget-engine.md "Refresh strategy" — a placed widget won't otherwise
-        // notice this write until its own precomputed timeline next reloads.
-        EventActions.reloadWidget()
-        // docs/08-notifications.md requirement 3: schedule immediately on create/edit, even
-        // for events weeks away — not gated by a date window. Fire-and-forget, same as
-        // `reloadWidget()` above, so the sheet dismisses instantly rather than waiting on
-        // notification-center round trips. This is also "the first point it's needed"
-        // (docs/08 "Permission handling") for a brand-new install, so it's the one call site
-        // allowed to prompt for permission.
-        if !staleIdentifiers.isEmpty {
-            SystemNotificationScheduler.shared.removePendingNotificationRequests(withIdentifiers: staleIdentifiers)
-        }
         // Kue 2.0 Phase 9/10 — "event saved/edited" is an explicit reconciliation trigger for
         // both the focused Live Activity and Spotlight's copy of this event; fire-and-forget
         // so the sheet dismisses instantly rather than waiting on these round trips.
-        if let eventID = createdEvent?.id {
-            let container = modelContext.container
-            Task {
-                await EventCreationService.reconcileAfterWrite(
-                    eventID: eventID, container: container, now: now,
-                    liveActivityManager: liveActivityManager, spotlightIndexer: spotlightIndexer
-                )
-            }
+        let eventID = result.event.id
+        let container = modelContext.container
+        Task {
+            await EventCreationService.reconcileAfterWrite(
+                eventID: eventID, container: container, now: now,
+                liveActivityManager: liveActivityManager, spotlightIndexer: spotlightIndexer
+            )
         }
         haptics.play(.eventCreated)
         dismiss()
-    }
-
-    /// Kue 2.0 Phase 3 — turns `event` into the origin of a brand-new series when the draft's
-    /// recurrence controls are on, and materializes the rest of the initial horizon. A no-op
-    /// (`draft.recurrenceRule == nil`) for every non-recurring create/edit — unchanged
-    /// behavior.
-    private func startSeriesIfNeeded(for event: KueEvent, now: Date) {
-        guard let rule = draft.recurrenceRule else { return }
-        event.recurrence = rule
-        event.seriesID = UUID()
-        event.recurrenceAnchorDate = event.startDate
-        OccurrenceReconciliationService.materializeInitialOccurrences(from: event, context: modelContext, now: now)
     }
 }
 

@@ -9,7 +9,13 @@
 //  see `KueApp.swift`'s own installation call site — never reachable in a production build
 //  by accident.
 //
+//  Kue 3.0 Phase 1 (macOS Foundation) — references `KueLiveActivityAttributes`/
+//  `LiveActivityStateBuilder`, both guarded to iOS/watchOS-only platforms (see
+//  `KueLiveActivityAttributes.swift`'s header); guarded the same way here. Mac Phase 1 has no
+//  Live Activity feature to fake-test, so this simply doesn't exist on that platform.
+//
 
+#if os(iOS)
 import Foundation
 
 @MainActor
@@ -116,3 +122,4 @@ final class FakeLiveActivityManager: LiveActivityManaging {
         reconcileCallCount = 0
     }
 }
+#endif

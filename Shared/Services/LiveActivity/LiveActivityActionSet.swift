@@ -10,7 +10,11 @@
 //  same reasoning `EventTypeAccent.swift`'s header already documents for the accent mapper.
 //  Never re-derives lifecycle: it only reads the already-computed `ContentState`.
 //
+//  Kue 3.0 Phase 1 (macOS Foundation) — `KueLiveActivityAttributes` itself only exists on
+//  iOS (see that file's own header); guarded here for the same reason.
+//
 
+#if os(iOS)
 import Foundation
 
 enum LiveActivityActionSet: Equatable {
@@ -33,3 +37,4 @@ func actionSet(for state: KueLiveActivityAttributes.ContentState) -> LiveActivit
     }
     return state.nextTaskID != nil ? .activeWithNextTask : .activeNoNextTask
 }
+#endif

@@ -9,7 +9,11 @@
 //  disagree about the same event's state at the same instant — see docs/23
 //  "ActivityKit attributes/state contract."
 //
+//  Kue 3.0 Phase 1 (macOS Foundation) — guarded like `KueLiveActivityAttributes.swift` itself
+//  (the type this whole file builds); see that file's header.
+//
 
+#if os(iOS)
 import Foundation
 
 enum LiveActivityStateBuilder {
@@ -119,3 +123,4 @@ enum LiveActivityStateBuilder {
         }
     }
 }
+#endif

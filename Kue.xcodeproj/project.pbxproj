@@ -12,6 +12,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		1D00B91DF7D21CE57F9F61F8 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2678A59F303DFB6300C1188B /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A52F40B43DC6C5B2AE2D653A;
+			remoteInfo = KueMac;
+		};
 		2678A5B7303DFB6400C1188B /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 2678A59F303DFB6300C1188B /* Project object */;
@@ -32,6 +39,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = 51131C3C87C242E89BC3120D;
 			remoteInfo = KueWidget;
+		};
+		56BE7DD43889B2266D6BA9C6 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2678A59F303DFB6300C1188B /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A52F40B43DC6C5B2AE2D653A;
+			remoteInfo = KueMac;
 		};
 		8E4414307005CE9EBF413FFD /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -61,7 +75,10 @@
 		2678A5A7303DFB6300C1188B /* Kue.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Kue.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		2678A5B6303DFB6400C1188B /* KueTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = KueTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		2678A5C0303DFB6400C1188B /* KueUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = KueUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		2803C6A4719CDE7DE9EAEFB5 /* KueMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = KueMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		2CB92D1AD7BF5A1A01D3F0C0 /* KueMacTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = KueMacTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		3DF5DEF77F56BF1B8D8855F9 /* KueShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = KueShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		E4B505EF27F0E9899BA88666 /* KueMacUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = KueMacUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E77018D0EA8847A2BE14C67A /* KueWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = KueWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -72,6 +89,13 @@
 				Info.plist,
 			);
 			target = 959B72BFB1B17F264687FCC2 /* KueShare */;
+		};
+		4979A27B874C61542F24CFED /* Exceptions for "KueMac" folder in "KueMac" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = A52F40B43DC6C5B2AE2D653A /* KueMac */;
 		};
 		66D0B89D379F476E9AFE9968 /* Exceptions for "KueWidget" folder in "KueWidget" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
@@ -143,12 +167,25 @@
 			path = Shared;
 			sourceTree = "<group>";
 		};
+		41F3DD55AAC0A96B341A6E16 /* KueMac */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				4979A27B874C61542F24CFED /* Exceptions for "KueMac" folder in "KueMac" target */,
+			);
+			path = KueMac;
+			sourceTree = "<group>";
+		};
 		4DB8A4220245BF2A7ACD27FC /* KueShare */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				3BB75FAFA648029E09F711D7 /* Exceptions for "KueShare" folder in "KueShare" target */,
 			);
 			path = KueShare;
+			sourceTree = "<group>";
+		};
+		CAC0BF0C4743C88C8AE51CCB /* KueMacTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = KueMacTests;
 			sourceTree = "<group>";
 		};
 		E2A1ABA6DECD4EB99174FE46 /* KueWidget */ = {
@@ -159,10 +196,22 @@
 			path = KueWidget;
 			sourceTree = "<group>";
 		};
+		F56199A7F869A77DFEDAEE3E /* KueMacUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = KueMacUITests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		0BC85BCE593710B636CF77D5 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1BD8DFBF1658545BF1A95488 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -190,6 +239,20 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		4AC5AB6179A1F210469F2865 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A81C1C2F762F4ACCF28E7E09 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		BD61C278151D4FF6802C481D /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -206,9 +269,12 @@
 				2678A5A9303DFB6300C1188B /* Kue */,
 				E2A1ABA6DECD4EB99174FE46 /* KueWidget */,
 				4DB8A4220245BF2A7ACD27FC /* KueShare */,
+				41F3DD55AAC0A96B341A6E16 /* KueMac */,
 				271E3D159C5E4D9F9FC97245 /* Shared */,
 				2678A5B9303DFB6400C1188B /* KueTests */,
 				2678A5C3303DFB6400C1188B /* KueUITests */,
+				CAC0BF0C4743C88C8AE51CCB /* KueMacTests */,
+				F56199A7F869A77DFEDAEE3E /* KueMacUITests */,
 				2678A5A8303DFB6300C1188B /* Products */,
 			);
 			sourceTree = "<group>";
@@ -221,6 +287,9 @@
 				3DF5DEF77F56BF1B8D8855F9 /* KueShare.appex */,
 				2678A5B6303DFB6400C1188B /* KueTests.xctest */,
 				2678A5C0303DFB6400C1188B /* KueUITests.xctest */,
+				2803C6A4719CDE7DE9EAEFB5 /* KueMac.app */,
+				2CB92D1AD7BF5A1A01D3F0C0 /* KueMacTests.xctest */,
+				E4B505EF27F0E9899BA88666 /* KueMacUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -323,6 +392,52 @@
 			productReference = E77018D0EA8847A2BE14C67A /* KueWidget.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		688AADBF5480AC36979D2543 /* KueMacUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9D7CBB607438163824617B09 /* Build configuration list for PBXNativeTarget "KueMacUITests" */;
+			buildPhases = (
+				0DD3D754CCE93372693E461E /* Sources */,
+				4AC5AB6179A1F210469F2865 /* Frameworks */,
+				666F4EE822432E640A859663 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				DB24D8E3AEFB3132DFC5271A /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				F56199A7F869A77DFEDAEE3E /* KueMacUITests */,
+			);
+			name = KueMacUITests;
+			packageProductDependencies = (
+			);
+			productName = KueMacUITests;
+			productReference = E4B505EF27F0E9899BA88666 /* KueMacUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		93E26FE1F687E342BA071350 /* KueMacTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 43B67D68734CA466F80E7FF1 /* Build configuration list for PBXNativeTarget "KueMacTests" */;
+			buildPhases = (
+				0282C5B88900DC7F09444489 /* Sources */,
+				1BD8DFBF1658545BF1A95488 /* Frameworks */,
+				9A26EDBDFE91204451E2A124 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				3942CAF675299B2B1B51C937 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				CAC0BF0C4743C88C8AE51CCB /* KueMacTests */,
+			);
+			name = KueMacTests;
+			packageProductDependencies = (
+			);
+			productName = KueMacTests;
+			productReference = 2CB92D1AD7BF5A1A01D3F0C0 /* KueMacTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		959B72BFB1B17F264687FCC2 /* KueShare */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 68044CB40E3A42142F7ACB9F /* Build configuration list for PBXNativeTarget "KueShare" */;
@@ -346,6 +461,29 @@
 			productName = KueShare;
 			productReference = 3DF5DEF77F56BF1B8D8855F9 /* KueShare.appex */;
 			productType = "com.apple.product-type.app-extension";
+		};
+		A52F40B43DC6C5B2AE2D653A /* KueMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A4475D94F095EA8947107C55 /* Build configuration list for PBXNativeTarget "KueMac" */;
+			buildPhases = (
+				AF2C21C57D45671728369E82 /* Sources */,
+				A81C1C2F762F4ACCF28E7E09 /* Frameworks */,
+				960B1DD84D6086F9392300DF /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				271E3D159C5E4D9F9FC97245 /* Shared */,
+				41F3DD55AAC0A96B341A6E16 /* KueMac */,
+			);
+			name = KueMac;
+			packageProductDependencies = (
+			);
+			productName = KueMac;
+			productReference = 2803C6A4719CDE7DE9EAEFB5 /* KueMac.app */;
+			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
 
@@ -371,7 +509,18 @@
 					51131C3C87C242E89BC3120D = {
 						CreatedOnToolsVersion = 26.6;
 					};
+					688AADBF5480AC36979D2543 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = A52F40B43DC6C5B2AE2D653A;
+					};
+					93E26FE1F687E342BA071350 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = A52F40B43DC6C5B2AE2D653A;
+					};
 					959B72BFB1B17F264687FCC2 = {
+						CreatedOnToolsVersion = 26.6;
+					};
+					A52F40B43DC6C5B2AE2D653A = {
 						CreatedOnToolsVersion = 26.6;
 					};
 				};
@@ -395,6 +544,9 @@
 				959B72BFB1B17F264687FCC2 /* KueShare */,
 				2678A5B5303DFB6400C1188B /* KueTests */,
 				2678A5BF303DFB6400C1188B /* KueUITests */,
+				A52F40B43DC6C5B2AE2D653A /* KueMac */,
+				93E26FE1F687E342BA071350 /* KueMacTests */,
+				688AADBF5480AC36979D2543 /* KueMacUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -435,9 +587,44 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		666F4EE822432E640A859663 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		960B1DD84D6086F9392300DF /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9A26EDBDFE91204451E2A124 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		0282C5B88900DC7F09444489 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0DD3D754CCE93372693E461E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		2463E69912B44AEBAC602801 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -473,6 +660,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AF2C21C57D45671728369E82 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -491,14 +685,68 @@
 			target = 959B72BFB1B17F264687FCC2 /* KueShare */;
 			targetProxy = 8E4414307005CE9EBF413FFD /* PBXContainerItemProxy */;
 		};
+		3942CAF675299B2B1B51C937 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A52F40B43DC6C5B2AE2D653A /* KueMac */;
+			targetProxy = 1D00B91DF7D21CE57F9F61F8 /* PBXContainerItemProxy */;
+		};
 		91B588D9FD794A368CD14164 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 51131C3C87C242E89BC3120D /* KueWidget */;
 			targetProxy = 46C554EB59974645A2424EB9 /* PBXContainerItemProxy */;
 		};
+		DB24D8E3AEFB3132DFC5271A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A52F40B43DC6C5B2AE2D653A /* KueMac */;
+			targetProxy = 56BE7DD43889B2266D6BA9C6 /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		0F7BDFEB19AD63FD6868CFA1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = N77N525X68;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kanishkgandecha.KueMacTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/KueMac.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/KueMac";
+			};
+			name = Debug;
+		};
+		251FC6CC423C96050FA8D732 /* Debug-Personal */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = N77N525X68;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kanishkgandecha.KueMacTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/KueMac.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/KueMac";
+			};
+			name = "Debug-Personal";
+		};
 		2678A5C8303DFB6400C1188B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -822,6 +1070,27 @@
 			};
 			name = Release;
 		};
+		3ACA3B3999ED07118B8EE259 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = N77N525X68;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kanishkgandecha.KueMacUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = KueMac;
+			};
+			name = Debug;
+		};
 		5FD3A49C6C214362AA6A0991 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -915,6 +1184,41 @@
 			};
 			name = "Debug-Personal";
 		};
+		6E550259A9A5CB26A7872640 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = KueMac/KueMac.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = N77N525X68;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = KueMac/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Kue;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kanishkgandecha.Kue.Mac;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 		780803DB8DD94D858E56759B /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -975,6 +1279,85 @@
 			};
 			name = "Debug-Personal";
 		};
+		8B4933DE7ADD3DFFD3C172C0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = N77N525X68;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kanishkgandecha.KueMacTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/KueMac.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/KueMac";
+			};
+			name = Release;
+		};
+		97D8B41F5A12131145FC2D02 /* Debug-Personal */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = N77N525X68;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kanishkgandecha.KueMacUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = KueMac;
+			};
+			name = "Debug-Personal";
+		};
+		C6FB3AB51899946932C1692F /* Debug-Personal */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = KueMac/KueMac.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = N77N525X68;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = KueMac/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Kue;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kanishkgandecha.Kue.Mac;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG KUE_PERSONAL_BUILD $(inherited)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = "Debug-Personal";
+		};
 		E8C6F3614A990FE3C7ECE8A9 /* Debug-Personal */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1032,6 +1415,62 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		F0D47C83EA4172E74A62DA14 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = N77N525X68;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kanishkgandecha.KueMacUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = KueMac;
+			};
+			name = Release;
+		};
+		F2511DF9427BA67A2D388A5D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = KueMac/KueMac.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = N77N525X68;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = KueMac/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Kue;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kanishkgandecha.Kue.Mac;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
 		};
@@ -1119,12 +1558,42 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		43B67D68734CA466F80E7FF1 /* Build configuration list for PBXNativeTarget "KueMacTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0F7BDFEB19AD63FD6868CFA1 /* Debug */,
+				8B4933DE7ADD3DFFD3C172C0 /* Release */,
+				251FC6CC423C96050FA8D732 /* Debug-Personal */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		68044CB40E3A42142F7ACB9F /* Build configuration list for PBXNativeTarget "KueShare" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				EC28B8DCDE854C723F9F6BE6 /* Debug */,
 				2D8901634C5584417FA7B108 /* Release */,
 				E8C6F3614A990FE3C7ECE8A9 /* Debug-Personal */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		9D7CBB607438163824617B09 /* Build configuration list for PBXNativeTarget "KueMacUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3ACA3B3999ED07118B8EE259 /* Debug */,
+				F0D47C83EA4172E74A62DA14 /* Release */,
+				97D8B41F5A12131145FC2D02 /* Debug-Personal */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A4475D94F095EA8947107C55 /* Build configuration list for PBXNativeTarget "KueMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F2511DF9427BA67A2D388A5D /* Debug */,
+				6E550259A9A5CB26A7872640 /* Release */,
+				C6FB3AB51899946932C1692F /* Debug-Personal */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

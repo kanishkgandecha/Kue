@@ -1098,6 +1098,59 @@ KueUITests/                  XCTest UI tests — Kue 2.0 Phase 2 added
                              `fakeVoice*Argument` constants); `KueApp` installs all four fake
                              Voice services together under that one argument — never the
                              simulator's or owner's real microphone.
+KueMac/                      Kue 3.0 Phase 1 — the native macOS app target-only folder:
+                             KueMacApp.swift (@main, WindowGroup + Settings scenes, wires
+                             `.environment(\.calendarProvider, ...)`), RootSplitView.swift
+                             (sidebar NavigationSplitView shell), MacAppState.swift (the one
+                             shared piece of UI state `KueMacCommands` reads/writes since
+                             Commands doesn't inherit the main window's environment),
+                             KueMacCommands.swift (⌘N/⌘F/⌘1-4/⌘⌫/⌘S),
+                             EventListComponents.swift (MacEventRow + Home/Filtered/Search
+                             list views), MacEventDetailView.swift (task rows now also carry
+                             keyboard-accessible Move Up/Move Down buttons alongside drag
+                             reorder; gained a Calendar export/update/unlink section reusing
+                             `CalendarExportService` verbatim), MacEventEditorView.swift,
+                             MacCalendarDestinationPickerView.swift (sheet for choosing which
+                             writable calendar to export to), MacCalendarImportListView.swift
+                             (second cleanup round — "Import from Calendar…" ⇧⌘I, hands its
+                             result to `MacEventEditorView`'s new `.addFromDraft` mode for
+                             review/save — see docs/29 "H."), MacTemplatesView.swift,
+                             MacSettingsView.swift (Backup/General/About, General now also
+                             shows Calendar authorization status + Allow-Access/Open-Settings),
+                             MacOnboardingView.swift, MacStoreOpenFailureView.swift,
+                             Assets.xcassets/AppIcon.appiconset/ (the real Kue brand icon, full
+                             traditional macOS 10-image size grid — see docs/29 "cleanup round"
+                             for why the simplified iOS-style single-1024 format doesn't work
+                             here), Info.plist, KueMac.entitlements (App Sandbox +
+                             user-selected file read-write only — no App Group, no CloudKit, in
+                             every configuration). See docs/29-kue-3-macos-foundation.md.
+KueMacTests/                 Kue 3.0 Phase 1 — one `@Suite(.serialized) struct
+                             KueMacAllTests`, its tests split across five files
+                             (MacModelContainerFactoryTests.swift owns the primary
+                             declaration; MacSharedServiceSmokeTests.swift/
+                             MacBackupInteropTests.swift/TaskEditingServiceTests.swift/
+                             MacPerformanceBenchmarkTests.swift are `extension
+                             KueMacAllTests`) plus MacTestSupport.swift (temp-store helpers, a
+                             fixture-event builder, and `makeTestContainer()` — see its own
+                             header for the real macOS SwiftData issue that makes it
+                             necessary, not just a style preference). Must stay one serialized
+                             suite — see docs/29 "K." before splitting it back apart.
+                             MacPerformanceBenchmarkTests.swift is a real, deterministic
+                             5,000-event benchmark with printed `ContinuousClock` timings, not
+                             a placeholder — see docs/29 "J." for the actual measured numbers
+                             (now seven phases, including UUID fetch and restore-plan
+                             validation from the second cleanup round). MacSharedServiceSmokeTests
+                             .swift also covers Calendar import end-to-end via
+                             `FakeCalendarProvider` — never the real Calendar.
+KueMacUITests/                Kue 3.0 Phase 1 — MacUITestLaunchConfiguration.swift (mirrors
+                             KueUITests' own isolatedStoreArgument literal) and
+                             KueMacUITests.swift (five cases: launch/empty-state, sidebar
+                             navigation, create, search, delete). Actually executed on this
+                             machine, not just built — 2/5 pass reliably; the other 3 fail with
+                             a precisely diagnosed "synthetic clicks can't reach
+                             `.sheet()`-presented content in this environment" limit. See
+                             docs/29 "K." before assuming this is fixed or re-diagnosing from
+                             scratch.
 ```
 
 A `Utilities/` folder doesn't exist yet — it'll appear when something is actually generic
@@ -1116,20 +1169,26 @@ not belong in `Shared/`. A build *setting* change (not just adding a source file
 Phase 8's `Kue/Info.plist` wiring, or a whole new target (Phase 4's KueWidget, Phase 10's
 KueShare) — still requires a direct `project.pbxproj` edit.
 
-### Three targets: Kue (app) + KueWidget (extension) + KueShare (extension)
+### Three iOS targets: Kue (app) + KueWidget (extension) + KueShare (extension), plus KueMac
 
-Kue+KueWidget added in Phase 4; KueShare added in Phase 10. All three join the App Group
-`group.com.kanishkgandecha.Kue` (`docs/03-data-model.md` "Shared storage: App Group") so
-`ModelContainerFactory.makeDefault()` opens the *same* on-disk store in every process — never
-a copy or snapshot. Both extensions must call `ModelContainerFactory.makeDefaultOrNil()` (not
-`makeDefault()`), since a broken store there should degrade gracefully (a placeholder widget
-entry; an alert + no-op in the Share Extension), never crash the extension process
-(`docs/13-error-handling.md` "Widget refresh failure" — the same principle applies to Share).
+Kue+KueWidget added in Phase 4; KueShare added in Phase 10; `KueMac` (Kue 3.0 Phase 1, native
+macOS app, docs/29) added a fourth, structurally separate target — it does **not** join the
+App Group below; see docs/29 "C." for why (Mac Personal builds are local-only by design). The
+original three still join the App Group `group.com.kanishkgandecha.Kue`
+(`docs/03-data-model.md` "Shared storage: App Group") so `ModelContainerFactory.makeDefault()`
+opens the *same* on-disk store in every process — never a copy or snapshot. Both iOS
+extensions must call `ModelContainerFactory.makeDefaultOrNil()` (not `makeDefault()`), since a
+broken store there should degrade gracefully (a placeholder widget entry; an alert + no-op in
+the Share Extension), never crash the extension process (`docs/13-error-handling.md` "Widget
+refresh failure" — the same principle applies to Share).
 
-All three targets currently use `CODE_SIGN_STYLE = Manual` with an ad-hoc identity (`-`) —
-this environment has no Apple Developer Team configured, and automatic signing silently
-strips App-Group-dependent entitlements from the final signature when there's no team to
-validate the capability against (confirmed empirically while building this out: the
+As of Kue 3.0 Phase 1, this environment has a real (free Personal Team) Apple Developer Team
+signed into Xcode, and every target — the original three plus `KueMac` — uses
+`CODE_SIGN_STYLE = Automatic` with that team, confirmed working for both iOS Simulator and
+macOS builds. This corrects the note below, kept for its still-relevant historical context:
+before that team was configured, this environment had none, and automatic signing silently
+stripped App-Group-dependent entitlements from the final signature when there was no team to
+validate the capability against (confirmed empirically while building the original three: the
 pre-strip "-Simulated.xcent" intermediate keeps the entitlement, but automatic signing's
 *actual* signed output does not, regardless of Automatic vs Manual). On a machine with a real
 (even free Personal) Team signed into Xcode, switching back to Automatic should work
@@ -1177,6 +1236,19 @@ xcodebuild test -project Kue.xcodeproj -scheme Kue \
 xcodebuild test -project Kue.xcodeproj -scheme Kue \
   -destination 'platform=iOS Simulator,name=iPhone 17' \
   -only-testing:KueUITests
+
+# Kue 3.0 Phase 1 — native macOS target, "Kue Mac Personal" scheme (Debug-Personal config).
+# No -destination device/simulator name needed; macOS builds/runs directly on this machine.
+xcodebuild build -project Kue.xcodeproj -scheme "Kue Mac Personal" -destination 'platform=macOS'
+
+xcodebuild test -project Kue.xcodeproj -scheme "Kue Mac Personal" -destination 'platform=macOS' \
+  -only-testing:KueMacTests
+# KueMacUITests builds cleanly (`build-for-testing`) but its cases cannot execute in a
+# non-interactive environment — macOS `XCUIApplication` automation requires the
+# Accessibility/Automation permission to be granted interactively once per built test runner;
+# `xcodebuild test` otherwise fails with "Timed out while enabling automation mode" before any
+# test body runs. Run it interactively (grant the permission when macOS prompts) to actually
+# execute the six cases.
 ```
 
 Fix every error and warning introduced by your own change before considering it done —
@@ -1245,6 +1317,66 @@ by `Shared/Services/LiveActivity/LiveActivityActionSet.swift`'s `actionSet(for:)
 the Lock Screen and Dynamic Island Expanded Bottom views — don't re-derive that condition
 inline a third time. No lifecycle, App Intent, persistence, schema, or widget-selection behavior
 changed.
+
+Kue 3.0 Phase 1 — a fourth target, `KueMac`, a native macOS app; see docs/29 for the full
+contract. Several files moved from `Kue/Services/` into `Shared/Services/` (unchanged logic,
+same "the widget/App-Intent process needs it too" reasoning Phase 9 already used) so `KueMac`
+can reuse them: `EventActions`, `EventCreationService`, `EventDuplicationService`,
+`EventReconciliation`, `EventValidator` (carries `EventDraft`), `DuplicateDetectionService`,
+`OccurrenceReconciliationService`, `NotificationEngine`, `PrivacyActions`,
+`Backup/BackupRestoreService`, `Backup/BackupFileDocument`. A new shared file,
+`EventSaveService.swift`, is the actual save orchestration extracted out of
+`EventFormView.save()` (iOS) — the iOS form now calls it too, so the new Mac editor shares one
+save path with iOS rather than reimplementing it; behavior is unchanged (proven by the full
+iOS regression suite). `Shared/Services/LiveActivity/`'s ActivityKit-dependent files
+(`KueLiveActivityAttributes`, `LiveActivityStateBuilder`, `SystemLiveActivityManager`,
+`FakeLiveActivityManager`, `LiveActivityActionSet`) are guarded `#if os(iOS)` — **not**
+`#if canImport(ActivityKit)`, which is insufficient: ActivityKit's module is importable on
+macOS but its types are `@available(macOS, unavailable)`. `SystemLiveActivityManager` gained
+an `#else` structural no-op so `EventActions`/etc.'s `liveActivityManager:` default parameter
+still compiles and works correctly on every platform. `TaskEditingService.swift` (new,
+Shared/) is Kue's first in-app task add/rename/delete/reorder/uncomplete logic anywhere — a
+genuine gap this phase found, not duplicated from an existing iOS feature (none existed).
+`ModelContainerFactory.storeURL()`'s Mac branch (`#if os(macOS)`) never touches the iOS App
+Group container — Mac Personal builds are structurally local-only, matching this project's own
+"Personal build" precedent. A confirmed macOS-SDK SwiftData issue (multiple in-memory/temp
+`ModelContainer`s alive across many rapid `@Test` functions in one process) crashed
+`KueMacTests` until traced to two real test-code bugs (a `ModelContext` outliving the
+`ModelContainer` that vended it; a fire-and-forget background `Task` racing test teardown) —
+see docs/29 "K." for the full story if this resurfaces.
+
+Kue 3.0 Phase 1 cleanup round (after the initial report) — see docs/29 for full detail on
+each: `Kue/Services/Calendar/` moved to `Shared/Services/Calendar/` after a real audit found
+no macOS blocker (only `SystemCalendarProvider.swift` touches EventKit, and every EventKit API
+it calls is available on macOS identically) — Mac Settings and Event Detail now have real
+Calendar authorization/export/update/unlink UI, reusing `CalendarProviding`/
+`CalendarExportService` verbatim; Calendar *import* UI on Mac was not built in this first round
+(a real, bounded follow-up, not silently done — since built, see the second-cleanup-round
+paragraph below). `KueMac/Assets.xcassets/AppIcon.appiconset/` carries
+the real Kue brand icon (the same source PNG iOS uses, resized into the full traditional macOS
+icon grid — this Xcode version's `actool` rejected the simplified single-1024 format for
+macOS, unlike iOS). `MacEventDetailView`'s task rows gained keyboard-accessible Move Up/Move
+Down buttons alongside the existing drag reorder. `KueMacTests` gained a real, deterministic
+5,000-event performance benchmark with printed, verified timings (docs/29 "J."). `KueMacUITests`
+was actually executed (not just built) — 2/5 pass reliably; the other 3 fail with a precisely
+diagnosed "synthetic clicks can't reach `.sheet()`-presented content in this environment" limit,
+tried four different ways before being reported as a real, open environment characteristic
+rather than worked around — see docs/29 "K." before assuming it's fixed or re-diagnosing from
+scratch.
+
+Second Kue 3.0 Phase 1 cleanup round (two remaining implementable gaps) — see docs/29 for
+detail: Calendar **import** is now built on Mac — `MacCalendarImportListView` (⇧⌘I) mirrors
+iOS's `CalendarImportListView` exactly (auth states, event browse, recurrence-choice dialog),
+then hands the resulting `EventDraft` to `MacEventEditorView`'s new `.addFromDraft` mode for
+review/edit before `EventSaveService.save` persists it — verified via `KueMacTests` against
+`FakeCalendarProvider`, never the real Calendar, and deliberately *not* via a new
+`KueMacUITests` sheet case (would hit the identical sheet-click-synthesis wall the 3 existing
+failures already document — no new evidence to gain there). `MacPerformanceBenchmarkTests` grew
+two more measured phases: Event Detail fetch-by-UUID (~0.0005s) and `BackupCoder
+.decodeAndValidate` restore-plan validation (~0.04s) over the same 5,000-event store — see
+docs/29 "J." The 3 sheet-dependent `KueMacUITests` failures were left exactly as diagnosed, not
+re-attacked — they're an explicit interactive-Xcode manual-checklist item now (docs/29 "L."),
+not a target for more headless workarounds.
 
 ### A module-wide concurrency quirk worth knowing before you hit it
 
