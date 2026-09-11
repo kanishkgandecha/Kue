@@ -486,7 +486,11 @@ ever being called production-sync-verified.
 Shared/                     Claimed by BOTH the "Kue" app target and the "KueWidget"
                              extension target (see "Two targets" below) — only code with
                              zero SwiftUI/WidgetKit/App-only dependencies belongs here.
-  Models/                   @Model classes + their Codable/enum types, one file per model
+  Models/                   @Model classes + their Codable/enum types, one file per model.
+                             Kue 3.0 Phase 3 added NotificationRule.swift (docs/31) — the
+                             persisted event-/task-level notification override; an empty
+                             `KueEvent.notificationRules`/`KueTask.notificationRules` array
+                             means "inherit the global default," never "no reminder."
   Persistence/              ModelContainerFactory — the single place the SwiftData schema
                              and ModelContainer are constructed (App Group store, in-memory
                              for tests/previews), plus `ModelContainerOpenOutcome`/
@@ -506,6 +510,17 @@ Shared/                     Claimed by BOTH the "Kue" app target and the "KueWid
                              `KueSchedule`, `WidgetConfiguration`, `WidgetState`) — see that
                              file's own header for why the whole connected subgraph needed
                              nesting, not just the one type whose shape actually changed.
+
+                             Kue 3.0 Phase 3 added KueSchemaV4.swift (`NotificationRule`, docs/31
+                             "Migration") — `.lightweight`, purely additive. Forced
+                             `KueSchemaV3.swift` (previously reference-live-types-directly, no
+                             nesting) to gain its own nested `KueEvent`/`KueTask`/`KueSchedule`/
+                             `WidgetConfiguration`/`WidgetState`, the same pattern one version
+                             later — and required fixing `migrateV2toV3`'s own `didMigrate`
+                             closure, which fetched a bare `FetchDescriptor<KueEvent>()` that
+                             crashed at runtime the moment `KueSchemaV3` stopped meaning the live
+                             type — see docs/31 for the exact crash and fix, and check for the
+                             same mistake again at the next version bump.
   Services/                 EventStatusEngine (status derivation + reconciliation sweep,
                              incl. `archiveThreshold`/`isPastAutoArchiveWindow` — the
                              date-driven auto-archive math both the sweep and the read-only
@@ -532,6 +547,21 @@ Shared/                     Claimed by BOTH the "Kue" app target and the "KueWid
                              stays app-only — its full cap-aware global `reschedule` pass is
                              unneeded by any Phase 9 intent, which only ever removes/replaces
                              one event's or one task's identifiers directly.
+
+                             Kue 3.0 Phase 3 added `Notifications/` (docs/31): NotificationRuleValidator.swift,
+                             NotificationGlobalPreferences.swift (App Group `UserDefaults`,
+                             per-device by construction), NotificationQuietHoursPolicy.swift,
+                             NotificationSchedulePlan.swift (pure output types), NotificationPlanner.swift
+                             (the pure engine — composes the pre-existing default-layer
+                             `NotificationCandidateBuilder` above with the new persisted
+                             `NotificationRule` layer), NotificationExecutor.swift (diff-based
+                             reconciliation, layered on the existing `NotificationScheduling`
+                             protocol — no second `UNUserNotificationCenter` seam), and
+                             NotificationDefaultsApplier.swift (the "Apply New Defaults to
+                             Existing Events…" preview/apply pair). `NotificationEngine
+                             .reschedule` (this same Services/ folder) now calls
+                             `NotificationPlanner`/`NotificationExecutor` internally — every
+                             pre-existing call site needed zero changes.
 
                              Phase 9 also added: WidgetReloading.swift (the
                              `WidgetCenter.shared.reloadTimelines(ofKind:)` DI seam —
@@ -932,7 +962,15 @@ KueTests/                   Swift Testing (`import Testing`) unit tests — `@te
                              FakeBackgroundTaskScheduler, FakeBackgroundTask) live in
                              NotificationTestSupport.swift, shared across its test files —
                              no test here ever touches a real `UNUserNotificationCenter` or
-                             `BGTaskScheduler`. Phase 9 added FakeWidgetReloader to the same
+                             `BGTaskScheduler`. Kue 3.0 Phase 3 added
+                             FailureInjectingNotificationScheduler to the same file (docs/31
+                             "Scheduling executor" — the failure-injection fake) plus
+                             NotificationRuleValidatorTests.swift, NotificationQuietHoursPolicyTests
+                             .swift, NotificationPlannerTests.swift, NotificationExecutorTests.swift,
+                             NotificationDefaultsApplierTests.swift, RecurringNotificationRuleTests
+                             .swift, Backup/NotificationRuleBackupTests.swift, and
+                             Migrations/SchemaV4MigrationTests.swift (70 new tests total —
+                             see docs/31 "Tests"). Phase 9 added FakeWidgetReloader to the same
                              file (same rationale) and tests
                              `WidgetIntentActions`/`TaskSnoozeCalculator` directly — the
                              `CompleteTaskIntent`/`SnoozeTaskIntent`/`CompleteEventIntent`
@@ -1045,7 +1083,16 @@ KueTests/                   Swift Testing (`import Testing`) unit tests — `@te
                              confirmation, cleanup after every termination path, notification/
                              widget effects after confirmed creation) — all four Fake* Voice
                              services only, never real `AVAudioSession`/`AVAudioEngine`/`Speech`.
-KueUITests/                  XCTest UI tests — Kue 2.0 Phase 2 added
+KueUITests/                  XCTest UI tests — Kue 3.0 Phase 3 added
+                             NotificationStudioUITests.swift (docs/31 "Tests"): Notification
+                             Studio reachable from Settings, add/delete a custom event-level
+                             rule from Event Detail's Notifications tab, and toggle-reachability
+                             checks (not value-change assertions — see that file's own header
+                             for the real, reproducible XCUITest-in-Simulator characteristic
+                             found while writing it: a `Toggle` tap synthesizes cleanly but its
+                             exposed `.value` doesn't reliably update afterward here, the same
+                             gap an earlier phase's `SystemIntegrationSettingsUITests` already
+                             worked around the same way). Kue 2.0 Phase 2 added
                              SearchAndOrganizationUITests.swift (search, clearing search,
                              the filter/sort sheet, filtering to one event type, sorting,
                              an unmatched-search empty state, duplication) — same unique-
@@ -1112,14 +1159,21 @@ KueMac/                      Kue 3.0 Phase 1 — the native macOS app target-onl
                              list views), MacEventDetailView.swift (task rows now also carry
                              keyboard-accessible Move Up/Move Down buttons alongside drag
                              reorder; gained a Calendar export/update/unlink section reusing
-                             `CalendarExportService` verbatim), MacEventEditorView.swift,
+                             `CalendarExportService` verbatim; Kue 3.0 Phase 3 — docs/31 — its
+                             Notifications section now lists every custom `NotificationRule`
+                             alongside the default reminders, source-labeled, plus a native
+                             quick-action to add a default event-start reminder), MacEventEditorView.swift,
                              MacCalendarDestinationPickerView.swift (sheet for choosing which
                              writable calendar to export to), MacCalendarImportListView.swift
                              (second cleanup round — "Import from Calendar…" ⇧⌘I, hands its
                              result to `MacEventEditorView`'s new `.addFromDraft` mode for
                              review/save — see docs/29 "H."), MacTemplatesView.swift,
                              MacSettingsView.swift (Backup/General/About, General now also
-                             shows Calendar authorization status + Allow-Access/Open-Settings),
+                             shows Calendar authorization status + Allow-Access/Open-Settings;
+                             Kue 3.0 Phase 3 replaced its Notifications section's old "planned
+                             for a later phase" placeholder with real master/per-device-delivery
+                             toggles reading/writing the same `NotificationGlobalPreferences`
+                             the iPhone app does — docs/31 "Mac behavior"),
                              MacOnboardingView.swift, MacStoreOpenFailureView.swift,
                              Assets.xcassets/AppIcon.appiconset/ (the real Kue brand icon, full
                              traditional macOS 10-image size grid — see docs/29 "cleanup round"
@@ -1348,6 +1402,48 @@ fixture as a real Live Activity on a physical device — every fixture is a plai
 limitation (no sandboxed "test" Activity namespace) means starting one still ends whatever real
 activity is currently focused, which the tool's own UI says up front. No lifecycle, App Intent,
 persistence, schema, or widget-selection behavior changed.
+
+**Kue 3.0 Phase 3 ("Notification Studio") is done** — see
+docs/31-kue-3-notification-studio.md for the full contract. Adds `KueSchemaV4`
+(`Shared/Models/NotificationRule.swift`, a new `@Model` + a new `@Relationship` from `KueEvent`/
+`KueTask` to it) — the first schema bump since Phase 4's `KueSchemaV3`, `.lightweight` since it's
+purely additive, and the phase that found (via a real migration-test run) that `KueMigrationPlan
+.migrateV2toV3`'s `didMigrate` closure needed its own unqualified `FetchDescriptor<KueEvent>()`
+requalified to `FetchDescriptor<KueSchemaV3.KueEvent>()` once `KueSchemaV3` gained its own nested
+copy — the same category of mistake to check for at the *next* version bump too. Composition,
+not replacement, is the load-bearing architecture decision: the pre-existing
+`NotificationCandidateBuilder`/`NotificationEngine` (docs/08, unchanged, still fully covered by
+its own pre-existing tests) is reused verbatim as a "default layer"; new
+`Shared/Services/Notifications/` (`NotificationPlanner`, `NotificationExecutor`,
+`NotificationRuleValidator`, `NotificationQuietHoursPolicy`, `NotificationGlobalPreferences`,
+`NotificationDefaultsApplier`, `NotificationSchedulePlan`) adds a "rule layer" of explicit,
+persisted `NotificationRule` rows on top — an event/task with zero rows still follows the global
+default automatically, so "backfill existing reminder behavior" needed no data migration at all,
+only `NotificationGlobalPreferences.seededFromLegacyPreferences()` reading the pre-existing
+`ReminderPreference.current` the first time it's ever asked. `NotificationEngine.reschedule`
+keeps its exact external signature (now `@discardableResult`-returning the computed
+`NotificationSchedulePlan`) — every existing call site (`EventActions`, `EventFormView`,
+`EditScheduleView`, `WidgetIntentActions`, `BackgroundRefreshHandler`) needed zero changes.
+`NotificationStudioSettingsView`/`ApplyDefaultsToExistingEventsView`
+(`Kue/Features/Settings/`) and `NotificationRuleEditorView` (`Kue/Features/Detail/`) are the new
+iPhone Notification Studio surfaces (Settings → Notifications → Notification Studio; Event
+Detail's existing Notifications tab gained a Custom Rules section, always reachable — a real bug
+found via an actual `KueUITests` run, since the section used to be nested inside the same branch
+that also required a non-empty default-reminder list, hiding "Add Custom Rule…" whenever an
+event had none pending yet). `KueMac/MacSettingsView.swift`'s own Notifications section (a
+Phase-1 placeholder reading "planned for a later Kue 3.0 phase") and `MacEventDetailView.swift`'s
+Notifications section now read/write the same `NotificationGlobalPreferences`/`NotificationRule`
+data with native Mac controls — a full native multi-field rule editor and quiet-hours
+configuration stay iPhone-only this phase, a real disclosed scope boundary, not silently skipped.
+`.kuebackup` format bumped 1 → 2 (`BackupPayload.notificationRules`, tolerant-decodes to `[]` for
+an old file). A genuine, reproducible XCUITest environment characteristic found while writing
+`NotificationStudioUITests.swift`: tapping a `Toggle` synthesizes cleanly but its exposed
+accessibility `.value` doesn't reliably reflect the change afterward here — the same category of
+gap `SystemIntegrationSettingsUITests.testSpotlightToggleAndRebuildAreReachable` (an earlier
+phase) already worked around by only checking reachability, never a resulting value; this
+phase's own toggle tests follow that same precedent rather than asserting something this
+environment can't reliably prove. No Supabase, no accounts, no push notifications, no Critical
+Alert entitlement, anywhere in this phase.
 
 Kue 3.0 Phase 1 — a fourth target, `KueMac`, a native macOS app; see docs/29 for the full
 contract. Several files moved from `Kue/Services/` into `Shared/Services/` (unchanged logic,

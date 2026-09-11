@@ -401,6 +401,26 @@ enum OccurrenceReconciliationService {
         occurrence.widgetConfiguration = widgetConfiguration
 
         SchedulingEngine.regenerateTasks(for: occurrence, context: context, now: now)
+
+        // Kue 3.0 Phase 3 — docs/31 "Recurring events": "Series-created occurrences inherit
+        // intended rules." Copies the template's own *event*-level `NotificationRule` rows as
+        // fresh, independent copies (new `id`s) — never the same row re-parented, so a later
+        // "this occurrence only" edit to one occurrence's rules can never leak into another's.
+        // Task-level rules aren't copied here: `SchedulingEngine.regenerateTasks` above already
+        // creates entirely new `KueTask` rows with new ids for this occurrence, so there is no
+        // template task-level rule that could correctly re-target one of them by identity.
+        for templateRule in template.notificationRules {
+            let copy = NotificationRule(
+                event: occurrence, anchor: templateRule.anchor,
+                offsetDirection: templateRule.offsetDirection, offsetQuantity: templateRule.offsetQuantity, offsetUnit: templateRule.offsetUnit,
+                absoluteDate: nil, // an absolute rule is a one-time, occurrence-specific reminder — never propagated to a different occurrence's own date
+                isEnabled: templateRule.isEnabled, customTitle: templateRule.customTitle, customBody: templateRule.customBody,
+                sound: templateRule.sound, interruptionPreference: templateRule.interruptionPreference, snoozeMinutes: templateRule.snoozeMinutes,
+                sortOrder: templateRule.sortOrder, createdAt: now, updatedAt: now
+            )
+            guard templateRule.anchor != .absolute else { continue } // see above — never copied
+            context.insert(copy)
+        }
         return occurrence
     }
 }

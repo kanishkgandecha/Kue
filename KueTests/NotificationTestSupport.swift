@@ -50,6 +50,37 @@ final class FakeNotificationScheduler: NotificationScheduling {
     }
 }
 
+/// Kue 3.0 Phase 3 — docs/31 "Scheduling executor": "Use a protocol with ... a Failure-
+/// injection fake." Behaves exactly like `FakeNotificationScheduler` except `add(_:)` silently
+/// declines for any identifier in `identifiersToFail` — a test compares `pendingRequestIdentifiers()`
+/// afterward against what it expected to see added, the same way a caller of the real
+/// `NotificationScheduling.add` (which already swallows its own errors) would observe a failure.
+@MainActor
+final class FailureInjectingNotificationScheduler: NotificationScheduling {
+    var authorizationStatusToReturn: UNAuthorizationStatus = .authorized
+    var identifiersToFail: Set<String> = []
+    private(set) var addedRequests: [UNNotificationRequest] = []
+    private(set) var removedIdentifierBatches: [[String]] = []
+
+    var addedIdentifiers: [String] { addedRequests.map(\.identifier) }
+
+    func requestAuthorization() async -> Bool { authorizationStatusToReturn == .authorized }
+    func authorizationStatus() async -> UNAuthorizationStatus { authorizationStatusToReturn }
+
+    func add(_ request: UNNotificationRequest) async {
+        guard !identifiersToFail.contains(request.identifier) else { return }
+        addedRequests.removeAll { $0.identifier == request.identifier }
+        addedRequests.append(request)
+    }
+
+    func removePendingNotificationRequests(withIdentifiers identifiers: [String]) {
+        removedIdentifierBatches.append(identifiers)
+        addedRequests.removeAll { identifiers.contains($0.identifier) }
+    }
+
+    func pendingRequestIdentifiers() async -> [String] { addedRequests.map(\.identifier) }
+}
+
 @MainActor
 final class FakeBackgroundTaskScheduler: BackgroundTaskScheduling {
     private(set) var registeredIdentifier: String?

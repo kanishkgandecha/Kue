@@ -8,12 +8,29 @@
 //  `KueEvent` gained five new stored properties this phase — `externalCalendarEventIdentifier`,
 //  `externalCalendarIdentifier`, `externalCalendarTitle`, `externalCalendarLastSyncedAt`,
 //  `externalCalendarLastKnownModifiedAt` (see Shared/Models/KueEvent.swift) — recording an
-//  explicit, user-confirmed link to an Apple Calendar event. No other model type changed and
-//  no model was added or removed, so — per docs/15-schema-migrations.md step 2 — this schema
-//  references every type directly from `Shared/Models/`, exactly as `KueSchemaV1`/`KueSchemaV2`
-//  still do for their own untouched types; only `KueEvent`'s *old* (Phase-3-era) shape needed
-//  its own frozen copy, nested in `KueSchemaV2` (see that file's header for why the nesting
-//  goes on that side, not this one).
+//  explicit, user-confirmed link to an Apple Calendar event.
+//
+//  Kue 3.0 Phase 3 update (docs/31-kue-3-notification-studio.md "Migration") — Phase 3 changed
+//  `KueEvent`/`KueTask`'s shape *again* (each gained a new `@Relationship` to the brand-new
+//  `NotificationRule` model), which means the live `KueEvent`/`KueTask` symbols now mean the
+//  Phase-3 shape, not this schema's own. Exactly the situation `KueSchemaV1.swift`/
+//  `KueSchemaV2.swift` already document at length — see `KueSchemaV1.swift`'s header for the
+//  full reasoning and the real incident that taught it — applies here again: `KueEvent`/
+//  `KueTask` (at their Phase-4-era shape, immediately before Phase 3's notification rules) are
+//  nested as `KueSchemaV3.KueEvent`/`KueSchemaV3.KueTask`, and so is every other type with a
+//  `@Relationship` *to* `KueEvent` (`KueSchedule`, `WidgetConfiguration`, `WidgetState`), each
+//  pointing at its nested siblings so the whole connected subgraph stays internally consistent.
+//  `RecurrenceExclusion` has no relationship to `KueEvent` (just a plain `seriesID: UUID`), so
+//  — like `Template`/`UserPreference` — it's still an untouched island in the graph and keeps
+//  referencing the live, shared type directly. `NotificationRule` itself does not exist at this
+//  schema version at all — it isn't listed in `models` below, and nothing here references it.
+//
+//  Kue 3.0 Phase 3 completion pass correction: `Template` no longer belongs in that "keeps
+//  referencing the live type" sentence — it has since gained a new stored property
+//  (`notificationRuleDefaultsData`, as of `KueSchemaV5`) — see `KueSchemaV1.swift`'s own
+//  matching correction for the full reasoning. It is nested below as its own frozen,
+//  byte-for-byte pre-completion-pass copy. `UserPreference` alone still references the live
+//  type.
 //
 
 import SwiftData
@@ -33,5 +50,290 @@ enum KueSchemaV3: VersionedSchema {
             Template.self,
             UserPreference.self,
         ]
+    }
+
+    /// Exact copy of `Shared/Models/KueTask.swift` as it stood before Kue 3.0 Phase 3, except
+    /// `event` now points at the nested `KueSchemaV3.KueEvent` sibling instead of the live one
+    /// — see file header.
+    @Model
+    final class KueTask {
+        var id: UUID
+        var event: KueEvent?
+        var title: String
+        var dueDate: Date
+        var isCompleted: Bool
+        var completedAt: Date?
+        var offsetLabel: String
+        var sortOrder: Int
+
+        init(
+            id: UUID = UUID(),
+            event: KueEvent? = nil,
+            title: String,
+            dueDate: Date,
+            isCompleted: Bool = false,
+            completedAt: Date? = nil,
+            offsetLabel: String,
+            sortOrder: Int = 0
+        ) {
+            self.id = id
+            self.event = event
+            self.title = title
+            self.dueDate = dueDate
+            self.isCompleted = isCompleted
+            self.completedAt = completedAt
+            self.offsetLabel = offsetLabel
+            self.sortOrder = sortOrder
+        }
+    }
+
+    /// Exact copy of `Shared/Models/KueSchedule.swift` as it stood before Kue 3.0 Phase 3 — see
+    /// file header (event points at the nested sibling).
+    @Model
+    final class KueSchedule {
+        var id: UUID
+        var event: KueEvent?
+        var templateType: ScheduleTemplateType
+        private var rulesData: Data
+        var isCustom: Bool
+        var generatedAt: Date
+
+        var rules: [ScheduleRule] {
+            get { (try? JSONDecoder().decode([ScheduleRule].self, from: rulesData)) ?? [] }
+            set { rulesData = (try? JSONEncoder().encode(newValue)) ?? Data() }
+        }
+
+        init(
+            id: UUID = UUID(),
+            event: KueEvent? = nil,
+            templateType: ScheduleTemplateType,
+            rules: [ScheduleRule] = [],
+            isCustom: Bool = false,
+            generatedAt: Date = Date()
+        ) {
+            self.id = id
+            self.event = event
+            self.templateType = templateType
+            self.rulesData = (try? JSONEncoder().encode(rules)) ?? Data()
+            self.isCustom = isCustom
+            self.generatedAt = generatedAt
+        }
+    }
+
+    /// Exact copy of `Shared/Models/WidgetConfiguration.swift` as it stood before Kue 3.0
+    /// Phase 3 — see file header (event points at the nested sibling).
+    @Model
+    final class WidgetConfiguration {
+        var id: UUID
+        var event: KueEvent?
+        var widgetType: WidgetType
+        var showLocation: Bool
+        var isEnabled: Bool
+
+        init(
+            id: UUID = UUID(),
+            event: KueEvent? = nil,
+            widgetType: WidgetType,
+            showLocation: Bool = true,
+            isEnabled: Bool = true
+        ) {
+            self.id = id
+            self.event = event
+            self.widgetType = widgetType
+            self.showLocation = showLocation
+            self.isEnabled = isEnabled
+        }
+    }
+
+    /// Exact copy of `Shared/Models/WidgetState.swift` as it stood before Kue 3.0 Phase 3 — see
+    /// file header (event points at the nested sibling).
+    @Model
+    final class WidgetState {
+        var id: UUID
+        var event: KueEvent?
+        var currentPhase: WidgetLifecyclePhase
+        var headline: String
+        var subline: String?
+        var progress: Double?
+        var nextTransitionDate: Date
+
+        init(
+            id: UUID = UUID(),
+            event: KueEvent? = nil,
+            currentPhase: WidgetLifecyclePhase,
+            headline: String,
+            subline: String? = nil,
+            progress: Double? = nil,
+            nextTransitionDate: Date
+        ) {
+            self.id = id
+            self.event = event
+            self.currentPhase = currentPhase
+            self.headline = headline
+            self.subline = subline
+            self.progress = progress
+            self.nextTransitionDate = nextTransitionDate
+        }
+    }
+
+    /// Exact copy of `Shared/Models/Template.swift` as it stood before Kue 3.0 Phase 3's
+    /// completion pass — see this file's header. No relationships to nest alongside it;
+    /// `Template` was, and remains, an island in this schema's connectivity graph.
+    @Model
+    final class Template {
+        var id: UUID
+        var name: String
+        var eventType: EventType
+        private var scheduleRulesData: Data
+        var isUserDefined: Bool
+        var isBuiltIn: Bool
+
+        var scheduleRules: [ScheduleRule] {
+            get { (try? JSONDecoder().decode([ScheduleRule].self, from: scheduleRulesData)) ?? [] }
+            set { scheduleRulesData = (try? JSONEncoder().encode(newValue)) ?? Data() }
+        }
+
+        init(
+            id: UUID = UUID(),
+            name: String,
+            eventType: EventType,
+            scheduleRules: [ScheduleRule] = [],
+            isUserDefined: Bool = false,
+            isBuiltIn: Bool = true
+        ) {
+            self.id = id
+            self.name = name
+            self.eventType = eventType
+            self.scheduleRulesData = (try? JSONEncoder().encode(scheduleRules)) ?? Data()
+            self.isUserDefined = isUserDefined
+            self.isBuiltIn = isBuiltIn
+        }
+    }
+
+    /// Exact copy of `Shared/Models/KueEvent.swift` as it stood before Kue 3.0 Phase 3 — see
+    /// file header. Never edit this nested type again either; it is now the permanent V3.0
+    /// snapshot. Relationships point at the nested `KueTask`/`KueSchedule`/
+    /// `WidgetConfiguration`/`WidgetState` siblings above, not the live ones, and there is no
+    /// `notificationRules` relationship here at all — that's genuinely new as of `KueSchemaV4`.
+    @Model
+    final class KueEvent {
+        var id: UUID
+        var title: String
+        var eventType: EventType
+        var startDate: Date
+        var endDate: Date?
+        var estimatedDurationMinutes: Int
+        var isAllDay: Bool
+        var timeZoneIdentifier: String
+        var location: String?
+        var notes: String?
+        var source: EventSource
+        var priority: Priority
+        var status: EventStatus
+        var isCancelled: Bool
+        var cancelledAt: Date?
+        var isManuallyCompleted: Bool
+        var manuallyCompletedAt: Date?
+        var recurrence: RecurrenceRule?
+        var schemaVersion: Int
+        var seriesID: UUID?
+        var recurrenceAnchorDate: Date?
+        var isRecurrenceException: Bool = false
+        var isSkipped: Bool = false
+        var skippedAt: Date?
+        var externalCalendarEventIdentifier: String?
+        var externalCalendarIdentifier: String?
+        var externalCalendarTitle: String?
+        var externalCalendarLastSyncedAt: Date?
+        var externalCalendarLastKnownModifiedAt: Date?
+
+        @Relationship(deleteRule: .cascade, inverse: \KueTask.event)
+        var tasks: [KueTask]
+
+        @Relationship(deleteRule: .cascade, inverse: \KueSchedule.event)
+        var schedule: KueSchedule?
+
+        @Relationship(deleteRule: .cascade, inverse: \WidgetConfiguration.event)
+        var widgetConfiguration: WidgetConfiguration?
+
+        @Relationship(deleteRule: .cascade, inverse: \WidgetState.event)
+        var widgetState: WidgetState?
+
+        var createdAt: Date
+        var updatedAt: Date
+
+        init(
+            id: UUID = UUID(),
+            title: String,
+            eventType: EventType,
+            startDate: Date,
+            endDate: Date? = nil,
+            estimatedDurationMinutes: Int,
+            isAllDay: Bool = false,
+            timeZoneIdentifier: String = TimeZone.current.identifier,
+            location: String? = nil,
+            notes: String? = nil,
+            source: EventSource,
+            priority: Priority = .medium,
+            status: EventStatus = .upcoming,
+            isCancelled: Bool = false,
+            cancelledAt: Date? = nil,
+            isManuallyCompleted: Bool = false,
+            manuallyCompletedAt: Date? = nil,
+            recurrence: RecurrenceRule? = nil,
+            schemaVersion: Int = 1,
+            seriesID: UUID? = nil,
+            recurrenceAnchorDate: Date? = nil,
+            isRecurrenceException: Bool = false,
+            isSkipped: Bool = false,
+            skippedAt: Date? = nil,
+            externalCalendarEventIdentifier: String? = nil,
+            externalCalendarIdentifier: String? = nil,
+            externalCalendarTitle: String? = nil,
+            externalCalendarLastSyncedAt: Date? = nil,
+            externalCalendarLastKnownModifiedAt: Date? = nil,
+            tasks: [KueTask] = [],
+            schedule: KueSchedule? = nil,
+            widgetConfiguration: WidgetConfiguration? = nil,
+            widgetState: WidgetState? = nil,
+            createdAt: Date = Date(),
+            updatedAt: Date = Date()
+        ) {
+            self.id = id
+            self.title = title
+            self.eventType = eventType
+            self.startDate = startDate
+            self.endDate = endDate
+            self.estimatedDurationMinutes = estimatedDurationMinutes
+            self.isAllDay = isAllDay
+            self.timeZoneIdentifier = timeZoneIdentifier
+            self.location = location
+            self.notes = notes
+            self.source = source
+            self.priority = priority
+            self.status = status
+            self.isCancelled = isCancelled
+            self.cancelledAt = cancelledAt
+            self.isManuallyCompleted = isManuallyCompleted
+            self.manuallyCompletedAt = manuallyCompletedAt
+            self.recurrence = recurrence
+            self.schemaVersion = schemaVersion
+            self.seriesID = seriesID
+            self.recurrenceAnchorDate = recurrenceAnchorDate
+            self.isRecurrenceException = isRecurrenceException
+            self.isSkipped = isSkipped
+            self.skippedAt = skippedAt
+            self.externalCalendarEventIdentifier = externalCalendarEventIdentifier
+            self.externalCalendarIdentifier = externalCalendarIdentifier
+            self.externalCalendarTitle = externalCalendarTitle
+            self.externalCalendarLastSyncedAt = externalCalendarLastSyncedAt
+            self.externalCalendarLastKnownModifiedAt = externalCalendarLastKnownModifiedAt
+            self.tasks = tasks
+            self.schedule = schedule
+            self.widgetConfiguration = widgetConfiguration
+            self.widgetState = widgetState
+            self.createdAt = createdAt
+            self.updatedAt = updatedAt
+        }
     }
 }

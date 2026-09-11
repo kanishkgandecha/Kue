@@ -19,6 +19,17 @@ nonisolated enum NotificationActionIdentifiers {
     /// moment those four choices are most relevant).
     static let outcomeFollowUpCategory = "KUE_OUTCOME_FOLLOW_UP"
 
+    /// Kue 3.0 Phase 3 completion pass — docs/31 "Actions and snooze" (section O: "no new
+    /// UI-reachable trigger yet"), now completed. Every rule-sourced notification *other* than
+    /// an outcome-follow-up (which keeps its own unchanged four-action category verbatim) gets
+    /// this single-action category instead. The snooze duration itself travels in the
+    /// request's own `userInfo["kueSnoozeMinutes"]` — set once at schedule time
+    /// (`NotificationExecutor.makeRequest`) — so acting on it needs no SwiftData fetch at all,
+    /// just a same-identifier reschedule of the notification that just fired.
+    static let ruleSnoozeCategory = "KUE_RULE_SNOOZE"
+    static let snoozeActionID = "KUE_ACTION_SNOOZE"
+    static let snoozeMinutesUserInfoKey = "kueSnoozeMinutes"
+
     static let completeActionID = "KUE_ACTION_COMPLETE"
     /// `options: [.foreground]` — opens the app to the exact event's Event Detail (docs/25
     /// "K.": "If Reschedule cannot be completed inside the notification action, deep-link to

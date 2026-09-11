@@ -27,7 +27,15 @@ import Foundation
 import CryptoKit
 
 nonisolated enum BackupFormat {
-    static let currentVersion = 1
+    /// Kue 3.0 Phase 3 — docs/31 "Backup and restore": bumped from 1 to export/import
+    /// `NotificationRule` rows. `BackupPayload.notificationRules` decodes tolerantly (defaults
+    /// to `[]` when the key is absent), so a version-1 backup — which never had this field at
+    /// all — still imports cleanly with every event/task falling back to its global-default
+    /// notification behavior, exactly as `KueSchemaV4`'s own migration already guarantees for
+    /// an in-place upgrade. See `BackupCoder.decodeAndValidate`'s existing
+    /// `unsupportedFutureFormatVersion` guard for the other direction: a version-2-or-newer
+    /// backup restored on an older build already fails closed, unchanged by this bump.
+    static let currentVersion = 2
     /// The file extension Export/Restore UX (Section E/F) reads and writes —
     /// `docs/27-personal-device-installation.md` documents this for a user restoring by hand.
     static let fileExtension = "kuebackup"
@@ -51,8 +59,31 @@ nonisolated enum BackupError: Error, Equatable {
     case malformedPayload
 }
 
+/// Kue 3.0 Phase 3 completion pass — docs/31 "Template notification defaults". Deliberately
+/// leaner than `NotificationRulePayload`: no `eventID`/`taskID` (a template default has no
+/// owner, by construction), no `absoluteDate` (structurally excluded — see
+/// `NotificationRuleDefault.swift`'s own header), no `sortOrder`/`createdAt`/`updatedAt` (a
+/// plain value array on `Template`, not a separately-identified, timestamped row).
+nonisolated struct NotificationRuleDefaultPayload: Codable, Equatable {
+    var id: UUID
+    var anchor: String
+    var offsetDirection: String
+    var offsetQuantity: Int
+    var offsetUnit: String
+    var isEnabled: Bool
+    var customTitle: String?
+    var customBody: String?
+    var sound: String
+    var interruptionPreference: String
+    var snoozeMinutes: Int?
+}
+
 /// Reuses `ScheduleRulePayload`/`RecurrenceRulePayload` etc. from EventSyncRecord.swift —
 /// see this file's header for why.
+///
+/// `notificationRuleDefaults` decodes tolerantly to `[]` for any backup written before this
+/// phase's completion pass — same "old field genuinely absent, not merely empty" policy
+/// `BackupPayload.notificationRules` already established for `NotificationRule` itself.
 nonisolated struct TemplateBackupPayload: Codable, Equatable {
     var id: UUID
     var name: String
@@ -62,6 +93,35 @@ nonisolated struct TemplateBackupPayload: Codable, Equatable {
     var scheduleRules: [ScheduleRulePayload]
     var isUserDefined: Bool
     var isBuiltIn: Bool
+    var notificationRuleDefaults: [NotificationRuleDefaultPayload]
+
+    init(
+        id: UUID, name: String, eventType: String, scheduleRules: [ScheduleRulePayload],
+        isUserDefined: Bool, isBuiltIn: Bool, notificationRuleDefaults: [NotificationRuleDefaultPayload] = []
+    ) {
+        self.id = id
+        self.name = name
+        self.eventType = eventType
+        self.scheduleRules = scheduleRules
+        self.isUserDefined = isUserDefined
+        self.isBuiltIn = isBuiltIn
+        self.notificationRuleDefaults = notificationRuleDefaults
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, eventType, scheduleRules, isUserDefined, isBuiltIn, notificationRuleDefaults
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        eventType = try container.decode(String.self, forKey: .eventType)
+        scheduleRules = try container.decode([ScheduleRulePayload].self, forKey: .scheduleRules)
+        isUserDefined = try container.decode(Bool.self, forKey: .isUserDefined)
+        isBuiltIn = try container.decode(Bool.self, forKey: .isBuiltIn)
+        notificationRuleDefaults = try container.decodeIfPresent([NotificationRuleDefaultPayload].self, forKey: .notificationRuleDefaults) ?? []
+    }
 }
 
 nonisolated struct UserPreferenceBackupPayload: Codable, Equatable {
@@ -70,13 +130,66 @@ nonisolated struct UserPreferenceBackupPayload: Codable, Equatable {
     var aiParsingEnabled: Bool
 }
 
+/// Kue 3.0 Phase 3 — docs/31 "Backup and restore". Raw-value fields fall back to a safe default
+/// on an unrecognized future case, same policy as every other raw-value field in this format;
+/// `BackupRestoreService` additionally runs every decoded row through
+/// `NotificationRuleValidator` before it ever touches SwiftData (docs/31: "Reject invalid
+/// anchors, offsets, and enum values safely").
+nonisolated struct NotificationRulePayload: Codable, Equatable {
+    var id: UUID
+    /// Exactly one of `eventID`/`taskID` is expected — mirrors `NotificationRule.event`/`.task`.
+    var eventID: UUID?
+    var taskID: UUID?
+    var anchor: String
+    var offsetDirection: String
+    var offsetQuantity: Int
+    var offsetUnit: String
+    var absoluteDate: Date?
+    var isEnabled: Bool
+    var customTitle: String?
+    var customBody: String?
+    var sound: String
+    var interruptionPreference: String
+    var snoozeMinutes: Int?
+    var sortOrder: Int
+    var createdAt: Date
+    var updatedAt: Date
+}
+
 /// The actual content — what `BackupEnvelope.payload`'s bytes decode to, once the envelope's
-/// checksum/version have already been validated.
+/// checksum/version have already been validated. `notificationRules` decodes tolerantly to `[]`
+/// for a version-1 backup (which predates this field entirely) — see `BackupFormat
+/// .currentVersion`'s own header.
 nonisolated struct BackupPayload: Codable, Equatable {
     var events: [EventSyncRecord]
     var exclusions: [RecurrenceExclusionSyncRecord]
     var templates: [TemplateBackupPayload]
     var userPreference: UserPreferenceBackupPayload?
+    var notificationRules: [NotificationRulePayload]
+
+    init(
+        events: [EventSyncRecord], exclusions: [RecurrenceExclusionSyncRecord], templates: [TemplateBackupPayload],
+        userPreference: UserPreferenceBackupPayload?, notificationRules: [NotificationRulePayload] = []
+    ) {
+        self.events = events
+        self.exclusions = exclusions
+        self.templates = templates
+        self.userPreference = userPreference
+        self.notificationRules = notificationRules
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case events, exclusions, templates, userPreference, notificationRules
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        events = try container.decode([EventSyncRecord].self, forKey: .events)
+        exclusions = try container.decode([RecurrenceExclusionSyncRecord].self, forKey: .exclusions)
+        templates = try container.decode([TemplateBackupPayload].self, forKey: .templates)
+        userPreference = try container.decodeIfPresent(UserPreferenceBackupPayload.self, forKey: .userPreference)
+        notificationRules = try container.decodeIfPresent([NotificationRulePayload].self, forKey: .notificationRules) ?? []
+    }
 }
 
 /// The on-disk container. `payload` is opaque `Data` (a nested JSON-encoded `BackupPayload`),

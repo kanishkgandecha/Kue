@@ -16,7 +16,12 @@
 
 import Foundation
 
-struct ReminderPreference: Equatable {
+/// `nonisolated` — Kue 3.0 Phase 3's `NotificationGlobalPreferences.seededFromLegacyPreferences`
+/// (itself `nonisolated`, so it can be read from the pure `NotificationPlanner`'s call graph)
+/// reads `.current` to seed its own migration default; a plain `UserDefaults`-backed value type
+/// has no actual MainActor requirement, so this costs nothing for every pre-existing caller —
+/// same reasoning `NotificationCandidate`/`NotificationQuietHours` are already `nonisolated` for.
+nonisolated struct ReminderPreference: Equatable {
     /// `nil` means the pre-event reminder is off. A `0` value is never stored — "Off" is
     /// represented as `nil`, not zero minutes.
     var preEventMinutes: Int?

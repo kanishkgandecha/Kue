@@ -83,6 +83,13 @@ struct SettingsView: View {
                     Button("Open Notification Settings") { openSystemSettings() }
                         .accessibilityIdentifier("openNotificationSettingsButton")
                 }
+                // Kue 3.0 Phase 3 — docs/31: the full rule hierarchy, quiet hours, privacy,
+                // sound/badge/grouping, and per-device delivery controls live here rather than
+                // growing this screen's own flat list of pickers further.
+                NavigationLink("Notification Studio") {
+                    NotificationStudioSettingsView()
+                }
+                .accessibilityIdentifier("notificationStudioLink")
             } header: {
                 Text("Notifications")
             } footer: {

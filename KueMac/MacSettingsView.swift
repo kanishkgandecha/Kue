@@ -25,6 +25,7 @@ struct MacSettingsView: View {
     @Environment(\.calendarProvider) private var calendarProvider
 
     @State private var notificationStatus: UNAuthorizationStatus = .notDetermined
+    @State private var notificationPreferences = NotificationGlobalPreferences.current
     @State private var calendarAuthorizationState: CalendarAuthorizationState = .notDetermined
     @State private var isExportingBackup = false
     @State private var isImportingBackup = false
@@ -35,9 +36,13 @@ struct MacSettingsView: View {
     @State private var isConfirmingDeleteEverything = false
     @State private var backupAlertMessage: String?
 
+    /// Kue 3.0 Phase 3 completion pass — docs/31 "Mac Notification Studio parity".
+    @State private var isShowingApplyToExistingSheet = false
+
     var body: some View {
         TabView {
             generalTab.tabItem { Label("General", systemImage: "gearshape") }
+            notificationsTab.tabItem { Label("Notifications", systemImage: "bell") }
             backupTab.tabItem { Label("Backup", systemImage: "arrow.down.doc") }
             aboutTab.tabItem { Label("About", systemImage: "info.circle") }
         }
@@ -87,9 +92,9 @@ struct MacSettingsView: View {
                     Button("Open System Settings") { openNotificationSettings() }
                 }
             } header: {
-                Text("Notifications")
+                Text("Notification Permission")
             } footer: {
-                Text("Notification behavior mirrors the iPhone app — a redesigned Notification Studio is planned for a later Kue 3.0 phase, not this one.")
+                Text("The full Notification Studio — global defaults, quiet hours, and per-device delivery — lives in the Notifications tab.")
             }
 
             Section {
@@ -143,6 +148,168 @@ struct MacSettingsView: View {
         }
     }
 
+    // MARK: - Notifications (Kue 3.0 Phase 3 completion pass — docs/31 "Mac Notification
+    // Studio parity"). Same `NotificationGlobalPreferences` (App Group `UserDefaults`,
+    // per-device by construction) and bindings pattern as iPhone's own
+    // `NotificationStudioSettingsView` — a native macOS `Form`/`.formStyle(.grouped)` tab here,
+    // not that iOS view embedded.
+
+    private var notificationsTab: some View {
+        Form {
+            Section {
+                LabeledContent("Status", value: notificationStatusText)
+                if notificationStatus == .denied {
+                    Button("Open System Settings") { openNotificationSettings() }
+                }
+                Toggle("Kue Notifications", isOn: notificationBinding(\.masterEnabled))
+                    .accessibilityIdentifier("macMasterNotificationsToggle")
+                Toggle("Deliver on This Mac", isOn: notificationBinding(\.deliverOnThisDevice))
+                    .accessibilityIdentifier("macDeliverOnThisDeviceToggle")
+            } footer: {
+                Text("\"Deliver on This Mac\" only affects this computer — it is not synced with your iPhone. If you turn it on for more than one of your devices, you may see the same reminder on each of them.")
+            }
+
+            Section("Default Event Rules") {
+                Picker("Before Event Start", selection: notificationBinding(\.defaultPreEventMinutes)) {
+                    ForEach(ReminderPreference.availableOptions, id: \.self) { minutes in
+                        Text(ReminderPreference.displayName(forMinutes: minutes)).tag(minutes)
+                    }
+                }
+                Toggle("Outcome Follow-Up (\"How did it go?\")", isOn: notificationBinding(\.defaultOutcomeFollowUpEnabled))
+            }
+
+            Section("Default Task Rules") {
+                Picker("Before Task Due", selection: notificationBinding(\.defaultTaskReminderMinutesBeforeDue)) {
+                    Text("At due time").tag(Int?.none)
+                    Text("15 minutes before").tag(Int?.some(15))
+                    Text("30 minutes before").tag(Int?.some(30))
+                    Text("1 hour before").tag(Int?.some(60))
+                }
+            }
+
+            Section {
+                DatePicker("Preferred Time", selection: allDayPreferredTimeBinding, displayedComponents: .hourAndMinute)
+            } header: {
+                Text("All-Day Events")
+            } footer: {
+                Text("All-day events have no clock time of their own, so reminders that reference \"event start\" use this time instead of midnight.")
+            }
+
+            quietHoursSection
+
+            Section("Sound & Presentation") {
+                Picker("Sound", selection: notificationBinding(\.soundPreference)) {
+                    Text("Default").tag(NotificationSoundOption.defaultSound)
+                    Text("Silent").tag(NotificationSoundOption.silent)
+                }
+                Toggle("Badge App Icon", isOn: notificationBinding(\.badgeEnabled))
+                Toggle("Group by Event", isOn: notificationBinding(\.groupNotificationsByEvent))
+                Toggle("Time-Sensitive", isOn: notificationBinding(\.timeSensitiveEnabled))
+                Toggle("Reduce on Weekends", isOn: Binding(
+                    get: { !notificationPreferences.nonEssentialNotificationsOnWeekends },
+                    set: { notificationPreferences.nonEssentialNotificationsOnWeekends = !$0; saveNotificationPreferences() }
+                ))
+            }
+
+            Section {
+                Picker("Notification Previews", selection: notificationBinding(\.previewPrivacy)) {
+                    Text("Full").tag(NotificationPreviewPrivacy.full)
+                    Text("Event Only").tag(NotificationPreviewPrivacy.eventOnly)
+                    Text("Private").tag(NotificationPreviewPrivacy.private)
+                }
+            } header: {
+                Text("Privacy")
+            } footer: {
+                Text(previewPrivacyExplanation)
+            }
+
+            Section {
+                Button("Apply New Defaults to Existing Events…") {
+                    isShowingApplyToExistingSheet = true
+                }
+                .accessibilityIdentifier("macApplyDefaultsToExistingEventsButton")
+            } footer: {
+                Text("Global defaults above only affect events you create from now on. Use this to review and optionally apply them to events you already have.")
+            }
+        }
+        .formStyle(.grouped)
+        .sheet(isPresented: $isShowingApplyToExistingSheet) {
+            MacApplyDefaultsToExistingEventsView(preferences: notificationPreferences)
+        }
+    }
+
+    private var quietHoursSection: some View {
+        Section {
+            Toggle("Quiet Hours", isOn: notificationBinding(\.quietHours.isEnabled))
+                .accessibilityIdentifier("macQuietHoursToggle")
+            if notificationPreferences.quietHours.isEnabled {
+                DatePicker("Starts", selection: quietHoursTimeBinding(\.startMinute), displayedComponents: .hourAndMinute)
+                DatePicker("Ends", selection: quietHoursTimeBinding(\.endMinute), displayedComponents: .hourAndMinute)
+                Toggle("Allow Event-Start Notifications", isOn: notificationBinding(\.quietHours.allowEventStartThrough))
+                Toggle("Allow Time-Sensitive Notifications", isOn: notificationBinding(\.quietHours.allowTimeSensitiveThrough))
+                weekdayPicker
+            }
+        } header: {
+            Text("Quiet Hours")
+        } footer: {
+            Text("A reminder due during quiet hours is delivered right when quiet hours end, not silently dropped.")
+        }
+    }
+
+    private var weekdayPicker: some View {
+        let symbols = Calendar.current.weekdaySymbols
+        return ForEach(1...7, id: \.self) { weekday in
+            Toggle(symbols[weekday - 1], isOn: Binding(
+                get: { notificationPreferences.quietHours.enabledWeekdays.contains(weekday) },
+                set: { isOn in
+                    if isOn { notificationPreferences.quietHours.enabledWeekdays.insert(weekday) }
+                    else { notificationPreferences.quietHours.enabledWeekdays.remove(weekday) }
+                    saveNotificationPreferences()
+                }
+            ))
+        }
+    }
+
+    private func quietHoursTimeBinding(_ keyPath: WritableKeyPath<NotificationQuietHours, Int>) -> Binding<Date> {
+        Binding(
+            get: {
+                let minute = notificationPreferences.quietHours[keyPath: keyPath]
+                return Calendar.current.date(bySettingHour: minute / 60, minute: minute % 60, second: 0, of: .now) ?? .now
+            },
+            set: { newDate in
+                let components = Calendar.current.dateComponents([.hour, .minute], from: newDate)
+                notificationPreferences.quietHours[keyPath: keyPath] = (components.hour ?? 0) * 60 + (components.minute ?? 0)
+                saveNotificationPreferences()
+            }
+        )
+    }
+
+    private var allDayPreferredTimeBinding: Binding<Date> {
+        Binding(
+            get: {
+                let minute = notificationPreferences.allDayPreferredMinuteOfDay
+                return Calendar.current.date(bySettingHour: minute / 60, minute: minute % 60, second: 0, of: .now) ?? .now
+            },
+            set: { newDate in
+                let components = Calendar.current.dateComponents([.hour, .minute], from: newDate)
+                notificationPreferences.allDayPreferredMinuteOfDay = (components.hour ?? 0) * 60 + (components.minute ?? 0)
+                saveNotificationPreferences()
+            }
+        )
+    }
+
+    private var previewPrivacyExplanation: String {
+        switch notificationPreferences.previewPrivacy {
+        case .full: return "Notifications show the real event and task names."
+        case .eventOnly: return "Notifications show the event name; task-specific reminders use generic text."
+        case .private: return "Notifications never show event or task names — just \"You have a Kue reminder.\""
+        }
+    }
+
+    private func notificationBinding<Value>(_ keyPath: WritableKeyPath<NotificationGlobalPreferences, Value>) -> Binding<Value> {
+        Binding(get: { notificationPreferences[keyPath: keyPath] }, set: { notificationPreferences[keyPath: keyPath] = $0; saveNotificationPreferences() })
+    }
+
     private var notificationStatusText: String {
         switch notificationStatus {
         case .authorized, .provisional, .ephemeral: return "Allowed"
@@ -158,6 +325,19 @@ struct MacSettingsView: View {
             NSWorkspace.shared.open(url)
         }
         #endif
+    }
+
+    /// Kue 3.0 Phase 3 — docs/31. Mirrors `NotificationStudioSettingsView.save()`'s own
+    /// save-then-reschedule sequence exactly, so a global preference changed on the Mac takes
+    /// effect on the Mac's own pending schedule immediately, the same guarantee iPhone already has.
+    private func saveNotificationPreferences() {
+        NotificationGlobalPreferences.save(notificationPreferences)
+        Task {
+            await NotificationEngine.reschedule(
+                context: modelContext, intensity: UserPreferenceStore.current(context: modelContext).notificationIntensity,
+                scheduler: SystemNotificationScheduler.shared, globalPreferences: notificationPreferences
+            )
+        }
     }
 
     // MARK: - Calendar (Kue 3.0 Phase 1 cleanup — see docs/29 "Calendar")

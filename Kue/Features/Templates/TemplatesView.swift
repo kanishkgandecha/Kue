@@ -29,6 +29,10 @@ struct TemplatesView: View {
     /// ones); the section header says so explicitly rather than leaving it implicit.
     private let templateTypes: [EventType] = [.interview, .exam, .trip, .deadline]
 
+    /// Kue 3.0 Phase 3 completion pass — docs/31 "Template notification defaults": which type's
+    /// notification defaults editor is currently presented, if any.
+    @State private var notificationDefaultsEventType: EventType?
+
     var body: some View {
         List {
             Section {
@@ -39,16 +43,39 @@ struct TemplatesView: View {
                         TemplateRow(eventType: type)
                     }
                     .accessibilityIdentifier("template-\(type.rawValue)")
+                    .swipeActions(edge: .leading) {
+                        Button {
+                            notificationDefaultsEventType = type
+                        } label: {
+                            Label("Notifications", systemImage: "bell")
+                        }
+                        .tint(.blue)
+                        .accessibilityIdentifier("template-\(type.rawValue)-notifications")
+                    }
                 }
             } header: {
                 Text("Built-In Templates")
             } footer: {
-                Text("Each one pre-fills the event type and its default preparation schedule — everything stays editable before you save.")
+                Text("Each one pre-fills the event type and its default preparation schedule — everything stays editable before you save. Swipe a template to customize the notification rules new events of that type start with.")
             }
         }
         .navigationTitle("Templates")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $notificationDefaultsEventType) { type in
+            NavigationStack {
+                TemplateNotificationDefaultsEditorView(eventType: type)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Done") { notificationDefaultsEventType = nil }
+                        }
+                    }
+            }
+        }
     }
+}
+
+extension EventType: Identifiable {
+    var id: String { rawValue }
 }
 
 private struct TemplateRow: View {

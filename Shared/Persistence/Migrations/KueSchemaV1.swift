@@ -37,6 +37,16 @@
 //  docs/15-schema-migrations.md step 2's "only types that actually changed [or are connected to
 //  a changed type] need a new, version-suffixed type."
 //
+//  Kue 3.0 Phase 3 completion pass correction: that was only true up to this point. `Template`
+//  itself has now gained a new stored property (`notificationRuleDefaultsData`, as of
+//  `KueSchemaV5` — see that file's header), which means the "still reference the live type
+//  directly" reasoning above no longer holds for `Template` — the exact same "the live symbol
+//  now means a new shape" failure mode this file's own Phase 3 KueEvent correction already
+//  describes, just for a second, previously-untouched type. `Template` is nested below as its
+//  own frozen, byte-for-byte pre-completion-pass copy; being a true relationship island, it
+//  needs no children nested alongside it the way `KueEvent`'s cascade did. `UserPreference` has
+//  still never changed shape, so it alone continues to reference the live type.
+//
 //  PRODUCTION INCIDENT (2026-08-27) — corrected here: the paragraph above (and the original
 //  version of this file) assumed `KueEvent.recurrence` was already part of V1.0 — "reserved,
 //  always nil" — and so carried a `var recurrence: RecurrenceRule?` into this nested snapshot
@@ -203,6 +213,40 @@ enum KueSchemaV1: VersionedSchema {
             self.subline = subline
             self.progress = progress
             self.nextTransitionDate = nextTransitionDate
+        }
+    }
+
+    /// Exact copy of `Shared/Models/Template.swift` as it stood before Kue 3.0 Phase 3's
+    /// completion pass — see this file's header. No relationships to nest alongside it;
+    /// `Template` was, and remains, an island in this schema's connectivity graph.
+    @Model
+    final class Template {
+        var id: UUID
+        var name: String
+        var eventType: EventType
+        private var scheduleRulesData: Data
+        var isUserDefined: Bool
+        var isBuiltIn: Bool
+
+        var scheduleRules: [ScheduleRule] {
+            get { (try? JSONDecoder().decode([ScheduleRule].self, from: scheduleRulesData)) ?? [] }
+            set { scheduleRulesData = (try? JSONEncoder().encode(newValue)) ?? Data() }
+        }
+
+        init(
+            id: UUID = UUID(),
+            name: String,
+            eventType: EventType,
+            scheduleRules: [ScheduleRule] = [],
+            isUserDefined: Bool = false,
+            isBuiltIn: Bool = true
+        ) {
+            self.id = id
+            self.name = name
+            self.eventType = eventType
+            self.scheduleRulesData = (try? JSONEncoder().encode(scheduleRules)) ?? Data()
+            self.isUserDefined = isUserDefined
+            self.isBuiltIn = isBuiltIn
         }
     }
 

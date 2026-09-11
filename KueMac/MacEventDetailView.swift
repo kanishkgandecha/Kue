@@ -25,6 +25,13 @@ struct MacEventDetailView: View {
     @State private var newTaskDueDate = Date()
     @State private var isChoosingCalendar = false
     @State private var calendarAlertMessage: String?
+    /// Kue 3.0 Phase 3 completion pass — docs/31 "Mac Notification Studio parity". `.some(nil)`
+    /// presents the editor for a brand-new rule; `.some(.some(rule))` edits `rule`; `nil`
+    /// dismissed. Matches `MacEventEditorView`'s own `.sheet(item:)`-free optional-Bool pattern
+    /// used elsewhere in this file, just one level deeper since "new" and "not presented" must
+    /// stay distinguishable.
+    @State private var isPresentingNewNotificationRule = false
+    @State private var editingNotificationRule: NotificationRule?
 
     private var status: EventStatus { EventStatusEngine.derive(for: event) }
     private var sortedTasks: [KueTask] { event.tasks.sorted { $0.sortOrder < $1.sortOrder } }
@@ -62,6 +69,12 @@ struct MacEventDetailView: View {
             MacCalendarDestinationPickerView(calendars: calendarProvider.writableCalendars()) { calendar in
                 export(to: calendar)
             }
+        }
+        .sheet(isPresented: $isPresentingNewNotificationRule) {
+            MacNotificationRuleEditorView(event: event)
+        }
+        .sheet(item: $editingNotificationRule) { rule in
+            MacNotificationRuleEditorView(event: event, existingRule: rule)
         }
         .alert("Calendar", isPresented: Binding(get: { calendarAlertMessage != nil }, set: { if !$0 { calendarAlertMessage = nil } })) {
             Button("OK") { calendarAlertMessage = nil }
@@ -267,25 +280,97 @@ struct MacEventDetailView: View {
         TaskEditingService.reorderTasks(reordered, context: modelContext)
     }
 
-    // MARK: - Notifications (truthful summary, not a redesigned Notification Studio)
+    // MARK: - Notifications
 
+    /// Kue 3.0 Phase 3 completion pass — docs/31 "Mac Notification Studio parity": the full
+    /// add/edit/delete/duplicate rule editor (`MacNotificationRuleEditorView`), reachable
+    /// natively here — no iPhone-only gap left in this section. Every custom `NotificationRule`
+    /// this event owns (source: Event) is tappable to edit, and carries a context menu for
+    /// duplicate/delete; the default reminders below it (source: Global Default) stay
+    /// read-only, matching iPhone's own `EventDetailView` "Custom Rules" vs. default-candidates
+    /// split.
     private var notificationsSection: some View {
         let intensity = UserPreferenceStore.current(context: modelContext).notificationIntensity
         let candidates = NotificationCandidateBuilder.prioritized(
             NotificationCandidateBuilder.filter(NotificationCandidateBuilder.candidates(for: event), intensity: intensity)
         )
         return Section("Notifications") {
-            if candidates.isEmpty {
+            if !event.notificationRules.isEmpty {
+                ForEach(event.notificationRules.sorted { $0.createdAt < $1.createdAt }) { rule in
+                    Button {
+                        editingNotificationRule = rule
+                    } label: {
+                        HStack {
+                            Text(macCustomRuleLabel(rule))
+                            Spacer()
+                            Text(rule.isEnabled ? "Source: Event" : "Disabled")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button("Edit") { editingNotificationRule = rule }
+                        Button("Duplicate") { duplicateNotificationRule(rule) }
+                        Button("Delete", role: .destructive) { deleteNotificationRule(rule) }
+                    }
+                }
+            }
+            if candidates.isEmpty && event.notificationRules.isEmpty {
                 Text("No upcoming notifications for this event.").foregroundStyle(.secondary)
             } else {
                 ForEach(candidates, id: \.identifier) { candidate in
                     VStack(alignment: .leading) {
                         Text(candidate.body)
-                        Text(candidate.fireDate.formatted(date: .abbreviated, time: .shortened))
-                            .font(.caption).foregroundStyle(.secondary)
+                        HStack {
+                            Text(candidate.fireDate.formatted(date: .abbreviated, time: .shortened))
+                            Spacer()
+                            Text("Source: Global Default")
+                        }
+                        .font(.caption).foregroundStyle(.secondary)
                     }
                 }
             }
+            Button("Add Notification Rule…") { isPresentingNewNotificationRule = true }
+                .accessibilityIdentifier("addNotificationRuleButton")
+        }
+    }
+
+    private func duplicateNotificationRule(_ rule: NotificationRule) {
+        let copy = NotificationRule(
+            event: rule.event, task: rule.task, anchor: rule.anchor, offsetDirection: rule.offsetDirection,
+            offsetQuantity: rule.offsetQuantity, offsetUnit: rule.offsetUnit, absoluteDate: rule.absoluteDate,
+            isEnabled: rule.isEnabled, customTitle: rule.customTitle, customBody: rule.customBody,
+            sound: rule.sound, interruptionPreference: rule.interruptionPreference, snoozeMinutes: rule.snoozeMinutes
+        )
+        modelContext.insert(copy)
+        event.notificationRules.append(copy)
+        try? modelContext.save()
+        Task {
+            await NotificationEngine.reschedule(
+                context: modelContext, intensity: UserPreferenceStore.current(context: modelContext).notificationIntensity,
+                scheduler: SystemNotificationScheduler.shared
+            )
+        }
+    }
+
+    private func deleteNotificationRule(_ rule: NotificationRule) {
+        modelContext.delete(rule)
+        try? modelContext.save()
+        Task {
+            await NotificationEngine.reschedule(
+                context: modelContext, intensity: UserPreferenceStore.current(context: modelContext).notificationIntensity,
+                scheduler: SystemNotificationScheduler.shared
+            )
+        }
+    }
+
+    private func macCustomRuleLabel(_ rule: NotificationRule) -> String {
+        switch rule.anchor {
+        case .eventStart: return rule.offsetDirection == .at ? "At event start" : "\(rule.offsetQuantity) \(rule.offsetUnit.rawValue) \(rule.offsetDirection == .before ? "before" : "after") start"
+        case .eventEnd: return rule.offsetDirection == .at ? "At event end" : "\(rule.offsetQuantity) \(rule.offsetUnit.rawValue) \(rule.offsetDirection == .before ? "before" : "after") end"
+        case .outcomeFollowUp: return "Outcome follow-up"
+        case .taskDue: return "Task reminder"
+        case .absolute: return rule.absoluteDate?.formatted(date: .abbreviated, time: .shortened) ?? "Custom date"
         }
     }
 

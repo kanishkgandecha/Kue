@@ -26,7 +26,11 @@ nonisolated struct BackupRestoreSummary: Equatable {
     var eventsSkippedAsOlder = 0
     var exclusionsInserted = 0
     var templatesInserted = 0
+    var templateNotificationDefaultsRejected = 0
     var preferenceRestored = false
+    var notificationRulesInserted = 0
+    var notificationRulesUpdated = 0
+    var notificationRulesRejected = 0
 }
 
 nonisolated enum BackupRestoreService {
@@ -68,7 +72,16 @@ nonisolated enum BackupRestoreService {
         for record in payload.templates {
             let existing = (try? context.fetch(FetchDescriptor<Template>(predicate: #Predicate { $0.id == record.id })))?.first
             guard existing == nil else { continue } // never overwrite an existing template, built-in or otherwise
-            context.insert(BackupCoder.makeTemplate(from: record))
+            let template = BackupCoder.makeTemplate(from: record)
+            // Kue 3.0 Phase 3 completion pass — reject an individually-invalid notification
+            // default rather than the whole template, same "skip, don't fail closed on one bad
+            // row" policy `NotificationRule` restore below already uses.
+            let validDefaults = template.notificationRuleDefaults.filter { ruleDefault in
+                (try? ruleDefault.validate()) != nil
+            }
+            summary.templateNotificationDefaultsRejected += template.notificationRuleDefaults.count - validDefaults.count
+            template.notificationRuleDefaults = validDefaults
+            context.insert(template)
             summary.templatesInserted += 1
         }
 
@@ -77,6 +90,61 @@ nonisolated enum BackupRestoreService {
             local.notificationIntensity = NotificationIntensity(rawValue: preference.notificationIntensity) ?? .standard
             local.aiParsingEnabled = preference.aiParsingEnabled
             summary.preferenceRestored = true
+        }
+
+        // Kue 3.0 Phase 3 — docs/31 "Backup and restore": merge by stable UUID, preserve
+        // existing event/task relationships, reject an invalid/orphaned row individually
+        // rather than aborting the whole restore (the same "skip, don't fail closed on one bad
+        // row" policy exclusions/templates above already use).
+        for record in payload.notificationRules {
+            guard record.eventID != nil || record.taskID != nil else {
+                summary.notificationRulesRejected += 1
+                continue // neither owner present — a corrupted/foreign row, never inserted
+            }
+            let event = record.eventID.flatMap { id in
+                try? context.fetch(FetchDescriptor<KueEvent>(predicate: #Predicate { $0.id == id })).first
+            }
+            let task = record.taskID.flatMap { id in
+                try? context.fetch(FetchDescriptor<KueTask>(predicate: #Predicate { $0.id == id })).first
+            }
+            // The owning event/task must exist in *this* store — a rule whose owner didn't
+            // come along in the same restore (or was already deleted here) is rejected rather
+            // than inserted as a dangling relationship.
+            guard (record.eventID == nil || event != nil), (record.taskID == nil || task != nil) else {
+                summary.notificationRulesRejected += 1
+                continue
+            }
+
+            let candidate = BackupCoder.makeNotificationRule(from: record, event: event, task: task)
+            do {
+                try NotificationRuleValidator.validate(candidate)
+            } catch {
+                summary.notificationRulesRejected += 1
+                continue
+            }
+
+            if let existing = try? context.fetch(FetchDescriptor<NotificationRule>(predicate: #Predicate { $0.id == record.id })).first {
+                guard record.updatedAt > existing.updatedAt else { continue } // local wins a tie/newer-local, same last-writer-wins policy as events
+                existing.event = event
+                existing.task = task
+                existing.anchor = candidate.anchor
+                existing.offsetDirection = candidate.offsetDirection
+                existing.offsetQuantity = candidate.offsetQuantity
+                existing.offsetUnit = candidate.offsetUnit
+                existing.absoluteDate = candidate.absoluteDate
+                existing.isEnabled = candidate.isEnabled
+                existing.customTitle = candidate.customTitle
+                existing.customBody = candidate.customBody
+                existing.sound = candidate.sound
+                existing.interruptionPreference = candidate.interruptionPreference
+                existing.snoozeMinutes = candidate.snoozeMinutes
+                existing.sortOrder = candidate.sortOrder
+                existing.updatedAt = candidate.updatedAt
+                summary.notificationRulesUpdated += 1
+            } else {
+                context.insert(candidate)
+                summary.notificationRulesInserted += 1
+            }
         }
 
         try context.save()

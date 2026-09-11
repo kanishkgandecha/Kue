@@ -129,10 +129,21 @@ enum NotificationCandidateBuilder {
     /// whether it was actually ever scheduled — the exhaustive removal set docs/08 calls for
     /// on edit/cancel/complete ("each transition kind + each task's -task-<taskID>
     /// identifier"). Removing an identifier that was never pending is a harmless no-op.
+    ///
+    /// Kue 3.0 Phase 3 (docs/31) — also includes every event- and task-level
+    /// `NotificationRule`'s own `"<event>-rule-<rule>"` identifier, so a caller that deletes an
+    /// event/occurrence (which cascade-deletes its rules) removes their pending requests too,
+    /// not just the default layer's own. One source of truth for "every identifier this event
+    /// could ever occupy" — `NotificationEngine.reschedule` reuses this directly rather than
+    /// re-deriving its own second list.
     static func allIdentifiers(for event: KueEvent) -> [String] {
         var kinds: [NotificationTransitionKind] = [.preparationStart, .tomorrow, .today, .preEvent, .eventStart, .outcomeFollowUp]
         kinds += event.tasks.map { .taskDue(taskID: $0.id) }
-        return kinds.map { "\(event.id)-\($0.identifierSuffix)" }
+        var identifiers = kinds.map { "\(event.id)-\($0.identifierSuffix)" }
+        var rules = event.notificationRules
+        for task in event.tasks { rules += task.notificationRules }
+        identifiers += rules.map { "\(event.id)-rule-\($0.id)" }
+        return identifiers
     }
 
     /// docs/08-notifications.md "User control over intensity".

@@ -20,6 +20,11 @@ final class KueTask {
     var offsetLabel: String
     var sortOrder: Int
 
+    /// Kue 3.0 Phase 3 — docs/31. Explicit task-level notification customizations only — see
+    /// `NotificationRule.swift`'s own header for why an empty array never means "no reminder."
+    @Relationship(deleteRule: .cascade, inverse: \NotificationRule.task)
+    var notificationRules: [NotificationRule]
+
     init(
         id: UUID = UUID(),
         event: KueEvent? = nil,
@@ -28,7 +33,8 @@ final class KueTask {
         isCompleted: Bool = false,
         completedAt: Date? = nil,
         offsetLabel: String,
-        sortOrder: Int = 0
+        sortOrder: Int = 0,
+        notificationRules: [NotificationRule] = []
     ) {
         self.id = id
         self.event = event
@@ -38,5 +44,6 @@ final class KueTask {
         self.completedAt = completedAt
         self.offsetLabel = offsetLabel
         self.sortOrder = sortOrder
+        self.notificationRules = notificationRules
     }
 }

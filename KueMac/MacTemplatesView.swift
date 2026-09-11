@@ -21,6 +21,9 @@ struct MacTemplatesView: View {
 
     private let templateTypes: [EventType] = [.interview, .exam, .trip, .deadline]
 
+    /// Kue 3.0 Phase 3 completion pass — docs/31 "Template notification defaults".
+    @State private var notificationDefaultsEventType: EventType?
+
     var body: some View {
         List {
             Section {
@@ -28,14 +31,21 @@ struct MacTemplatesView: View {
                     Button { onStart(type) } label: {
                         MacTemplateRow(eventType: type)
                     }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button("Notification Defaults…") { notificationDefaultsEventType = type }
+                    }
                 }
             } header: {
                 Text("Built-In Templates")
             } footer: {
-                Text("Each one pre-fills the event type and its default preparation schedule — everything stays editable before you save. Kue doesn't yet support custom, user-saved templates on either platform.")
+                Text("Each one pre-fills the event type and its default preparation schedule — everything stays editable before you save. Kue doesn't yet support custom, user-saved templates on either platform. Right-click a template to customize the notification rules new events of that type start with.")
             }
         }
         .navigationTitle("Templates")
+        .sheet(item: $notificationDefaultsEventType) { type in
+            MacTemplateNotificationDefaultsEditorView(eventType: type)
+        }
     }
 }
 
@@ -63,4 +73,12 @@ private struct MacTemplateRow: View {
         case .trip: return "airplane"
         }
     }
+}
+
+/// Kue 3.0 Phase 3 completion pass — docs/31 "Template notification defaults". `EventType`
+/// (Shared/) has no `Identifiable` conformance of its own; iOS's own `TemplatesView.swift`
+/// declares the identical extension for the identical `.sheet(item:)` need — each app target
+/// needs its own copy since neither compiles the other's `Kue/`/`KueMac/` folder.
+extension EventType: Identifiable {
+    var id: String { rawValue }
 }

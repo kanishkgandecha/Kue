@@ -53,7 +53,22 @@ enum NotificationActionHandler {
             intentIdentifiers: [],
             options: []
         )
-        UNUserNotificationCenter.current().setNotificationCategories([outcomeCategory])
+        // Kue 3.0 Phase 3 completion pass — docs/31 "Actions and snooze". `options: []` (no
+        // `.foreground`) — a snooze is a same-identifier reschedule the action handler performs
+        // entirely in the background, exactly like `SnoozeTaskIntent`'s own "routine and
+        // reversible, no confirmation" precedent for the task-level snooze.
+        let snooze = UNNotificationAction(
+            identifier: NotificationActionIdentifiers.snoozeActionID,
+            title: "Snooze",
+            options: []
+        )
+        let ruleSnoozeCategory = UNNotificationCategory(
+            identifier: NotificationActionIdentifiers.ruleSnoozeCategory,
+            actions: [snooze],
+            intentIdentifiers: [],
+            options: []
+        )
+        UNUserNotificationCenter.current().setNotificationCategories([outcomeCategory, ruleSnoozeCategory])
     }
 
     /// A notification request's identifier is always `"<event UUID>-<transition suffix>"`
@@ -74,8 +89,18 @@ enum NotificationActionHandler {
         scheduler: NotificationScheduling = SystemNotificationScheduler.shared,
         liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared,
         spotlightIndexer: SpotlightIndexing = SystemSpotlightIndexer.shared
-    ) {
+    ) async {
         guard let eventID = eventID(fromRequestIdentifier: response.notification.request.identifier) else { return }
+
+        // Kue 3.0 Phase 3 completion pass — docs/31 "Actions and snooze": a deterministic
+        // same-identifier reschedule, nothing else. Never touches SwiftData/`KueEvent`/
+        // `KueTask` — "reuse the existing notification action architecture" here means routing
+        // through this same handler, not that a snooze needs (or should have) any event
+        // mutation the way Complete/Skip/Cancel do.
+        if response.actionIdentifier == NotificationActionIdentifiers.snoozeActionID {
+            await snooze(response: response, scheduler: scheduler)
+            return
+        }
 
         // Reschedule and a plain tap both just open the exact event through the app's one
         // real deep-link route (`RootTabView.onOpenURL`) — including when the event turns out
@@ -83,7 +108,7 @@ enum NotificationActionHandler {
         // than resolving to another event (docs/25 "K.").
         if response.actionIdentifier == NotificationActionIdentifiers.rescheduleActionID
             || response.actionIdentifier == UNNotificationDefaultActionIdentifier {
-            UIApplication.shared.open(KueDeepLink.url(for: .event(eventID)))
+            await UIApplication.shared.open(KueDeepLink.url(for: .event(eventID)))
             return
         }
 
@@ -102,6 +127,32 @@ enum NotificationActionHandler {
         default:
             break
         }
+    }
+
+    /// Re-adds the exact notification that just fired, same identifier and content, with a
+    /// new one-shot trigger `minutesFromNow` later. `UNUserNotificationCenter.add(_:)` with an
+    /// already-pending (or, here, just-delivered) identifier replaces it outright — this is
+    /// the same "deterministic identifier, scoped reconciliation" guarantee
+    /// `NotificationExecutor.reconcile` already relies on elsewhere, just invoked once, from
+    /// here, instead of a full replan. The duration comes from `userInfo` set at schedule time
+    /// (`NotificationExecutor.makeRequest`) — no SwiftData fetch, no `NotificationRule` lookup,
+    /// nothing that could race a rule being edited/deleted in between.
+    private static func snooze(response: UNNotificationResponse, scheduler: NotificationScheduling) async {
+        guard let snoozedRequest = snoozedRequest(from: response.notification.request) else { return }
+        await scheduler.add(snoozedRequest)
+    }
+
+    /// Pure — split out from `snooze(response:scheduler:)` above specifically so this is
+    /// testable against a directly-constructed `UNNotificationRequest` (`UNNotificationResponse`
+    /// itself has no public initializer, so it can't be built in a test at all). `nil` for a
+    /// request with a missing or non-positive snooze duration — "disabled/missing snooze
+    /// configuration" (this phase's own test requirement) means "do nothing," never a crash or
+    /// a same-instant reschedule.
+    static func snoozedRequest(from request: UNNotificationRequest) -> UNNotificationRequest? {
+        guard let minutes = request.content.userInfo[NotificationActionIdentifiers.snoozeMinutesUserInfoKey] as? Int, minutes > 0 else { return nil }
+        guard let content = request.content.mutableCopy() as? UNMutableNotificationContent else { return nil }
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: TimeInterval(minutes * 60), repeats: false)
+        return UNNotificationRequest(identifier: request.identifier, content: content, trigger: trigger)
     }
 }
 
@@ -123,7 +174,7 @@ final class NotificationActionDelegate: NSObject, UNUserNotificationCenterDelega
     ) {
         Task { @MainActor in
             if let context {
-                NotificationActionHandler.handle(response: response, context: context)
+                await NotificationActionHandler.handle(response: response, context: context)
             }
             completionHandler()
         }

@@ -164,6 +164,12 @@ final class KueEvent {
     @Relationship(deleteRule: .cascade, inverse: \WidgetState.event)
     var widgetState: WidgetState?
 
+    /// Kue 3.0 Phase 3 — docs/31. Explicit event-level notification customizations only; an
+    /// empty array means "every notification for this event still follows the global/template
+    /// defaults," never "no notifications." See `NotificationRule.swift`'s own header.
+    @Relationship(deleteRule: .cascade, inverse: \NotificationRule.event)
+    var notificationRules: [NotificationRule]
+
     var createdAt: Date
     var updatedAt: Date
 
@@ -201,6 +207,7 @@ final class KueEvent {
         schedule: KueSchedule? = nil,
         widgetConfiguration: WidgetConfiguration? = nil,
         widgetState: WidgetState? = nil,
+        notificationRules: [NotificationRule] = [],
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -237,6 +244,7 @@ final class KueEvent {
         self.schedule = schedule
         self.widgetConfiguration = widgetConfiguration
         self.widgetState = widgetState
+        self.notificationRules = notificationRules
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }

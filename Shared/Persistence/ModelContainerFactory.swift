@@ -107,16 +107,17 @@ enum ModelContainerFactory {
         ProcessInfo.processInfo.arguments.contains(uiTestLaunchArgument)
     }
 
-    /// Built from `KueSchemaV3` (Persistence/Migrations/) — the *current* schema version. Do
+    /// Built from `KueSchemaV5` (Persistence/Migrations/) — the *current* schema version. Do
     /// **not** replace this with a bare `Schema([...])` literal again; that would silently
     /// detach the schema this app opens stores with from the versioned/migratable one
-    /// `KueMigrationPlan` describes. Kue 2.0 Phase 4 added `KueSchemaV3` (Calendar-linkage
-    /// fields) — see docs/18-calendar-integration.md "Migration" and `KueMigrationPlan`'s own
-    /// header.
-    static let schema = Schema(versionedSchema: KueSchemaV3.self)
+    /// `KueMigrationPlan` describes. Kue 3.0 Phase 3's completion pass added `KueSchemaV5`
+    /// (`Template.notificationRuleDefaultsData`) — see docs/31-kue-3-notification-studio.md
+    /// "Migration" and `KueMigrationPlan`'s own header.
+    static let schema = Schema(versionedSchema: KueSchemaV5.self)
 
-    /// `KueSchemaV1` → `KueSchemaV2` → `KueSchemaV3` as of Kue 2.0 Phase 4 — see
-    /// `KueMigrationPlan`'s own header for what adding the *next* stage looks like.
+    /// `KueSchemaV1` → `KueSchemaV2` → `KueSchemaV3` → `KueSchemaV4` → `KueSchemaV5` as of
+    /// Kue 3.0 Phase 3's completion pass — see `KueMigrationPlan`'s own header for what adding
+    /// the *next* stage looks like.
     static let migrationPlan: any SchemaMigrationPlan.Type = KueMigrationPlan.self
 
     /// Kue 2.0 Phase 11 (docs/26-icloud-cloudkit-sync.md "A."): **every** `ModelConfiguration`

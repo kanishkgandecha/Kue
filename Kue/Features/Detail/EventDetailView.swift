@@ -67,6 +67,10 @@ struct EventDetailView: View {
     @State private var notificationAuthorizationStatus: UNAuthorizationStatus = .notDetermined
     @State private var pendingNotificationIdentifiers: Set<String> = []
 
+    // MARK: Kue 3.0 Phase 3 — docs/31. Custom-rule editing state for the Notifications tab.
+    @State private var isAddingNotificationRule = false
+    @State private var editingNotificationRule: NotificationRule?
+
     /// Kue 2.0 Phase 2, requirement 9 — wraps what `EventDuplicationService.duplicate`
     /// returned so the sheet below can show the same duplicate-warning banner
     /// `EventFormView` shows, without threading extra optionals through `EventDetailView`
@@ -566,43 +570,95 @@ struct EventDetailView: View {
             NotificationCandidateBuilder.filter(allCandidates, intensity: intensity)
         )
         let excludedByIntensityCount = allCandidates.count - visibleCandidates.count
-        return Group {
-            if visibleCandidates.isEmpty && !isNotificationsDisabled {
-                ContentUnavailableView(
-                    "No Upcoming Notifications",
-                    systemImage: "bell.slash",
-                    description: Text("Nothing left to remind you about for this event.")
-                )
-            } else {
-                List {
-                    if isNotificationsDisabled {
-                        Section {
-                            Label("Notifications are off", systemImage: "bell.slash")
-                                .foregroundStyle(KueColor.secondaryText)
-                                .accessibilityIdentifier("notificationsDisabledLabel")
-                            Button("Open Settings") { openSystemSettings() }
-                                .accessibilityIdentifier("openSystemSettingsButton")
-                        } footer: {
-                            Text("Kue can't guarantee reminders below fire until notifications are on.")
+        // Kue 3.0 Phase 3 — the Custom Rules section (and "Add Custom Rule…") is always
+        // reachable, regardless of whether any *default* reminder currently exists — a real
+        // bug found via a real `KueUITests` run: the section used to live only inside the
+        // branch that also required `!visibleCandidates.isEmpty`, so an event with no default
+        // reminders pending (or notifications not yet authorized) hid the add-a-rule
+        // affordance entirely. Only the *default-reminders* half of this tab is conditional now.
+        return List {
+            if isNotificationsDisabled {
+                Section {
+                    Label("Notifications are off", systemImage: "bell.slash")
+                        .foregroundStyle(KueColor.secondaryText)
+                        .accessibilityIdentifier("notificationsDisabledLabel")
+                    Button("Open Settings") { openSystemSettings() }
+                        .accessibilityIdentifier("openSystemSettingsButton")
+                } footer: {
+                    Text("Kue can't guarantee reminders below fire until notifications are on.")
+                }
+            }
+
+            // Kue 3.0 Phase 3 — docs/31: every rule shows its source (Event, here, vs.
+            // Global Default below) — inherited and customized rules are never distinguished
+            // by color alone (source is a text label on every row).
+            Section {
+                ForEach(event.notificationRules.sorted { $0.sortOrder == $1.sortOrder ? $0.createdAt < $1.createdAt : $0.sortOrder < $1.sortOrder }) { rule in
+                    Button {
+                        editingNotificationRule = rule
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text(customRuleLabel(rule))
+                                Spacer()
+                                if !rule.isEnabled {
+                                    Text("Disabled").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            Text("Source: Event").font(.caption2).foregroundStyle(.secondary)
                         }
                     }
-                    Section {
-                        ForEach(visibleCandidates, id: \.identifier) { candidate in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(candidate.body)
-                                Text(notificationStatusText(for: candidate))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                    .foregroundStyle(.primary)
+                }
+                Button("Add Custom Rule…") { isAddingNotificationRule = true }
+                    .accessibilityIdentifier("addNotificationRuleButton")
+            } header: {
+                Text("Custom Rules")
+            } footer: {
+                Text("Custom rules replace the matching default below and are never affected by future changes to your global defaults.")
+            }
+
+            if visibleCandidates.isEmpty {
+                Section {
+                    Text("Nothing left to remind you about for this event from your global defaults.")
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Section {
+                    ForEach(visibleCandidates, id: \.identifier) { candidate in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(candidate.body)
+                            Text(notificationStatusText(for: candidate))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("Source: Global Default").font(.caption2).foregroundStyle(.secondary)
                         }
-                    } footer: {
-                        if excludedByIntensityCount > 0 {
-                            Text("\(excludedByIntensityCount) more reminder\(excludedByIntensityCount == 1 ? "" : "s") won't fire — excluded by your Intensity setting.")
-                        }
+                    }
+                } header: {
+                    Text("Default Reminders")
+                } footer: {
+                    if excludedByIntensityCount > 0 {
+                        Text("\(excludedByIntensityCount) more reminder\(excludedByIntensityCount == 1 ? "" : "s") won't fire — excluded by your Intensity setting.")
                     }
                 }
-                .accessibilityIdentifier("notificationsList")
             }
+        }
+        .accessibilityIdentifier("notificationsList")
+        .sheet(isPresented: $isAddingNotificationRule) {
+            NotificationRuleEditorView(event: event)
+        }
+        .sheet(item: $editingNotificationRule) { rule in
+            NotificationRuleEditorView(event: event, existingRule: rule)
+        }
+    }
+
+    private func customRuleLabel(_ rule: NotificationRule) -> String {
+        switch rule.anchor {
+        case .eventStart: return rule.offsetDirection == .at ? "At event start" : "\(rule.offsetQuantity) \(rule.offsetUnit.rawValue) \(rule.offsetDirection == .before ? "before" : "after") start"
+        case .eventEnd: return rule.offsetDirection == .at ? "At event end" : "\(rule.offsetQuantity) \(rule.offsetUnit.rawValue) \(rule.offsetDirection == .before ? "before" : "after") end"
+        case .outcomeFollowUp: return "Outcome follow-up"
+        case .taskDue: return "Task reminder"
+        case .absolute: return rule.absoluteDate?.formatted(date: .abbreviated, time: .shortened) ?? "Custom date"
         }
     }
 

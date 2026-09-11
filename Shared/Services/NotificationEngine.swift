@@ -30,43 +30,55 @@ enum NotificationEngine {
     /// it's needed" (creating/editing an event) — docs/08 "Permission handling": requested
     /// "at the first point it's needed ... not at app launch." Passive triggers (foreground
     /// sweep, background refresh) pass `false` so they never surprise the user with a prompt.
+    @discardableResult
     static func reschedule(
         context: ModelContext,
         intensity: NotificationIntensity,
         scheduler: NotificationScheduling,
         now: Date = .now,
         requestPermissionIfNeeded: Bool = false,
-        reminderPreference: ReminderPreference? = nil
-    ) async {
-        let reminderPreference = reminderPreference ?? .current
+        reminderPreference: ReminderPreference? = nil,
+        globalPreferences: NotificationGlobalPreferences? = nil
+    ) async -> NotificationSchedulePlan {
+        // `reminderPreference` stays an explicit override parameter (tests / call sites that
+        // still pass one directly keep working) but no longer drives the plan on its own —
+        // `NotificationGlobalPreferences.defaultPreEventMinutes` is the real source of truth
+        // now; when a caller passes `reminderPreference` explicitly, it wins, matching this
+        // parameter's pre-existing "explicit override" contract.
+        let globalPreferences = { () -> NotificationGlobalPreferences in
+            var prefs = globalPreferences ?? .current
+            if let reminderPreference { prefs.defaultPreEventMinutes = reminderPreference.preEventMinutes }
+            return prefs
+        }()
+
         var status = await scheduler.authorizationStatus()
         if status == .notDetermined && requestPermissionIfNeeded {
             _ = await scheduler.requestAuthorization()
             status = await scheduler.authorizationStatus()
         }
-        // Requirement 9: not-determined and denied both mean "schedule nothing," gracefully —
-        // never crash, never block the caller's own event mutation, which has already
-        // committed by the time this runs.
-        guard status == .authorized || status == .provisional else { return }
+        let authorizationGranted = status == .authorized || status == .provisional
 
         let events = (try? context.fetch(FetchDescriptor<KueEvent>())) ?? []
-        let allKnownIdentifiers = Set(events.flatMap(NotificationCandidateBuilder.allIdentifiers))
-        let allCandidates = events.flatMap { NotificationCandidateBuilder.candidates(for: $0, now: now, reminderPreference: reminderPreference) }
-        let desired = NotificationCandidateBuilder.prioritized(
-            NotificationCandidateBuilder.filter(allCandidates, intensity: intensity)
-        )
-        // Requirement 6: keep the nearest `pendingRequestCap` by (date, tier); anything past
-        // the cap is left unscheduled for now, picked back up next replenishment.
-        let toSchedule = Array(desired.prefix(pendingRequestCap))
-        let desiredIdentifiers = Set(toSchedule.map(\.identifier))
+        let plan = NotificationPlanner.plan(NotificationPlanner.Input(
+            events: events, globalPreferences: globalPreferences, intensity: intensity,
+            authorizationGranted: authorizationGranted, now: now, capacity: pendingRequestCap
+        ))
 
-        let toRemove = allKnownIdentifiers.subtracting(desiredIdentifiers)
-        if !toRemove.isEmpty {
-            scheduler.removePendingNotificationRequests(withIdentifiers: Array(toRemove))
-        }
-        for candidate in toSchedule {
-            await scheduler.add(candidate.makeRequest())
-        }
+        // Every identifier this event/task graph could ever occupy — `allIdentifiers` (Shared/)
+        // already covers both the default layer's own exhaustive set (docs/08) and every
+        // rule's own `"<event>-rule-<rule>"` form, including disabled/invalid/excluded ones, so
+        // a since-disabled or since-invalidated rule's stale pending request is still cleanly
+        // removed (docs/31 "Scheduling executor": "Use stable identifiers so rescheduling
+        // replaces the correct pending request").
+        let knownIdentifiers = Set(events.flatMap(NotificationCandidateBuilder.allIdentifiers))
+
+        // Requirement 9 (docs/08): not-determined/denied both mean "schedule nothing,"
+        // gracefully — `NotificationPlanner` already excluded every candidate with
+        // `.permissionDenied` above when `authorizationGranted` is false, so this reconcile
+        // call still runs (removing anything stale) rather than early-returning and leaving
+        // old requests behind.
+        await NotificationExecutor.reconcile(plan: plan, knownIdentifiers: knownIdentifiers, scheduler: scheduler, globalPreferences: globalPreferences)
+        return plan
     }
 
     /// docs/08-notifications.md "Deduplication": "Completing or cancelling an event removes

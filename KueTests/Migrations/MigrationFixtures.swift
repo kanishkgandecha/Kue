@@ -298,7 +298,11 @@ enum MigrationFixtures {
 
         // MARK: Template (never actually populated by V1 product code, but part of the
         // schema — verified for completeness, requirement 7's "every field and relationship").
-        let template = Template(
+        // `KueSchemaV1.Template`, not the live type — see this file's header ("inserting a live
+        // KueEvent into a V1-schema-only context ... crashes") and `KueSchemaV1.swift`'s Phase 3
+        // completion-pass correction: `Template` gained a new stored property, so the live
+        // symbol no longer matches this schema's own frozen shape.
+        let template = KueSchemaV1.Template(
             name: "Interview", eventType: .interview,
             scheduleRules: [ScheduleRule(offset: DateComponents(day: 7), taskTitle: "Preparation start", isTimeSensitive: false)],
             isUserDefined: false, isBuiltIn: true
@@ -379,7 +383,7 @@ enum MigrationFixtures {
         )
     }
 
-    private static func snapshot(_ template: Template) -> TemplateSnapshot {
+    private static func snapshot(_ template: KueSchemaV1.Template) -> TemplateSnapshot {
         TemplateSnapshot(
             id: template.id, name: template.name, eventType: template.eventType,
             scheduleRules: template.scheduleRules, isUserDefined: template.isUserDefined, isBuiltIn: template.isBuiltIn

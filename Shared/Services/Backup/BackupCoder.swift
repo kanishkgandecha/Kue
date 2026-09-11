@@ -22,6 +22,7 @@ nonisolated enum BackupCoder {
         let exclusions = try context.fetch(FetchDescriptor<RecurrenceExclusion>())
         let templates = try context.fetch(FetchDescriptor<Template>())
         let preference = try context.fetch(FetchDescriptor<UserPreference>()).first
+        let notificationRules = try context.fetch(FetchDescriptor<NotificationRule>())
 
         return BackupPayload(
             events: events.map(EventGraphMapper.record(for:)),
@@ -29,7 +30,8 @@ nonisolated enum BackupCoder {
             templates: templates.map(templatePayload),
             userPreference: preference.map {
                 UserPreferenceBackupPayload(notificationIntensity: $0.notificationIntensity.rawValue, aiParsingEnabled: $0.aiParsingEnabled)
-            }
+            },
+            notificationRules: notificationRules.map(notificationRulePayload)
         )
     }
 
@@ -85,7 +87,8 @@ nonisolated enum BackupCoder {
             eventType: template.eventType.rawValue,
             scheduleRules: template.scheduleRules.map { ScheduleRulePayload(offset: $0.offset, taskTitle: $0.taskTitle, isTimeSensitive: $0.isTimeSensitive) },
             isUserDefined: template.isUserDefined,
-            isBuiltIn: template.isBuiltIn
+            isBuiltIn: template.isBuiltIn,
+            notificationRuleDefaults: template.notificationRuleDefaults.map(notificationRuleDefaultPayload)
         )
     }
 
@@ -95,8 +98,74 @@ nonisolated enum BackupCoder {
             name: payload.name,
             eventType: EventType(rawValue: payload.eventType) ?? .generic,
             scheduleRules: payload.scheduleRules.map { ScheduleRule(offset: $0.offset, taskTitle: $0.taskTitle, isTimeSensitive: $0.isTimeSensitive) },
+            notificationRuleDefaults: payload.notificationRuleDefaults.map(makeNotificationRuleDefault),
             isUserDefined: payload.isUserDefined,
             isBuiltIn: payload.isBuiltIn
+        )
+    }
+
+    private static func notificationRuleDefaultPayload(_ ruleDefault: NotificationRuleDefault) -> NotificationRuleDefaultPayload {
+        NotificationRuleDefaultPayload(
+            id: ruleDefault.id, anchor: ruleDefault.anchor.rawValue, offsetDirection: ruleDefault.offsetDirection.rawValue,
+            offsetQuantity: ruleDefault.offsetQuantity, offsetUnit: ruleDefault.offsetUnit.rawValue,
+            isEnabled: ruleDefault.isEnabled, customTitle: ruleDefault.customTitle, customBody: ruleDefault.customBody,
+            sound: ruleDefault.sound.rawValue, interruptionPreference: ruleDefault.interruptionPreference.rawValue,
+            snoozeMinutes: ruleDefault.snoozeMinutes
+        )
+    }
+
+    /// Unrecognized raw values fall back to a safe default, same policy as every other mapper
+    /// in this file. `BackupRestoreService` separately runs `NotificationRuleDefault.validate()`
+    /// on the result before ever assigning it onto a `Template`.
+    static func makeNotificationRuleDefault(from payload: NotificationRuleDefaultPayload) -> NotificationRuleDefault {
+        NotificationRuleDefault(
+            id: payload.id,
+            anchor: TemplateNotificationAnchor(rawValue: payload.anchor) ?? .eventStart,
+            offsetDirection: NotificationOffsetDirection(rawValue: payload.offsetDirection) ?? .at,
+            offsetQuantity: payload.offsetQuantity,
+            offsetUnit: NotificationOffsetUnit(rawValue: payload.offsetUnit) ?? .minutes,
+            isEnabled: payload.isEnabled,
+            customTitle: payload.customTitle,
+            customBody: payload.customBody,
+            sound: NotificationSoundOption(rawValue: payload.sound) ?? .defaultSound,
+            interruptionPreference: NotificationInterruptionPreference(rawValue: payload.interruptionPreference) ?? .active,
+            snoozeMinutes: payload.snoozeMinutes
+        )
+    }
+
+    // MARK: - NotificationRule mapping (Kue 3.0 Phase 3 — docs/31 "Backup and restore")
+
+    private static func notificationRulePayload(_ rule: NotificationRule) -> NotificationRulePayload {
+        NotificationRulePayload(
+            id: rule.id, eventID: rule.event?.id, taskID: rule.task?.id,
+            anchor: rule.anchor.rawValue, offsetDirection: rule.offsetDirection.rawValue,
+            offsetQuantity: rule.offsetQuantity, offsetUnit: rule.offsetUnit.rawValue,
+            absoluteDate: rule.absoluteDate, isEnabled: rule.isEnabled,
+            customTitle: rule.customTitle, customBody: rule.customBody,
+            sound: rule.sound.rawValue, interruptionPreference: rule.interruptionPreference.rawValue,
+            snoozeMinutes: rule.snoozeMinutes, sortOrder: rule.sortOrder,
+            createdAt: rule.createdAt, updatedAt: rule.updatedAt
+        )
+    }
+
+    /// `event`/`task` are the caller's already-resolved owners (looked up by
+    /// `payload.eventID`/`payload.taskID`) — this function never fetches, matching every other
+    /// `make*(from:)` mapper in this file. Unrecognized raw values fall back to a safe default,
+    /// same policy as `makeTemplate(from:)` above; `BackupRestoreService` separately runs
+    /// `NotificationRuleValidator` on the *result* before ever inserting it.
+    static func makeNotificationRule(from payload: NotificationRulePayload, event: KueEvent?, task: KueTask?) -> NotificationRule {
+        NotificationRule(
+            id: payload.id, event: event, task: task,
+            anchor: NotificationRuleAnchor(rawValue: payload.anchor) ?? .absolute,
+            offsetDirection: NotificationOffsetDirection(rawValue: payload.offsetDirection) ?? .at,
+            offsetQuantity: payload.offsetQuantity,
+            offsetUnit: NotificationOffsetUnit(rawValue: payload.offsetUnit) ?? .minutes,
+            absoluteDate: payload.absoluteDate, isEnabled: payload.isEnabled,
+            customTitle: payload.customTitle, customBody: payload.customBody,
+            sound: NotificationSoundOption(rawValue: payload.sound) ?? .defaultSound,
+            interruptionPreference: NotificationInterruptionPreference(rawValue: payload.interruptionPreference) ?? .active,
+            snoozeMinutes: payload.snoozeMinutes, sortOrder: payload.sortOrder,
+            createdAt: payload.createdAt, updatedAt: payload.updatedAt
         )
     }
 }

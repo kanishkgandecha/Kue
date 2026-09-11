@@ -28,6 +28,12 @@
 //  — like `Template`/`UserPreference` — it's still an untouched island in the graph and keeps
 //  referencing the live, shared type directly.
 //
+//  Kue 3.0 Phase 3 completion pass correction: `Template` no longer belongs in that last
+//  sentence — it has since gained a new stored property (`notificationRuleDefaultsData`, as of
+//  `KueSchemaV5`) — see `KueSchemaV1.swift`'s own matching correction for the full reasoning.
+//  It is nested below as its own frozen, byte-for-byte pre-completion-pass copy.
+//  `UserPreference` alone still references the live type.
+//
 
 import SwiftData
 import Foundation
@@ -169,6 +175,40 @@ enum KueSchemaV2: VersionedSchema {
             self.subline = subline
             self.progress = progress
             self.nextTransitionDate = nextTransitionDate
+        }
+    }
+
+    /// Exact copy of `Shared/Models/Template.swift` as it stood before Kue 3.0 Phase 3's
+    /// completion pass — see this file's header. No relationships to nest alongside it;
+    /// `Template` was, and remains, an island in this schema's connectivity graph.
+    @Model
+    final class Template {
+        var id: UUID
+        var name: String
+        var eventType: EventType
+        private var scheduleRulesData: Data
+        var isUserDefined: Bool
+        var isBuiltIn: Bool
+
+        var scheduleRules: [ScheduleRule] {
+            get { (try? JSONDecoder().decode([ScheduleRule].self, from: scheduleRulesData)) ?? [] }
+            set { scheduleRulesData = (try? JSONEncoder().encode(newValue)) ?? Data() }
+        }
+
+        init(
+            id: UUID = UUID(),
+            name: String,
+            eventType: EventType,
+            scheduleRules: [ScheduleRule] = [],
+            isUserDefined: Bool = false,
+            isBuiltIn: Bool = true
+        ) {
+            self.id = id
+            self.name = name
+            self.eventType = eventType
+            self.scheduleRulesData = (try? JSONEncoder().encode(scheduleRules)) ?? Data()
+            self.isUserDefined = isUserDefined
+            self.isBuiltIn = isBuiltIn
         }
     }
 

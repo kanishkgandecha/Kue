@@ -50,6 +50,7 @@ enum EventCreationService {
         event.widgetConfiguration = widgetConfiguration
         SchedulingEngine.regenerateTasks(for: event, context: context, now: now)
         startSeriesIfNeeded(for: event, draft: draft, context: context, now: now)
+        applyTemplateNotificationDefaults(to: event, context: context, now: now)
 
         try? context.save()
         // Kue 2.0 Phase 11 — docs/26 "E.": the one shared creation path (`EventFormView`'s
@@ -104,6 +105,46 @@ enum EventCreationService {
             event, context: context, now: now, scheduler: scheduler,
             liveActivityManager: liveActivityManager, spotlightIndexer: spotlightIndexer
         )
+    }
+
+    /// Kue 3.0 Phase 3 completion pass — docs/31 "Template notification defaults": copies the
+    /// event type's built-in `Template.notificationRuleDefaults` (if any) into brand-new,
+    /// independent `NotificationRule` rows owned by this event, at this exact moment only. This
+    /// is a snapshot copy, not a live link: `Template` has no reference back to `event`, and a
+    /// later edit to the template's defaults never touches an already-created event — the
+    /// explicit "deterministic behavior for later template edits" requirement this pass raised.
+    /// A no-op when no built-in template row exists yet, or when it has zero defaults — the
+    /// overwhelmingly common case, matching Phase 3's original zero-`NotificationRule`-rows
+    /// "inherit from global defaults" behavior exactly.
+    private static func applyTemplateNotificationDefaults(to event: KueEvent, context: ModelContext, now: Date) {
+        guard let template = TemplateStore.existingBuiltIn(for: event.eventType, context: context) else { return }
+        for (index, ruleDefault) in template.notificationRuleDefaults.enumerated() {
+            let rule = NotificationRule(
+                event: event,
+                anchor: ruleDefault.anchor.asRuleAnchor,
+                offsetDirection: ruleDefault.offsetDirection,
+                offsetQuantity: ruleDefault.offsetQuantity,
+                offsetUnit: ruleDefault.offsetUnit,
+                // No `.absolute` case exists on `TemplateNotificationAnchor` — see
+                // `NotificationRuleDefault.swift`'s own header — so `absoluteDate` is always nil
+                // here; nothing here could ever copy a stale one-time timestamp forward.
+                absoluteDate: nil,
+                isEnabled: ruleDefault.isEnabled,
+                customTitle: ruleDefault.customTitle,
+                customBody: ruleDefault.customBody,
+                sound: ruleDefault.sound,
+                interruptionPreference: ruleDefault.interruptionPreference,
+                snoozeMinutes: ruleDefault.snoozeMinutes,
+                sortOrder: index,
+                createdAt: now,
+                updatedAt: now
+            )
+            context.insert(rule)
+            // `NotificationRuleEditorView.save()`'s own "insert, then explicitly append to the
+            // owner's array" convention — setting `event:` in the initializer alone does not
+            // synchronously update `event.notificationRules` in-memory.
+            event.notificationRules.append(rule)
+        }
     }
 
     /// Kue 2.0 Phase 3 — turns `event` into the origin of a brand-new series when the draft's
