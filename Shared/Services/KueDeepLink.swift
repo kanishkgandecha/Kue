@@ -51,6 +51,11 @@ nonisolated enum KueDeepLink {
         /// `LockScreenEventSelection.current` directly to decide "nothing chosen yet" vs
         /// "chosen, but that event is gone" copy, so this one route covers both.
         case lockScreenEventSelection
+        /// Kue 3.0 Phase 4 — docs/32 "Deep links." A parsed `kue://auth/callback` (email
+        /// confirmation, password recovery, or another Supabase auth callback type). Carries
+        /// only the parsed payload — never a raw event id or anything that could let an
+        /// authentication callback navigate to or mutate an arbitrary event (requirement J).
+        case authCallback(AccountAuthCallbackPayload)
     }
 
     static func url(for destination: Destination) -> URL {
@@ -85,6 +90,11 @@ nonisolated enum KueDeepLink {
             return URL(string: "\(scheme)://focus")!
         case .lockScreenEventSelection:
             return URL(string: "\(scheme)://widgets/lock-screen/select")!
+        case .authCallback:
+            // Never actually constructed by Kue itself — the URL comes from Supabase's own
+            // email templates, already pointed at `AccountDeepLinkSupport.callbackURL`. This
+            // arm exists only so `Destination` stays exhaustively switchable.
+            return AccountDeepLinkSupport.callbackURL
         }
     }
 
@@ -117,6 +127,11 @@ nonisolated enum KueDeepLink {
             return .liveActivityFocus
         case "widgets":
             return url.path == "/lock-screen/select" ? .lockScreenEventSelection : nil
+        case AccountDeepLinkSupport.host:
+            // Kue 3.0 Phase 4 — validated fully inside `AccountDeepLinkSupport.parse` (exact
+            // host + path + a recognized `type` + a matching token shape); `nil` here means
+            // reject, exactly like every other unrecognized/malformed case in this function.
+            return AccountDeepLinkSupport.parse(url).map(Destination.authCallback)
         default:
             return nil
         }

@@ -61,6 +61,8 @@ struct RootTabView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.nlParser) private var nlParser
     @Environment(\.aiAvailabilityChecker) private var aiAvailabilityChecker
+    // Kue 3.0 Phase 4 — docs/32 "Deep links."
+    @Environment(AccountCoordinator.self) private var accountCoordinator
 
     /// Bundles what `EventFormView(prefilledDraft:ambiguities:source:)` needs for a
     /// `kue://quick-add-text` deep link — same shape `ShareExtensionRootView.FormInput`
@@ -149,6 +151,13 @@ struct RootTabView: View {
                 selection = .settings
             case .lockScreenEventSelection:
                 isShowingLockScreenSelection = true
+            case .authCallback(let payload):
+                // Requirement J: "an authentication callback cannot navigate to or mutate an
+                // arbitrary event" — this arm only ever routes to Settings (where Account/
+                // Profile lives) and hands the coordinator the already-validated payload;
+                // nothing here touches `modelContext`/`EventDetailView`/any event at all.
+                selection = .settings
+                Task { await accountCoordinator.handleAuthCallback(payload) }
             }
         }
         .sheet(item: $deepLinkedEvent) { event in

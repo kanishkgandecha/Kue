@@ -149,6 +149,10 @@ final class HonestOutcomesUITests: XCTestCase {
         // text row, or another element type depending on OS version; matching by identifier
         // across every type (not guessing one) is what stays robust here.
         let picker = app.descendants(matching: .any)["reminderDurationPicker"]
+        // Kue 3.0 Phase 4's new Account section (Settings' first) pushed this row further
+        // down — see `scrollUpUntilHittable`'s own header for the underlying `Form`
+        // virtualization this works around.
+        picker.scrollUpUntilHittable(in: app)
         XCTAssertTrue(picker.waitForExistence(timeout: 5))
     }
 }

@@ -75,8 +75,25 @@ struct SettingsView: View {
         self.showOnboarding = showOnboarding
     }
 
+    // Kue 3.0 Phase 4 — docs/32 "iPhone experience."
+    @Environment(AccountCoordinator.self) private var accountCoordinator
+
     var body: some View {
         Form {
+            Section {
+                NavigationLink {
+                    AccountHubView()
+                } label: {
+                    HStack {
+                        Text("Account")
+                        Spacer()
+                        Text(accountSummaryText)
+                            .foregroundStyle(KueColor.secondaryText)
+                    }
+                }
+                .accessibilityIdentifier("accountLink")
+            }
+
             Section {
                 permissionStatusRow
                 if authorizationStatus == .denied {
@@ -642,6 +659,19 @@ struct SettingsView: View {
 
     private func reschedule(intensity: NotificationIntensity) async {
         await NotificationEngine.reschedule(context: modelContext, intensity: intensity, scheduler: scheduler, reminderPreference: ReminderPreference.current)
+    }
+
+    // MARK: - Account (Kue 3.0 Phase 4 — docs/32 "iPhone experience")
+
+    private var accountSummaryText: String {
+        switch accountCoordinator.state {
+        case .signedIn(_, let profile): return profile?.username ?? "Signed In"
+        case .awaitingEmailConfirmation: return "Confirm Email"
+        case .passwordRecovery: return "Set Password"
+        case .sessionExpired: return "Expired"
+        case .unavailable: return "Unavailable"
+        case .signedOut, .authenticating: return "Not Signed In"
+        }
     }
 }
 

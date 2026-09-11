@@ -25,6 +25,10 @@ struct KueMacApp: App {
     let container: ModelContainer
     @State private var storeOpenError: StoreOpenDiagnostic?
     @State private var appState = MacAppState()
+    /// Kue 3.0 Phase 4 — docs/32 "Architecture." Same instance for both the `WindowGroup` and
+    /// `Settings` scenes below — Mac's own Profile destination lives in Settings, but other
+    /// windows may want to read `state` too later, so this isn't scoped to just one scene.
+    @State private var accountCoordinator = Self.makeAccountCoordinator()
 
     init() {
         switch ModelContainerFactory.makeDefaultOrDiagnostic() {
@@ -53,10 +57,14 @@ struct KueMacApp: App {
                             _ = EventStatusEngine.sweep(context: container.mainContext)
                             _ = OccurrenceReconciliationService.replenishAll(context: container.mainContext)
                         }
+                        // Kue 3.0 Phase 4 — never blocks the window from opening; local data
+                        // (the two sweeps above) is already independent of this.
+                        .task { await accountCoordinator.restoreSession() }
                 }
             }
             .frame(minWidth: 760, minHeight: 480)
             .environment(\.calendarProvider, Self.makeCalendarProvider())
+            .environment(accountCoordinator)
         }
         .modelContainer(container)
         .commands {
@@ -67,6 +75,7 @@ struct KueMacApp: App {
             MacSettingsView(appState: appState)
                 .modelContainer(container)
                 .environment(\.calendarProvider, Self.makeCalendarProvider())
+                .environment(accountCoordinator)
                 .frame(minWidth: 480, minHeight: 360)
         }
     }
@@ -81,5 +90,19 @@ struct KueMacApp: App {
     /// is dormant today, kept only for parity with the exact pattern iOS already established.
     private static func makeCalendarProvider() -> CalendarProviding {
         FakeCalendarProvider.makeFromLaunchArguments() ?? SystemCalendarProvider()
+    }
+
+    // MARK: - Accounts (Kue 3.0 Phase 4 — docs/32 "Architecture")
+
+    /// Same shape as `Kue/KueApp.swift`'s own `makeAccountCoordinator()` — a separate,
+    /// device-local `SystemSecureStore`/session (no App Group on this target, matching this
+    /// file's own header's "no cross-platform data path but backup" guarantee).
+    private static func makeAccountCoordinator() -> AccountCoordinator {
+        let provider: AccountProviding? = FakeAccountProvider.makeFromLaunchArguments()
+            ?? SupabaseConfiguration.current.map { SystemAccountProvider(configuration: $0) }
+        let secureStore: SecureStoring = ProcessInfo.processInfo.arguments.contains(FakeAccountProvider.uiTestLaunchArgument)
+            ? FakeSecureStore()
+            : SystemSecureStore.shared
+        return AccountCoordinator(provider: provider, secureStore: secureStore)
     }
 }

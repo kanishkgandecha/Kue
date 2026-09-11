@@ -33,6 +33,13 @@ struct KueApp: App {
     /// test flow (index → verify → remove) needs the identical instance across navigation.
     private let spotlightIndexer: SpotlightIndexing = Self.makeSpotlightIndexer()
 
+    /// Kue 3.0 Phase 4 — docs/32 "Architecture." Same "resolved once, not inline in `body`"
+    /// reasoning as `liveActivityManager`/`spotlightIndexer` above — `AccountCoordinator` is
+    /// stateful (`state`, an in-flight refresh `Task`) and must stay the identical instance
+    /// across `body` re-evaluations. Never blocks `init()`'s synchronous path — its own
+    /// `restoreSession()` is only ever called from `.task` below.
+    @State private var accountCoordinator = Self.makeAccountCoordinator()
+
     /// docs/08-notifications.md "Replenishment" / docs/04-event-types.md "Reconciliation" —
     /// registering the launch handler must happen before the app finishes launching, which
     /// for a SwiftUI `App` means here, in `init()`, not later in `.task`/`onAppear`.
@@ -147,6 +154,14 @@ struct KueApp: App {
                     // Kue 2.0 Phase 10 — same seam again: real Core Spotlight indexing never
                     // runs under `KueUITests` (docs/24-siri-shortcuts-spotlight-and-controls.md).
                     .environment(\.spotlightIndexer, spotlightIndexer)
+                    // Kue 3.0 Phase 4 — docs/32 "Architecture." The `@Observable` coordinator
+                    // itself, not a protocol-typed environment value (see
+                    // `AccountEnvironment.swift`'s own header for why). `restoreSession()` is
+                    // `async` and started from `.task`, never `init()`'s synchronous path —
+                    // "account initialization... must not delay opening the user's local Kue
+                    // data" (requirement N).
+                    .environment(accountCoordinator)
+                    .task { await accountCoordinator.restoreSession() }
                     .modelContainer(container)
             case .failure(let diagnostic):
                 StoreOpenFailureView(diagnostic: diagnostic) {
@@ -250,6 +265,20 @@ struct KueApp: App {
     @MainActor
     private static func makeSpotlightIndexer() -> SpotlightIndexing {
         FakeSpotlightIndexer.makeFromLaunchArguments() ?? SystemSpotlightIndexer.shared
+    }
+
+    /// Kue 3.0 Phase 4 — same "launch-argument-gated fake" shape as `makeCalendarProvider()`.
+    /// `provider` is `nil` whenever `FakeAccountProvider` isn't requested *and*
+    /// `SupabaseConfiguration.current` is `nil` (missing/placeholder config) — `AccountCoordinator`
+    /// itself turns that into `.unavailable(.configurationMissing)`, never a crash.
+    @MainActor
+    private static func makeAccountCoordinator() -> AccountCoordinator {
+        let provider: AccountProviding? = FakeAccountProvider.makeFromLaunchArguments()
+            ?? SupabaseConfiguration.current.map { SystemAccountProvider(configuration: $0) }
+        let secureStore: SecureStoring = ProcessInfo.processInfo.arguments.contains(FakeAccountProvider.uiTestLaunchArgument)
+            ? FakeSecureStore()
+            : SystemSecureStore.shared
+        return AccountCoordinator(provider: provider, secureStore: secureStore)
     }
 
     /// Kue 2.0 Phase 7 — UI tests already launch with one of the fake-service arguments above

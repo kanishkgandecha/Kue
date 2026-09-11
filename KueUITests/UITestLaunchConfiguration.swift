@@ -95,6 +95,12 @@ enum UITestLaunchConfiguration {
     /// real CloudKit never runs under `KueUITests`.
     static let fakeSyncArgument = "-uiTestFakeSync"
 
+    /// Kue 3.0 Phase 4 — must match `FakeAccountProvider.uiTestLaunchArgument` exactly.
+    /// `KueApp` installs a `FakeAccountProvider` + `FakeSecureStore` (never real Supabase
+    /// credentials, never the real Keychain) in place of `SystemAccountProvider`/
+    /// `SystemSecureStore` when present.
+    static let fakeAccountArgument = "-uiTestFakeAccounts"
+
     /// The simulator's interface orientation is a *device*-level property, not scoped to one
     /// app process — it doesn't reset just because a test relaunches the app. A stray rotation
     /// left over from an earlier test (or an earlier run against the same booted simulator)
@@ -124,6 +130,27 @@ extension XCUIElement {
             app.swipeUp()
             attempts += 1
         }
+    }
+
+    /// Kue 3.0 Phase 4 — a real, disclosed environment characteristic found while fixing
+    /// `CalendarIntegrationUITests` after Settings gained a new "Account" section (docs/32
+    /// "Tests"): a plain, non-interactive `Label` row (no `Button`/`NavigationLink` around it)
+    /// never reports `isHittable == true` here no matter how it's scrolled, so
+    /// `scrollUpUntilHittable`'s own loop keeps swiping for its *entire* budget regardless of
+    /// whether the row is already on screen — fine for a target sitting at the very bottom of
+    /// the list (further swipes are a no-op once already scrolled as far as it goes) but wrong
+    /// for one in the middle, where those extra swipes scroll straight past it. This stops the
+    /// moment the element merely *exists* — matching the already-established, file-local
+    /// `scrollUpUntilExists` idiom in `RecurringEventsUITests.swift`, promoted here now that a
+    /// second file needs the identical thing.
+    @discardableResult
+    func scrollUpUntilExists(in app: XCUIApplication, maxSwipes: Int = 10) -> Bool {
+        var attempts = 0
+        while !exists && attempts < maxSwipes {
+            app.swipeUp()
+            attempts += 1
+        }
+        return exists
     }
 }
 

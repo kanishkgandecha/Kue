@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	Kue 3.0 Phase 4 — see SupabaseConfiguration.swift's own header before editing this file.
+
+	Fill in the real values from the "Kue Development" Supabase project (Settings → API in the
+	Supabase dashboard): "Project URL" for SUPABASE_URL, and the "anon" / "publishable" key
+	(NEVER the "service_role" key) for SUPABASE_ANON_KEY. Both are safe to commit — the anon
+	key is designed to ship inside a client app; see docs/32-kue-3-accounts-and-backend-foundation.md
+	"Privacy" for why. Leaving these as placeholders is safe too: every account feature reports
+	a truthful "not configured" state rather than crashing (SupabaseConfiguration.current
+	returns nil until both are real values).
+	-->
+	<key>SUPABASE_URL</key>
+	<string>https://liazfrrgszmvhysqeljj.supabase.co</string>
+	<key>SUPABASE_ANON_KEY</key>
+	<string>sb_publishable_EfmBciyextUN9yRmZnxL4w_zonbv5KY</string>
+</dict>
+</plist>

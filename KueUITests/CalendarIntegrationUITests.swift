@@ -58,7 +58,13 @@ final class CalendarIntegrationUITests: XCTestCase {
     func testSettingsShowsFullAccessAuthorizationState() {
         launch()
         app.selectTab("tab-settings")
-        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "calendarStatusFullAccess").firstMatch.waitForExistence(timeout: 5))
+        // Kue 3.0 Phase 4's new Account section pushed this row out of the initial visible
+        // viewport — a plain `Label` row with no `Button`/`NavigationLink` around it never
+        // reports `isHittable` here, so this uses `scrollUpUntilExists`, not
+        // `scrollUpUntilHittable` (see that method's own header for why the distinction
+        // matters for a row sitting in the middle of the list, not at its very end).
+        let status = app.descendants(matching: .any).matching(identifier: "calendarStatusFullAccess").firstMatch
+        XCTAssertTrue(status.scrollUpUntilExists(in: app))
     }
 
     // MARK: 2. Contextual permission education
@@ -80,7 +86,8 @@ final class CalendarIntegrationUITests: XCTestCase {
     func testSettingsShowsDeniedState() {
         launch(extraArguments: [UITestLaunchConfiguration.fakeCalendarDeniedArgument])
         app.selectTab("tab-settings")
-        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "calendarStatusDenied").firstMatch.waitForExistence(timeout: 5))
+        let status = app.descendants(matching: .any).matching(identifier: "calendarStatusDenied").firstMatch
+        XCTAssertTrue(status.scrollUpUntilExists(in: app))
     }
 
     func testImportSheetShowsUnavailableStateWhenDenied() {
@@ -92,7 +99,8 @@ final class CalendarIntegrationUITests: XCTestCase {
     func testSettingsShowsRestrictedState() {
         launch(extraArguments: [UITestLaunchConfiguration.fakeCalendarRestrictedArgument])
         app.selectTab("tab-settings")
-        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "calendarStatusRestricted").firstMatch.waitForExistence(timeout: 5))
+        let status = app.descendants(matching: .any).matching(identifier: "calendarStatusRestricted").firstMatch
+        XCTAssertTrue(status.scrollUpUntilExists(in: app))
     }
 
     // MARK: 4. Import selection

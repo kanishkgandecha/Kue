@@ -45,6 +45,8 @@ tasks; no model call in that path.
   features, subscriptions, third-party analytics, a Mac app, calendar integration, a
   context engine (location/weather/Focus), Live Activities, Lock Screen widgets, large
   widgets. See `docs/01-vision-and-scope.md` "What NOT to build in V1" for the full list.
+  (Superseded for "user accounts" and "a backend/cloud database" only, by Kue 3.0 Phase 4
+  below — docs/32. Everything else in this bullet remains true as originally written.)
 - **Widget size is never app-owned.** Widget family (small/medium) is chosen by the user
   per placed Home Screen instance — don't reintroduce a `size` field on
   `WidgetConfiguration` or `UserPreference`. See `docs/03-data-model.md` "WidgetConfiguration."
@@ -970,7 +972,13 @@ KueTests/                   Swift Testing (`import Testing`) unit tests — `@te
                              NotificationDefaultsApplierTests.swift, RecurringNotificationRuleTests
                              .swift, Backup/NotificationRuleBackupTests.swift, and
                              Migrations/SchemaV4MigrationTests.swift (70 new tests total —
-                             see docs/31 "Tests"). Phase 9 added FakeWidgetReloader to the same
+                             see docs/31 "Tests"). Kue 3.0 Phase 4 added Accounts/
+                             (AccountValidationTests.swift, SupabaseConfigurationTests.swift,
+                             AccountDeepLinkParsingTests.swift, ProfileStatisticsEngineTests
+                             .swift, AccountCoordinatorTests.swift, SecureStoringTests.swift —
+                             `FakeAccountProvider`/`FakeSecureStore` only, never a real network
+                             call or the real Keychain in a test that doesn't specifically mean
+                             to exercise it — see docs/32 "Tests"). Phase 9 added FakeWidgetReloader to the same
                              file (same rationale) and tests
                              `WidgetIntentActions`/`TaskSnoozeCalculator` directly — the
                              `CompleteTaskIntent`/`SnoozeTaskIntent`/`CompleteEventIntent`
@@ -1083,7 +1091,17 @@ KueTests/                   Swift Testing (`import Testing`) unit tests — `@te
                              confirmation, cleanup after every termination path, notification/
                              widget effects after confirmed creation) — all four Fake* Voice
                              services only, never real `AVAudioSession`/`AVAudioEngine`/`Speech`.
-KueUITests/                  XCTest UI tests — Kue 3.0 Phase 3 added
+KueUITests/                  XCTest UI tests — Kue 3.0 Phase 4 added AccountUITests.swift
+                             (`FakeAccountProvider` via `-uiTestFakeAccounts`, never a real
+                             Supabase credential — signed-out/continue-without-an-account,
+                             registration validation, sign-in success/failure, forgot
+                             password, signed-in profile/statistics, edit-profile-cancel,
+                             sign-out, delete-account; see docs/32 "Tests" for two real
+                             environment findings this file's own header documents: a
+                             `SecureField`-`typeText` character-retention bug isolated to
+                             `RegistrationView` specifically, and the Simulator's own system
+                             "Save Password?" AutoFill sheet silently blocking every
+                             subsequent tap until dismissed). Kue 3.0 Phase 3 added
                              NotificationStudioUITests.swift (docs/31 "Tests"): Notification
                              Studio reachable from Settings, add/delete a custom event-level
                              rule from Event Detail's Notifications tab, and toggle-reachability
@@ -1198,7 +1216,11 @@ KueMacTests/                 Kue 3.0 Phase 1 — one `@Suite(.serialized) struct
                              (now seven phases, including UUID fetch and restore-plan
                              validation from the second cleanup round). MacSharedServiceSmokeTests
                              .swift also covers Calendar import end-to-end via
-                             `FakeCalendarProvider` — never the real Calendar.
+                             `FakeCalendarProvider` — never the real Calendar. Kue 3.0 Phase 4
+                             added AccountSharedServiceSmokeTests.swift (`extension
+                             KueMacAllTests`, same file-per-area pattern) — one representative
+                             case per Accounts/ area reached from the `KueMac` module, not a
+                             second copy of KueTests/Accounts/'s own exhaustive coverage.
 KueMacUITests/                Kue 3.0 Phase 1 — MacUITestLaunchConfiguration.swift (mirrors
                              KueUITests' own isolatedStoreArgument literal) and
                              KueMacUITests.swift (five cases: launch/empty-state, sidebar
@@ -1444,6 +1466,83 @@ phase) already worked around by only checking reachability, never a resulting va
 phase's own toggle tests follow that same precedent rather than asserting something this
 environment can't reliably prove. No Supabase, no accounts, no push notifications, no Critical
 Alert entitlement, anywhere in this phase.
+
+**Kue 3.0 Phase 4 ("Accounts, Profiles, and Supabase Backend Foundation") is done** — see
+docs/32-kue-3-accounts-and-backend-foundation.md for the full contract. Adds optional email/
+password accounts against a real Supabase project ("Kue Development," region Mumbai) — no
+schema version bump, no new SwiftData model; a session is Keychain-held local state, nothing
+account-related is persisted in SwiftData. New `Shared/Services/Accounts/` (syncs into all
+five targets, same `PBXFileSystemSynchronizedRootGroup` mechanism every other `Shared/` file
+already uses): `AccountProviding`/`SystemAccountProvider` (a plain `URLSession` REST client
+against Supabase's own `/auth/v1`, `/rest/v1`, `/functions/v1` endpoints — no new SPM
+dependency)/`FakeAccountProvider`, `SecureStoring`/`SystemSecureStore` (Keychain)/
+`FakeSecureStore`, the one `@MainActor @Observable` `AccountCoordinator` every view reads from
+(injected via `.environment(_:)` in `KueApp`/`KueMacApp`), `UsernamePolicy`/
+`AccountValidation`, `SupabaseConfiguration` (the one config seam — reads `SupabaseConfig
+.plist`; missing/placeholder config resolves to an honest `.unavailable(.configurationMissing)`
+state, never a crash), `AccountDeepLinkSupport` (a new `KueDeepLink.Destination.authCallback`
+case for `kue://auth/callback`), and `ProfileStatisticsEngine` (pure, local-only usage
+statistics — never uploaded). One migration (`supabase/migrations/
+20260911000000_create_profiles.sql`, checked into this repo): a `profiles` table with
+CHECK-constrained/UNIQUE username normalization mirroring `UsernamePolicy` exactly, a
+`security definer` `handle_new_user()` trigger creating each profile after registration (with
+a race-safe unique-violation retry), a granted `is_username_available` RPC, and explicit
+owner-only RLS (no insert/delete policy at all — only the trigger and an `on delete cascade`
+from `auth.users` can create/remove a row). Account deletion needs a real Auth Admin API call,
+which needs a service-role key the app itself must never hold — `supabase/functions/
+delete-account/index.ts`, a small Edge Function, is the one place that key is ever used,
+injected by Supabase into its own server-side runtime, never committed. New UI:
+`Kue/Features/Account/AccountHubView.swift` + `AccountProfileView.swift` (iPhone, reachable
+from a new Settings → Account row) and `KueMac/MacAccountView.swift` (Mac, a new Settings tab)
+— registration, sign-in, forgot/reset password, email-confirmation-pending, session-expired
+recovery, signed-in profile with statistics, profile editing, sign-out and delete-account
+(both behind a `.confirmationDialog` with an honest "local events are not deleted" disclosure).
+Two real bugs found and fixed via actual test runs: a refresh-token-dedup race
+(`AccountCoordinator.performRefresh`'s in-flight-task guard was only checked from one of its
+two entry points — `restoreSession()`'s own direct call bypassed it, letting two concurrent
+restorations each fire a refresh against the same single-use rotating refresh token) and an
+ISO8601 date-precision loss (`.iso8601`'s whole-seconds truncation broke a real Keychain
+round-trip test — fixed with a custom fractional-seconds formatter). Two real, disclosed
+XCUITest-environment findings (not silently worked around): `RegistrationView`'s password
+`SecureField` only retains `typeText`'s last character despite exhaustive elimination of every
+structural cause (its own test asserts only what's provable; the coordinator's real
+`signUp` correctness is proven at the unit level instead), and a real `SecureField` submission
+triggers the Simulator's own system "Save Password?" AutoFill sheet, which sat on top of the
+app and was the actual cause of three action-button tests failing regardless of scroll budget
+(fixed with a one-line "Not Now" dismissal). A separate, real regression Settings' new Account
+section (now its first `Form` section) caused: three `CalendarIntegrationUITests` cases broke
+because it pushed the Calendar-authorization-status row down into the middle of the list —
+`scrollUpUntilHittable` alone didn't fix it, since that plain `Label` row never reports
+`isHittable` here and the helper's loop then just swipes past it for its whole budget; fixed
+with a new sibling helper, `scrollUpUntilExists(in:maxSwipes:)` (`UITestLaunchConfiguration
+.swift`, promoting an equivalent idiom already private to `RecurringEventsUITests.swift`),
+which stops as soon as the element merely exists. `Kue Personal`/`Kue Mac Personal` use the
+identical account seam — a missing `SupabaseConfig.plist` is the only thing that changes
+(an honest "not configured" state), with zero effect on any local feature. **No cross-device
+event/task sync, merge, realtime, collaboration, or public sharing was built — that is Phase
+5's explicitly separate scope.**
+
+**A pre-commit hardening pass fixed three further real defects** (docs/32 "R."): (1)
+`handle_new_user()`'s reserved/malformed/over-length desired-username handling could abort
+registration entirely with an uncaught `CHECK`-constraint error — fixed with a shared
+`is_valid_username_candidate(text)` SQL function checked before every insert attempt, including
+a length-safe (13-char-truncated-base) collision-suffix retry; (2) `AccountCoordinator`'s
+`loadProfile`/`updateProfile`/`setNewPassword`/`deleteAccount` could send a stale access token
+instead of refreshing first — fixed by routing all four through the same deduplicated
+`refreshIfNeeded()` path `restoreSession()` already used, proven by 6 new tests using a new
+`#if DEBUG`-only test seam (`seedSignedInStateForTesting`/`seedPasswordRecoveryStateForTesting`)
+since the coordinator's own public API can never otherwise produce "signed in with an
+already-expired session" (every real path refreshes first or uses a fresh one, and
+`AccountSession.isExpired(now:)`'s 30-second buffer makes any realistically-short-lived fake
+session expired from the instant it's minted); (3) `handleAuthCallback` marked a callback
+"handled" *before* the exchange ran, so a transient offline/server failure permanently
+swallowed a retry of the identical link — fixed by moving that marking into a new
+`performCallbackExchange`, gated on both the exchange *and* the secure-store write (`try?` →
+`try`) succeeding, with a separate `inFlightCallback` still deduplicating genuinely concurrent
+deliveries. `is_username_available` also now returns `false` (not just "not yet taken") for a
+reserved/invalid candidate, and both it and the new helper explicitly `revoke ... from public`
+before granting only the roles that need them. Full regression: `KueTests` 1002/1002 (909 + 93
+Accounts tests, exact), `AccountUITests` 11/11, `KueMacTests` 44/44 — all re-run after this pass.
 
 Kue 3.0 Phase 1 — a fourth target, `KueMac`, a native macOS app; see docs/29 for the full
 contract. Several files moved from `Kue/Services/` into `Shared/Services/` (unchanged logic,

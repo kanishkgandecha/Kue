@@ -6,5 +6,10 @@
 	<true/>
 	<key>com.apple.security.files.user-selected.read-write</key>
 	<true/>
+	<!-- Kue 3.0 Phase 4 — outbound HTTPS to Supabase (SystemAccountProvider) needs this under
+	     App Sandbox; without it, every URLSession request from KueMac fails silently. Client-
+	     only — no com.apple.security.network.server, no App Group, no CloudKit added. -->
+	<key>com.apple.security.network.client</key>
+	<true/>
 </dict>
 </plist>

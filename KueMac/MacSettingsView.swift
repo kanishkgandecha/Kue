@@ -42,6 +42,7 @@ struct MacSettingsView: View {
     var body: some View {
         TabView {
             generalTab.tabItem { Label("General", systemImage: "gearshape") }
+            MacAccountView().tabItem { Label("Account", systemImage: "person.crop.circle") }
             notificationsTab.tabItem { Label("Notifications", systemImage: "bell") }
             backupTab.tabItem { Label("Backup", systemImage: "arrow.down.doc") }
             aboutTab.tabItem { Label("About", systemImage: "info.circle") }
