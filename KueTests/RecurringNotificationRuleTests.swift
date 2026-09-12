@@ -144,7 +144,7 @@ struct RecurringNotificationRuleTests {
             authorizationGranted: true, now: now, capacity: 64
         ))
         #expect(plan.scheduledCandidates.isEmpty)
-        #expect(plan.excludedCandidates.contains { $0.sourceRuleID == rule.id && $0.reason == .eventTerminal })
+        #expect(plan.excludedCandidates.contains { $0.sourceRuleID == rule.id && $0.reason == .eventSkipped })
     }
 
     // MARK: - Replenishment doesn't duplicate

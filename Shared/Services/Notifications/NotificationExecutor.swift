@@ -85,7 +85,12 @@ enum NotificationExecutor {
         content.body = candidate.body
         content.sound = candidate.sound == .silent ? nil : .default
         if globalPreferences.badgeEnabled { content.badge = 1 }
-        if globalPreferences.groupNotificationsByEvent { content.threadIdentifier = candidate.eventID.uuidString }
+        // Kue 3.0 Phase 7 — docs/35: a Daily/Weekly Summary candidate has no owning event
+        // (`eventID == nil`) — grouped under its own fixed thread instead of being force-
+        // unwrapped or silently ungrouped.
+        if globalPreferences.groupNotificationsByEvent {
+            content.threadIdentifier = candidate.eventID?.uuidString ?? candidate.identifier
+        }
         switch candidate.interruptionPreference {
         case .passive: content.interruptionLevel = .passive
         case .active: content.interruptionLevel = .active

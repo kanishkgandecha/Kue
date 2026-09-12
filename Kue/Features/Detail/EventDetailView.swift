@@ -70,6 +70,8 @@ struct EventDetailView: View {
     // MARK: Kue 3.0 Phase 3 — docs/31. Custom-rule editing state for the Notifications tab.
     @State private var isAddingNotificationRule = false
     @State private var editingNotificationRule: NotificationRule?
+    // Kue 3.0 Phase 7 — docs/35 "Per-event notification editor."
+    @State private var overridingEventTypeDefault: NotificationRuleDefault?
 
     /// Kue 2.0 Phase 2, requirement 9 — wraps what `EventDuplicationService.duplicate`
     /// returned so the sheet below can show the same duplicate-warning banner
@@ -563,6 +565,19 @@ struct EventDetailView: View {
     /// distinguishes "scheduled," "time already passed," and "not currently scheduled" (the
     /// one honest umbrella for the pending-cap and scheduling-failure cases, which look
     /// identical from here — `add()` swallows its own errors, docs/08 "Permission handling").
+    /// Kue 3.0 Phase 7 — docs/35 "Per-event notification editor." Re-runs the exact same
+    /// `NotificationPlanner` a real `NotificationEngine.reschedule` pass would, scoped to just
+    /// this one event, so every row below shows the *actual* calculated delivery date/
+    /// suppression reason — never a re-derived summary that could silently disagree with what
+    /// would really be scheduled.
+    private func effectivePlan(intensity: NotificationIntensity) -> NotificationSchedulePlan {
+        NotificationPlanner.plan(NotificationPlanner.Input(
+            events: [event], globalPreferences: .current, eventTypeRules: .current,
+            intensity: intensity, authorizationGranted: !isNotificationsDisabled, now: .now,
+            capacity: NotificationEngine.pendingRequestCap
+        ))
+    }
+
     private var notificationsTab: some View {
         let intensity = UserPreferenceStore.current(context: modelContext).notificationIntensity
         let allCandidates = NotificationCandidateBuilder.candidates(for: event)
@@ -570,6 +585,12 @@ struct EventDetailView: View {
             NotificationCandidateBuilder.filter(allCandidates, intensity: intensity)
         )
         let excludedByIntensityCount = allCandidates.count - visibleCandidates.count
+        let plan = effectivePlan(intensity: intensity)
+        let eventLevelAnchors = Set(event.notificationRules.map(\.anchor))
+        // Kue 3.0 Phase 7 — docs/35: the same precedence `NotificationPlanner` itself enforces
+        // — an event-type default only shown here while nothing more specific overrides it.
+        let effectiveEventTypeDefaults = EventTypeNotificationPreferences.current.rules(for: event.eventType)
+            .filter { !eventLevelAnchors.contains($0.anchor.asRuleAnchor) }
         // Kue 3.0 Phase 3 — the Custom Rules section (and "Add Custom Rule…") is always
         // reachable, regardless of whether any *default* reminder currently exists — a real
         // bug found via a real `KueUITests` run: the section used to live only inside the
@@ -591,7 +612,9 @@ struct EventDetailView: View {
 
             // Kue 3.0 Phase 3 — docs/31: every rule shows its source (Event, here, vs.
             // Global Default below) — inherited and customized rules are never distinguished
-            // by color alone (source is a text label on every row).
+            // by color alone (source is a text label on every row). Kue 3.0 Phase 7 — docs/35:
+            // now also shows the actual calculated delivery date/suppression reason per rule,
+            // computed from the real planner, never re-derived.
             Section {
                 ForEach(event.notificationRules.sorted { $0.sortOrder == $1.sortOrder ? $0.createdAt < $1.createdAt : $0.sortOrder < $1.sortOrder }) { rule in
                     Button {
@@ -606,6 +629,9 @@ struct EventDetailView: View {
                                 }
                             }
                             Text("Source: Event").font(.caption2).foregroundStyle(.secondary)
+                            Text(planStatusText(for: rule.id, plan: plan))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
                     .foregroundStyle(.primary)
@@ -616,6 +642,39 @@ struct EventDetailView: View {
                 Text("Custom Rules")
             } footer: {
                 Text("Custom rules replace the matching default below and are never affected by future changes to your global defaults.")
+            }
+
+            // Kue 3.0 Phase 7 — docs/35 "Per-event notification editor": inherited Event Type
+            // rules, visually distinguished ("Source: \(eventType) Default") from this event's
+            // own rules above — "Override" seeds a new event-level rule from it (which then
+            // naturally supersedes it, matching `NotificationPlanner`'s own precedence) rather
+            // than mutating the shared event-type default itself.
+            if !effectiveEventTypeDefaults.isEmpty {
+                Section {
+                    ForEach(effectiveEventTypeDefaults) { def in
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text(eventTypeDefaultLabel(def))
+                                Spacer()
+                                if !def.isEnabled {
+                                    Text("Disabled").font(.caption).foregroundStyle(.secondary)
+                                }
+                                Button("Override") { overridingEventTypeDefault = def }
+                                    .font(.caption)
+                                    .buttonStyle(.borderless)
+                                    .accessibilityIdentifier("overrideEventTypeDefaultButton")
+                            }
+                            Text("Source: \(event.eventType.displayName) Default").font(.caption2).foregroundStyle(.secondary)
+                            Text(planStatusText(for: nil, identifier: "\(event.id)-eventtype-\(event.eventType.rawValue)-\(def.id)", plan: plan))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } header: {
+                    Text("\(event.eventType.displayName) Defaults")
+                } footer: {
+                    Text("Inherited from Settings → Notifications → Event Type Overrides. Overriding creates a rule just for this event.")
+                }
             }
 
             if visibleCandidates.isEmpty {
@@ -649,6 +708,39 @@ struct EventDetailView: View {
         }
         .sheet(item: $editingNotificationRule) { rule in
             NotificationRuleEditorView(event: event, existingRule: rule)
+        }
+        .sheet(item: $overridingEventTypeDefault) { def in
+            NotificationRuleEditorView(event: event, seedFromEventTypeDefault: def)
+        }
+    }
+
+    /// Kue 3.0 Phase 7 — docs/35 "Per-event notification editor": "show the actual calculated
+    /// delivery date/time; explain when a notification cannot be scheduled because its delivery
+    /// time passed; show 'possibly capped' when system limits prevent certainty." Looks up this
+    /// exact identifier/rule id in the real plan rather than re-deriving any of this.
+    private func planStatusText(for ruleID: UUID?, identifier: String? = nil, plan: NotificationSchedulePlan) -> String {
+        if let scheduled = plan.scheduledCandidates.first(where: { ruleID != nil ? $0.sourceRuleID == ruleID : $0.identifier == identifier }) {
+            let dateText = scheduled.effectiveDeliveryDate.formatted(date: .abbreviated, time: .shortened)
+            if scheduled.quietHoursAdjustment == .movedToQuietHoursEnd {
+                return "Scheduled for \(dateText) — moved by quiet hours"
+            }
+            return "Scheduled for \(dateText)"
+        }
+        if let excluded = plan.excludedCandidates.first(where: { ruleID != nil ? $0.sourceRuleID == ruleID : $0.identifier == identifier }) {
+            switch excluded.reason {
+            case .systemCapacityLimit: return "Possibly capped — too many reminders pending"
+            case .passed: return "Time already passed — won't fire"
+            default: return excluded.explanation
+            }
+        }
+        return "Not currently scheduled"
+    }
+
+    private func eventTypeDefaultLabel(_ def: NotificationRuleDefault) -> String {
+        switch def.anchor {
+        case .eventStart: return def.offsetDirection == .at ? "At event start" : "\(def.offsetQuantity) \(def.offsetUnit.rawValue) \(def.offsetDirection == .before ? "before" : "after") start"
+        case .eventEnd: return def.offsetDirection == .at ? "At event end" : "\(def.offsetQuantity) \(def.offsetUnit.rawValue) \(def.offsetDirection == .before ? "before" : "after") end"
+        case .outcomeFollowUp: return "Outcome follow-up"
         }
     }
 

@@ -136,19 +136,31 @@ struct NotificationPlannerTests {
 
     // MARK: - Terminal events / Needs Review
 
+    // Kue 3.0 Phase 7 correction — docs/35: `.eventTerminal` was one blended reason for four
+    // distinct states; each is now reported honestly as its own case.
     @Test(arguments: [
-        \KueEvent.isCancelled,
-        \KueEvent.isSkipped,
-        \KueEvent.isManuallyCompleted,
-    ] as [WritableKeyPath<KueEvent, Bool>])
-    func aTerminalEventsRuleIsExcludedAsEventTerminal(flag: WritableKeyPath<KueEvent, Bool>) {
+        (\KueEvent.isCancelled, NotificationExclusionReason.eventCancelled),
+        (\KueEvent.isSkipped, NotificationExclusionReason.eventSkipped),
+        (\KueEvent.isManuallyCompleted, NotificationExclusionReason.eventCompleted),
+    ] as [(WritableKeyPath<KueEvent, Bool>, NotificationExclusionReason)])
+    func aTerminalEventsRuleIsExcludedWithItsOwnSpecificReason(flagAndReason: (flag: WritableKeyPath<KueEvent, Bool>, reason: NotificationExclusionReason)) {
         var event = makeEvent(startDate: now.addingTimeInterval(10 * 86_400))
-        event[keyPath: flag] = true
+        event[keyPath: flagAndReason.flag] = true
         let rule = NotificationRule(event: event, anchor: .eventStart, offsetDirection: .before, offsetQuantity: 10, offsetUnit: .minutes)
         event.notificationRules = [rule]
 
         let result = plan(events: [event])
-        #expect(result.excludedCandidates.contains { $0.sourceRuleID == rule.id && $0.reason == .eventTerminal })
+        #expect(result.excludedCandidates.contains { $0.sourceRuleID == rule.id && $0.reason == flagAndReason.reason })
+    }
+
+    @Test func anArchivedEventsRuleIsExcludedAsEventArchived() {
+        let event = makeEvent(startDate: now.addingTimeInterval(10 * 86_400))
+        event.status = .archived
+        let rule = NotificationRule(event: event, anchor: .eventStart, offsetDirection: .before, offsetQuantity: 10, offsetUnit: .minutes)
+        event.notificationRules = [rule]
+
+        let result = plan(events: [event])
+        #expect(result.excludedCandidates.contains { $0.sourceRuleID == rule.id && $0.reason == .eventArchived })
     }
 
     @Test func needsReviewEventDoesNotMisclassifyARuleCandidateAsTerminal() {

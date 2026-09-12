@@ -144,4 +144,19 @@ final class NotificationRule {
     var owningEventID: UUID? {
         event?.id ?? task?.event?.id
     }
+
+    /// The exact identifier this rule's own pending notification request uses — matches
+    /// `NotificationPlanner`'s own construction precisely (`"<owningEventID>-rule-<id>"`).
+    /// Kue 3.0 Phase 7 correction (docs/35 "Audit") — a real, confirmed defect this exists to
+    /// fix: `NotificationEngine.reschedule`'s diff-based cleanup can only remove identifiers
+    /// still *derivable from current live data*; once this rule is deleted, its identifier is
+    /// unenumerable from anything reschedule could fetch afterward, so a caller about to delete
+    /// this rule while its owning event/task stays alive must capture and remove this
+    /// identifier explicitly, *before* deleting — the exact same "capture identifiers before
+    /// removing the row" pattern `OccurrenceReconciliationService`'s own deletion paths already
+    /// use, applied here for the one call site that was missing it.
+    var pendingRequestIdentifier: String? {
+        guard let owningEventID else { return nil }
+        return "\(owningEventID)-rule-\(id)"
+    }
 }

@@ -32,6 +32,8 @@ struct MacEventDetailView: View {
     /// stay distinguishable.
     @State private var isPresentingNewNotificationRule = false
     @State private var editingNotificationRule: NotificationRule?
+    // Kue 3.0 Phase 7 — docs/35 "Per-event notification editor."
+    @State private var overridingEventTypeDefault: NotificationRuleDefault?
 
     private var status: EventStatus { EventStatusEngine.derive(for: event) }
     private var sortedTasks: [KueTask] { event.tasks.sorted { $0.sortOrder < $1.sortOrder } }
@@ -294,6 +296,10 @@ struct MacEventDetailView: View {
         let candidates = NotificationCandidateBuilder.prioritized(
             NotificationCandidateBuilder.filter(NotificationCandidateBuilder.candidates(for: event), intensity: intensity)
         )
+        // Kue 3.0 Phase 7 — docs/35: same Event Type scope as iPhone's own `EventDetailView`.
+        let eventLevelAnchors = Set(event.notificationRules.map(\.anchor))
+        let effectiveEventTypeDefaults = EventTypeNotificationPreferences.current.rules(for: event.eventType)
+            .filter { !eventLevelAnchors.contains($0.anchor.asRuleAnchor) }
         return Section("Notifications") {
             if !event.notificationRules.isEmpty {
                 ForEach(event.notificationRules.sorted { $0.createdAt < $1.createdAt }) { rule in
@@ -315,7 +321,17 @@ struct MacEventDetailView: View {
                     }
                 }
             }
-            if candidates.isEmpty && event.notificationRules.isEmpty {
+            ForEach(effectiveEventTypeDefaults) { def in
+                HStack {
+                    Text(macEventTypeDefaultLabel(def))
+                    Spacer()
+                    Text("Source: \(event.eventType.displayName) Default").font(.caption2).foregroundStyle(.secondary)
+                    Button("Override") { overridingEventTypeDefault = def }
+                        .font(.caption).buttonStyle(.borderless)
+                        .accessibilityIdentifier("macOverrideEventTypeDefaultButton")
+                }
+            }
+            if candidates.isEmpty && event.notificationRules.isEmpty && effectiveEventTypeDefaults.isEmpty {
                 Text("No upcoming notifications for this event.").foregroundStyle(.secondary)
             } else {
                 ForEach(candidates, id: \.identifier) { candidate in
@@ -332,6 +348,17 @@ struct MacEventDetailView: View {
             }
             Button("Add Notification Rule…") { isPresentingNewNotificationRule = true }
                 .accessibilityIdentifier("addNotificationRuleButton")
+        }
+        .sheet(item: $overridingEventTypeDefault) { def in
+            MacNotificationRuleEditorView(event: event, seedFromEventTypeDefault: def)
+        }
+    }
+
+    private func macEventTypeDefaultLabel(_ def: NotificationRuleDefault) -> String {
+        switch def.anchor {
+        case .eventStart: return def.offsetDirection == .at ? "At event start" : "\(def.offsetQuantity) \(def.offsetUnit.rawValue) \(def.offsetDirection == .before ? "before" : "after") start"
+        case .eventEnd: return def.offsetDirection == .at ? "At event end" : "\(def.offsetQuantity) \(def.offsetUnit.rawValue) \(def.offsetDirection == .before ? "before" : "after") end"
+        case .outcomeFollowUp: return "Outcome follow-up"
         }
     }
 

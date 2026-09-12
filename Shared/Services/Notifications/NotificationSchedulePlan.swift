@@ -19,7 +19,14 @@ enum NotificationExclusionReason: String, Equatable, Codable {
     case ruleDisabled
     case invalidRule
     case passed
-    case eventTerminal
+    /// Kue 3.0 Phase 7 correction — docs/35 "Suppression reasons": the four terminal states
+    /// this replaces `.eventTerminal` with are reported *separately*, never blended into one
+    /// generic "terminal" bucket — the transparency UI needs to say which of the four actually
+    /// applies, not just "no longer active."
+    case eventCompleted
+    case eventCancelled
+    case eventSkipped
+    case eventArchived
     case taskCompleted
     case quietHoursSuppressed
     case systemCapacityLimit
@@ -27,6 +34,12 @@ enum NotificationExclusionReason: String, Equatable, Codable {
     case missingEvent
     case missingTask
     case unsupportedPlatformBehavior
+    /// Kue 3.0 Phase 7 — docs/35: a scope (e.g. a hypothetical "entire series" rule apply) that
+    /// would need to reach beyond what's actually materialized/supported. Not reachable through
+    /// any path this phase actually built (recurring rule propagation only ever touches
+    /// occurrences already materialized as concrete `KueEvent` rows — see docs/35 "Recurring
+    /// series scope"), kept as an explicit, honest case rather than silently omitted.
+    case outsideRecurrenceHorizon
 }
 
 /// docs/31 "Quiet hours": "Each rule needs a deterministic quiet-hours behavior." Carried on a
@@ -39,7 +52,9 @@ nonisolated enum NotificationQuietHoursAdjustment: Equatable {
 
 nonisolated struct NotificationScheduledCandidate: Equatable {
     var identifier: String
-    var eventID: UUID
+    /// `nil` only for a Daily/Weekly Summary candidate (Kue 3.0 Phase 7 — docs/35) — every
+    /// other candidate belongs to a real event.
+    var eventID: UUID?
     var taskID: UUID?
     /// `nil` for a default-layer candidate (preparation/tomorrow/today/task-due-default) —
     /// only rule-sourced candidates have a real owning `NotificationRule.id`.
@@ -65,7 +80,7 @@ nonisolated struct NotificationScheduledCandidate: Equatable {
     var snoozeMinutes: Int?
 
     init(
-        identifier: String, eventID: UUID, taskID: UUID? = nil, sourceRuleID: UUID? = nil,
+        identifier: String, eventID: UUID?, taskID: UUID? = nil, sourceRuleID: UUID? = nil,
         title: String, body: String, requestedDeliveryDate: Date, effectiveDeliveryDate: Date,
         quietHoursAdjustment: NotificationQuietHoursAdjustment, priority: Int,
         sound: NotificationSoundOption, interruptionPreference: NotificationInterruptionPreference,

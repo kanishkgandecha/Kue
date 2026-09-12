@@ -61,6 +61,41 @@ nonisolated struct NotificationQuietHours: Codable, Equatable {
     )
 }
 
+/// Kue 3.0 Phase 7 — docs/35 "Summaries." A privacy-safe, device-scheduled daily digest —
+/// never a live per-event `NotificationRule` (there is no single event to anchor it to).
+/// `Optional` on `NotificationGlobalPreferences` (see this file's own migration precedent for
+/// `defaultSnoozeMinutes`) so an install that predates this phase decodes its existing stored
+/// JSON cleanly — a missing key means "never configured," read as `.disabled` everywhere,
+/// never a surprise new notification appearing after an update.
+nonisolated struct DailySummaryPreference: Codable, Equatable {
+    var isEnabled: Bool
+    /// Minutes since midnight, device-local wall clock — same convention as
+    /// `allDayPreferredMinuteOfDay`/`NotificationQuietHours`.
+    var deliveryMinuteOfDay: Int
+    var scope: DailySummaryScope
+
+    static let disabled = DailySummaryPreference(isEnabled: false, deliveryMinuteOfDay: 8 * 60, scope: .today)
+}
+
+nonisolated enum DailySummaryScope: String, Codable, CaseIterable {
+    case today
+    case tomorrow
+}
+
+/// Kue 3.0 Phase 7 — docs/35 "Summaries." Same shape/reasoning as `DailySummaryPreference`.
+nonisolated struct WeeklySummaryPreference: Codable, Equatable {
+    var isEnabled: Bool
+    /// `Calendar.Component.weekday` raw value (1 = Sunday ... 7 = Saturday) — same convention
+    /// `NotificationQuietHours.enabledWeekdays` already uses.
+    var weekday: Int
+    var deliveryMinuteOfDay: Int
+    /// How many days ahead the summary counts — a plain, disclosed integer, never a hidden
+    /// "smart" window.
+    var upcomingWindowDays: Int
+
+    static let disabled = WeeklySummaryPreference(isEnabled: false, weekday: 2 /* Monday */, deliveryMinuteOfDay: 8 * 60, upcomingWindowDays: 7)
+}
+
 nonisolated struct NotificationGlobalPreferences: Codable, Equatable {
     var masterEnabled: Bool
     /// docs/31 "Rule editor": a small, useful spread, same spirit as `ReminderPreference
@@ -99,6 +134,14 @@ nonisolated struct NotificationGlobalPreferences: Codable, Equatable {
     /// this falls back to a fixed 10 minutes when it's `nil`, so old and new installs behave
     /// identically either way.
     var defaultSnoozeMinutes: Int?
+    /// Kue 3.0 Phase 7 — docs/35 "Summaries." `Optional`, not defaulted, for the exact same
+    /// old-JSON-decoding reason as `defaultSnoozeMinutes` above; every read site uses
+    /// `effectiveDailySummary`/`effectiveWeeklySummary` below rather than the raw optional.
+    var dailySummary: DailySummaryPreference?
+    var weeklySummary: WeeklySummaryPreference?
+
+    var effectiveDailySummary: DailySummaryPreference { dailySummary ?? .disabled }
+    var effectiveWeeklySummary: WeeklySummaryPreference { weeklySummary ?? .disabled }
 
     /// docs/31 "Migration": what a brand-new install (or a pre-Phase-3 install on its first
     /// read) gets — deliberately reproduces `ReminderPreference.conservativeDefault`/
@@ -117,7 +160,9 @@ nonisolated struct NotificationGlobalPreferences: Codable, Equatable {
         groupNotificationsByEvent: true,
         timeSensitiveEnabled: false,
         deliverOnThisDevice: true,
-        defaultSnoozeMinutes: 10
+        defaultSnoozeMinutes: 10,
+        dailySummary: nil,
+        weeklySummary: nil
     )
 
     private static let defaults = UserDefaults(suiteName: ModelContainerFactory.appGroupIdentifier) ?? .standard

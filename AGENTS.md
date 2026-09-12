@@ -1644,6 +1644,42 @@ the new Insights screen (renamed to `testSignedInProfileShowsIdentityAndALinkToI
 `MacInsightsView` — same missing fake-launch-argument-wiring gap Phase 5's own correction pass
 already disclosed for `MacSyncView`.
 
+**Kue 3.0 Phase 7 ("Advanced Notification Control Center") is done** — see
+docs/35-advanced-notification-control-center.md for the full contract. Extends (never
+replaces) Phase 3's Notification Studio: a new live **Event Type** scope
+(`EventTypeNotificationPreferences`, per-device JSON preferences, never a SwiftData row — an
+event-type rule has no live event/task owner) sits between Global Default and Specific Event in
+`NotificationPlanner`'s own precedence, via a new internal `EffectiveRule` abstraction so the
+same pipeline (validation, terminal checks, quiet hours, content, priority) serves both real
+`NotificationRule` rows and event-type defaults with no parallel logic. New Daily/Weekly
+Summary (two new optional fields on `NotificationGlobalPreferences`, both off by default,
+count-only body text at every privacy level, fixed singleton identifiers). **Two real defects
+found by direct code audit and fixed**: quiet hours were being evaluated against a calendar
+pinned to *the event's own* time zone rather than the device's own (contradicting
+`NotificationQuietHours`'s own documented "device-local wall-clock" contract) — fixed by
+injecting the device's own `calendar` into `NotificationPlanner.Input`; deleting a single
+`NotificationRule` while its owning event/task stayed alive (`NotificationRuleEditorView
+.delete(_:)`, its Mac counterpart, and `TaskEditingService.deleteTask` for a task's own rules)
+never removed its pending notification, since `NotificationEngine.reschedule`'s diff-based
+cleanup can only see identifiers still derivable from current data — fixed with a new
+`NotificationRule.pendingRequestIdentifier`, captured and explicitly removed *before* deletion.
+`NotificationExclusionReason.eventTerminal` (one blended reason) is now four honest ones —
+`.eventCompleted`/`.eventCancelled`/`.eventSkipped`/`.eventArchived`. `EventDetailView`'s (and
+`MacEventDetailView`'s) Notifications tab now shows inherited Event Type defaults distinctly
+from this event's own rules, each with a real calculated delivery-status line (scheduled/
+passed/possibly-capped) computed by re-running the actual planner, and an "Override" action
+that seeds a new event-level rule from the inherited one. Settings' iPhone notification
+destination is renamed "Notification Studio" → "Notifications" (matching Mac's own existing tab
+name). **No SwiftData schema change, no new Supabase migration** — Event Type/Summary
+preferences join the same per-device-only tier every other Notification Studio setting already
+occupies; per-event/task `NotificationRule` sync (Phase 5) is completely unchanged. **Disclosed,
+not built**: "Entire Series" recurring scope for notification rules (the existing
+`RecurrenceEditScope` enum has only `.thisOccurrence`/`.thisAndFuture` — confirmed by direct
+inspection, not assumed) and bulk-propagating a rule edit to already-materialized future
+occurrences in one action (new occurrences already inherit rules via the pre-existing
+template-copy mechanism; editing existing future ones individually still works). Full
+regression: `KueTests` 1072/1072, `KueMacTests` 51/51, `NotificationStudioUITests` 5/5.
+
 Kue 3.0 Phase 1 — a fourth target, `KueMac`, a native macOS app; see docs/29 for the full
 contract. Several files moved from `Kue/Services/` into `Shared/Services/` (unchanged logic,
 same "the widget/App-Intent process needs it too" reasoning Phase 9 already used) so `KueMac`

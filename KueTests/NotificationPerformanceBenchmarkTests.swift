@@ -117,7 +117,10 @@ struct NotificationPerformanceBenchmarkTests {
         let disabledRuleEvents = events.enumerated().filter { $0.offset % 3 == 1 }.map(\.element)
         let result = NotificationPlanner.plan(planInput(events: events, capacity: 1_000_000))
 
-        let disabledExclusionCount = result.excludedCandidates.filter { $0.reason == .ruleDisabled }.count
+        // Kue 3.0 Phase 7 — docs/35: `.ruleDisabled` also now covers the Daily/Weekly Summary
+        // (both off by default under `.conservativeDefault`), which are never per-event —
+        // scoped to `eventID != nil` so this count stays exactly "disabled per-event rules."
+        let disabledExclusionCount = result.excludedCandidates.filter { $0.reason == .ruleDisabled && $0.eventID != nil }.count
         #expect(disabledExclusionCount == disabledRuleEvents.count)
     }
 

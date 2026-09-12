@@ -56,6 +56,23 @@ struct NotificationStudioSettingsView: View {
                 Text("All-day events have no clock time of their own, so reminders that reference \"event start\" use this time instead of midnight.")
             }
 
+            // Kue 3.0 Phase 7 — docs/35 "Notification Control Center." The new Event Type
+            // scope — precedence `Specific Event > Event Type > Global Default`.
+            Section {
+                ForEach(EventType.allCases, id: \.self) { eventType in
+                    NavigationLink(eventType.displayName) {
+                        EventTypeNotificationRulesView(eventType: eventType)
+                    }
+                }
+            } header: {
+                Text("Event Type Overrides")
+            } footer: {
+                Text("Rules here apply to every event of that type, unless a specific event overrides them.")
+            }
+
+            dailySummarySection
+            weeklySummarySection
+
             quietHoursSection
 
             Section("Sound & Presentation") {
@@ -93,10 +110,82 @@ struct NotificationStudioSettingsView: View {
                 Text("Global defaults above only affect events you create from now on. Use this to review and optionally apply them to events you already have.")
             }
         }
-        .navigationTitle("Notification Studio")
+        .navigationTitle("Notifications")
         .sheet(isPresented: $isShowingApplyToExistingSheet) {
             ApplyDefaultsToExistingEventsView(preferences: preferences)
         }
+    }
+
+    // MARK: - Daily / Weekly Summary (Kue 3.0 Phase 7 — docs/35)
+
+    private var dailySummarySection: some View {
+        Section {
+            Toggle("Daily Summary", isOn: Binding(
+                get: { preferences.effectiveDailySummary.isEnabled },
+                set: { var s = preferences.effectiveDailySummary; s.isEnabled = $0; preferences.dailySummary = s; save() }
+            ))
+            .accessibilityIdentifier("dailySummaryToggle")
+            if preferences.effectiveDailySummary.isEnabled {
+                DatePicker("Delivery Time", selection: minuteBinding(
+                    get: { preferences.effectiveDailySummary.deliveryMinuteOfDay },
+                    set: { var s = preferences.effectiveDailySummary; s.deliveryMinuteOfDay = $0; preferences.dailySummary = s }
+                ), displayedComponents: .hourAndMinute)
+                Picker("Covers", selection: Binding(
+                    get: { preferences.effectiveDailySummary.scope },
+                    set: { var s = preferences.effectiveDailySummary; s.scope = $0; preferences.dailySummary = s; save() }
+                )) {
+                    Text("Today").tag(DailySummaryScope.today)
+                    Text("Tomorrow").tag(DailySummaryScope.tomorrow)
+                }
+            }
+        } header: {
+            Text("Daily Summary")
+        } footer: {
+            Text("A single reminder with just a count — never event titles or notes.")
+        }
+    }
+
+    private var weeklySummarySection: some View {
+        Section {
+            Toggle("Weekly Summary", isOn: Binding(
+                get: { preferences.effectiveWeeklySummary.isEnabled },
+                set: { var s = preferences.effectiveWeeklySummary; s.isEnabled = $0; preferences.weeklySummary = s; save() }
+            ))
+            .accessibilityIdentifier("weeklySummaryToggle")
+            if preferences.effectiveWeeklySummary.isEnabled {
+                Picker("Day", selection: Binding(
+                    get: { preferences.effectiveWeeklySummary.weekday },
+                    set: { var s = preferences.effectiveWeeklySummary; s.weekday = $0; preferences.weeklySummary = s; save() }
+                )) {
+                    ForEach(1...7, id: \.self) { weekday in
+                        Text(Calendar.current.weekdaySymbols[weekday - 1]).tag(weekday)
+                    }
+                }
+                DatePicker("Delivery Time", selection: minuteBinding(
+                    get: { preferences.effectiveWeeklySummary.deliveryMinuteOfDay },
+                    set: { var s = preferences.effectiveWeeklySummary; s.deliveryMinuteOfDay = $0; preferences.weeklySummary = s }
+                ), displayedComponents: .hourAndMinute)
+                Stepper("Next \(preferences.effectiveWeeklySummary.upcomingWindowDays) days", value: Binding(
+                    get: { preferences.effectiveWeeklySummary.upcomingWindowDays },
+                    set: { var s = preferences.effectiveWeeklySummary; s.upcomingWindowDays = $0; preferences.weeklySummary = s; save() }
+                ), in: 1...30)
+            }
+        } header: {
+            Text("Weekly Summary")
+        } footer: {
+            Text("A single reminder with just a count of what's coming up — never event titles or notes.")
+        }
+    }
+
+    private func minuteBinding(get: @escaping () -> Int, set: @escaping (Int) -> Void) -> Binding<Date> {
+        Binding(
+            get: { Calendar.current.date(bySettingHour: get() / 60, minute: get() % 60, second: 0, of: .now) ?? .now },
+            set: { newDate in
+                let components = Calendar.current.dateComponents([.hour, .minute], from: newDate)
+                set((components.hour ?? 0) * 60 + (components.minute ?? 0))
+                save()
+            }
+        )
     }
 
     // MARK: - Quiet hours

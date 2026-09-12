@@ -33,16 +33,18 @@ struct MacNotificationRuleEditorView: View {
     @State private var snoozeMinutes: Int?
     @State private var validationMessage: String?
 
-    init(event: KueEvent, existingRule: NotificationRule? = nil) {
+    /// Kue 3.0 Phase 7 — docs/35: same "seed an override from an inherited Event Type default"
+    /// contract as iPhone's own `NotificationRuleEditorView`.
+    init(event: KueEvent, existingRule: NotificationRule? = nil, seedFromEventTypeDefault seed: NotificationRuleDefault? = nil) {
         self.event = event
         self.existingRule = existingRule
-        _anchor = State(initialValue: existingRule?.anchor ?? .eventStart)
-        _offsetDirection = State(initialValue: existingRule?.offsetDirection ?? .before)
-        _offsetQuantity = State(initialValue: existingRule?.offsetQuantity ?? 30)
-        _offsetUnit = State(initialValue: existingRule?.offsetUnit ?? .minutes)
+        _anchor = State(initialValue: existingRule?.anchor ?? seed?.anchor.asRuleAnchor ?? .eventStart)
+        _offsetDirection = State(initialValue: existingRule?.offsetDirection ?? seed?.offsetDirection ?? .before)
+        _offsetQuantity = State(initialValue: existingRule?.offsetQuantity ?? seed?.offsetQuantity ?? 30)
+        _offsetUnit = State(initialValue: existingRule?.offsetUnit ?? seed?.offsetUnit ?? .minutes)
         _absoluteDate = State(initialValue: existingRule?.absoluteDate ?? .now.addingTimeInterval(3600))
-        _isEnabled = State(initialValue: existingRule?.isEnabled ?? true)
-        _customTitle = State(initialValue: existingRule?.customTitle ?? "")
+        _isEnabled = State(initialValue: existingRule?.isEnabled ?? seed?.isEnabled ?? true)
+        _customTitle = State(initialValue: existingRule?.customTitle ?? seed?.customTitle ?? "")
         _customBody = State(initialValue: existingRule?.customBody ?? "")
         _sound = State(initialValue: existingRule?.sound ?? .defaultSound)
         _interruptionPreference = State(initialValue: existingRule?.interruptionPreference ?? .active)
@@ -182,9 +184,16 @@ struct MacNotificationRuleEditorView: View {
 
     private func delete(_ rule: NotificationRule) {
         let owningEventID = rule.owningEventID
+        // Kue 3.0 Phase 7 correction (docs/35 "Audit") — same real defect fixed on iPhone's
+        // `NotificationRuleEditorView.delete(_:)`: captured before deletion, since the
+        // identifier becomes unenumerable from live data afterward.
+        let pendingIdentifier = rule.pendingRequestIdentifier
         modelContext.delete(rule)
         try? modelContext.save()
         SyncOutbox.markNotificationRuleDeleted(rule.id, owningEventID: owningEventID)
+        if let pendingIdentifier {
+            SystemNotificationScheduler.shared.removePendingNotificationRequests(withIdentifiers: [pendingIdentifier])
+        }
         rescheduleAndDismiss()
     }
 

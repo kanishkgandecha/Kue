@@ -30,7 +30,7 @@ final class NotificationStudioUITests: XCTestCase {
 
     func testNotificationStudioIsReachableFromSettings() {
         openNotificationStudio()
-        XCTAssertTrue(app.navigationBars["Notification Studio"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Notifications"].waitForExistence(timeout: 5))
     }
 
     // Kue 3.0 Phase 3 — a real, reproducible environment characteristic found while writing
@@ -52,7 +52,7 @@ final class NotificationStudioUITests: XCTestCase {
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
         toggle.tap()
         // The app must still be responsive afterward — proves the tap didn't crash/hang it.
-        XCTAssertTrue(app.navigationBars["Notification Studio"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Notifications"].waitForExistence(timeout: 5))
     }
 
     func testQuietHoursToggleIsReachableAndTappable() {
@@ -61,7 +61,7 @@ final class NotificationStudioUITests: XCTestCase {
         toggle.scrollUpUntilHittable(in: app)
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
         toggle.tap()
-        XCTAssertTrue(app.navigationBars["Notification Studio"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Notifications"].waitForExistence(timeout: 5))
     }
 
     // MARK: - Event Detail rule editor

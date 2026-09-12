@@ -38,7 +38,11 @@ enum NotificationEngine {
         now: Date = .now,
         requestPermissionIfNeeded: Bool = false,
         reminderPreference: ReminderPreference? = nil,
-        globalPreferences: NotificationGlobalPreferences? = nil
+        globalPreferences: NotificationGlobalPreferences? = nil,
+        // Kue 3.0 Phase 7 — docs/35: injectable for tests; the real call sites always read the
+        // current per-device preferences, same pattern `globalPreferences` itself already uses.
+        eventTypeRules: EventTypeNotificationPreferences? = nil,
+        calendar: Calendar = .current
     ) async -> NotificationSchedulePlan {
         // `reminderPreference` stays an explicit override parameter (tests / call sites that
         // still pass one directly keep working) but no longer drives the plan on its own —
@@ -58,10 +62,12 @@ enum NotificationEngine {
         }
         let authorizationGranted = status == .authorized || status == .provisional
 
+        let eventTypeRules = eventTypeRules ?? .current
         let events = (try? context.fetch(FetchDescriptor<KueEvent>())) ?? []
         let plan = NotificationPlanner.plan(NotificationPlanner.Input(
-            events: events, globalPreferences: globalPreferences, intensity: intensity,
-            authorizationGranted: authorizationGranted, now: now, capacity: pendingRequestCap
+            events: events, globalPreferences: globalPreferences, eventTypeRules: eventTypeRules,
+            intensity: intensity, authorizationGranted: authorizationGranted, now: now,
+            calendar: calendar, capacity: pendingRequestCap
         ))
 
         // Every identifier this event/task graph could ever occupy — `allIdentifiers` (Shared/)
@@ -69,8 +75,19 @@ enum NotificationEngine {
         // rule's own `"<event>-rule-<rule>"` form, including disabled/invalid/excluded ones, so
         // a since-disabled or since-invalidated rule's stale pending request is still cleanly
         // removed (docs/31 "Scheduling executor": "Use stable identifiers so rescheduling
-        // replaces the correct pending request").
-        let knownIdentifiers = Set(events.flatMap(NotificationCandidateBuilder.allIdentifiers))
+        // replaces the correct pending request"). Kue 3.0 Phase 7 — docs/35: also every
+        // currently-known event-type-sourced identifier for each event's own type (so a
+        // since-disabled event-type default is cleanly removed too) and the two fixed Daily/
+        // Weekly Summary identifiers (always known, regardless of whether either is currently
+        // enabled, so disabling one cleanly removes its stale pending request).
+        var knownIdentifiers = Set(events.flatMap(NotificationCandidateBuilder.allIdentifiers))
+        for event in events {
+            for def in eventTypeRules.rules(for: event.eventType) {
+                knownIdentifiers.insert("\(event.id)-eventtype-\(event.eventType.rawValue)-\(def.id)")
+            }
+        }
+        knownIdentifiers.insert("daily-summary")
+        knownIdentifiers.insert("weekly-summary")
 
         // Requirement 9 (docs/08): not-determined/denied both mean "schedule nothing,"
         // gracefully — `NotificationPlanner` already excluded every candidate with

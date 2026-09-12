@@ -40,6 +40,8 @@ struct MacSettingsView: View {
 
     /// Kue 3.0 Phase 3 completion pass — docs/31 "Mac Notification Studio parity".
     @State private var isShowingApplyToExistingSheet = false
+    // Kue 3.0 Phase 7 — docs/35 "Notification Control Center."
+    @State private var eventTypeBeingEdited: EventType?
 
     var body: some View {
         TabView {
@@ -200,6 +202,28 @@ struct MacSettingsView: View {
                 Text("All-day events have no clock time of their own, so reminders that reference \"event start\" use this time instead of midnight.")
             }
 
+            // Kue 3.0 Phase 7 — docs/35 "Notification Control Center." Same Event Type scope
+            // and Daily/Weekly Summary configuration as iPhone — shared model, shared engine,
+            // native `Form` presentation. A `.sheet`, not `NavigationLink` — this tab has no
+            // navigation stack of its own to push into (same reason `MacAccountView`'s own
+            // drill-in content is always a sheet, never a push).
+            Section {
+                ForEach(EventType.allCases, id: \.self) { eventType in
+                    Button(eventType.displayName) {
+                        eventTypeBeingEdited = eventType
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.primary)
+                }
+            } header: {
+                Text("Event Type Overrides")
+            } footer: {
+                Text("Rules here apply to every event of that type, unless a specific event overrides them.")
+            }
+
+            macDailySummarySection
+            macWeeklySummarySection
+
             quietHoursSection
 
             Section("Sound & Presentation") {
@@ -241,6 +265,81 @@ struct MacSettingsView: View {
         .sheet(isPresented: $isShowingApplyToExistingSheet) {
             MacApplyDefaultsToExistingEventsView(preferences: notificationPreferences)
         }
+        .sheet(item: $eventTypeBeingEdited) { eventType in
+            NavigationStack { MacEventTypeNotificationRulesView(eventType: eventType) }
+        }
+    }
+
+    // MARK: - Daily / Weekly Summary (Kue 3.0 Phase 7 — docs/35)
+
+    private var macDailySummarySection: some View {
+        Section {
+            Toggle("Daily Summary", isOn: Binding(
+                get: { notificationPreferences.effectiveDailySummary.isEnabled },
+                set: { var s = notificationPreferences.effectiveDailySummary; s.isEnabled = $0; notificationPreferences.dailySummary = s; saveNotificationPreferences() }
+            ))
+            .accessibilityIdentifier("macDailySummaryToggle")
+            if notificationPreferences.effectiveDailySummary.isEnabled {
+                DatePicker("Delivery Time", selection: macMinuteBinding(
+                    get: { notificationPreferences.effectiveDailySummary.deliveryMinuteOfDay },
+                    set: { var s = notificationPreferences.effectiveDailySummary; s.deliveryMinuteOfDay = $0; notificationPreferences.dailySummary = s }
+                ), displayedComponents: .hourAndMinute)
+                Picker("Covers", selection: Binding(
+                    get: { notificationPreferences.effectiveDailySummary.scope },
+                    set: { var s = notificationPreferences.effectiveDailySummary; s.scope = $0; notificationPreferences.dailySummary = s; saveNotificationPreferences() }
+                )) {
+                    Text("Today").tag(DailySummaryScope.today)
+                    Text("Tomorrow").tag(DailySummaryScope.tomorrow)
+                }
+            }
+        } header: {
+            Text("Daily Summary")
+        } footer: {
+            Text("A single reminder with just a count — never event titles or notes.")
+        }
+    }
+
+    private var macWeeklySummarySection: some View {
+        Section {
+            Toggle("Weekly Summary", isOn: Binding(
+                get: { notificationPreferences.effectiveWeeklySummary.isEnabled },
+                set: { var s = notificationPreferences.effectiveWeeklySummary; s.isEnabled = $0; notificationPreferences.weeklySummary = s; saveNotificationPreferences() }
+            ))
+            .accessibilityIdentifier("macWeeklySummaryToggle")
+            if notificationPreferences.effectiveWeeklySummary.isEnabled {
+                Picker("Day", selection: Binding(
+                    get: { notificationPreferences.effectiveWeeklySummary.weekday },
+                    set: { var s = notificationPreferences.effectiveWeeklySummary; s.weekday = $0; notificationPreferences.weeklySummary = s; saveNotificationPreferences() }
+                )) {
+                    ForEach(1...7, id: \.self) { weekday in
+                        Text(Calendar.current.weekdaySymbols[weekday - 1]).tag(weekday)
+                    }
+                }
+                DatePicker("Delivery Time", selection: macMinuteBinding(
+                    get: { notificationPreferences.effectiveWeeklySummary.deliveryMinuteOfDay },
+                    set: { var s = notificationPreferences.effectiveWeeklySummary; s.deliveryMinuteOfDay = $0; notificationPreferences.weeklySummary = s }
+                ), displayedComponents: .hourAndMinute)
+                Stepper("Next \(notificationPreferences.effectiveWeeklySummary.upcomingWindowDays) days", value: Binding(
+                    get: { notificationPreferences.effectiveWeeklySummary.upcomingWindowDays },
+                    set: { var s = notificationPreferences.effectiveWeeklySummary; s.upcomingWindowDays = $0; notificationPreferences.weeklySummary = s; saveNotificationPreferences() }
+                ), in: 1...30)
+            }
+        } header: {
+            Text("Weekly Summary")
+        } footer: {
+            Text("A single reminder with just a count of what's coming up — never event titles or notes.")
+        }
+    }
+
+    private func macMinuteBinding(get: @escaping () -> Int, set: @escaping (Int) -> Void) -> Binding<Date> {
+        Binding(
+            get: { Calendar.current.date(bySettingHour: get() / 60, minute: get() % 60, second: 0, of: .now) ?? .now },
+            set: { newDate in
+                let components = Calendar.current.dateComponents([.hour, .minute], from: newDate)
+                set((components.hour ?? 0) * 60 + (components.minute ?? 0))
+                saveNotificationPreferences()
+            }
+        )
     }
 
     private var quietHoursSection: some View {

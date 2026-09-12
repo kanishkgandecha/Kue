@@ -35,21 +35,25 @@ struct NotificationRuleEditorView: View {
     @State private var snoozeMinutes: Int?
     @State private var validationMessage: String?
 
-    init(event: KueEvent, task: KueTask? = nil, existingRule: NotificationRule? = nil) {
+    /// Kue 3.0 Phase 7 — docs/35 "Per-event notification editor": "let the user override... an
+    /// inherited rule for this event." Seeds every field from an Event Type default's own
+    /// values, exactly as if the user had typed them in fresh — saving still always creates a
+    /// genuine new *event*-level `NotificationRule` row, never mutates the shared default.
+    init(event: KueEvent, task: KueTask? = nil, existingRule: NotificationRule? = nil, seedFromEventTypeDefault seed: NotificationRuleDefault? = nil) {
         self.event = event
         self.task = task
         self.existingRule = existingRule
-        _anchor = State(initialValue: existingRule?.anchor ?? (task != nil ? .taskDue : .eventStart))
-        _offsetDirection = State(initialValue: existingRule?.offsetDirection ?? .before)
-        _offsetQuantity = State(initialValue: existingRule?.offsetQuantity ?? 30)
-        _offsetUnit = State(initialValue: existingRule?.offsetUnit ?? .minutes)
+        _anchor = State(initialValue: existingRule?.anchor ?? seed?.anchor.asRuleAnchor ?? (task != nil ? .taskDue : .eventStart))
+        _offsetDirection = State(initialValue: existingRule?.offsetDirection ?? seed?.offsetDirection ?? .before)
+        _offsetQuantity = State(initialValue: existingRule?.offsetQuantity ?? seed?.offsetQuantity ?? 30)
+        _offsetUnit = State(initialValue: existingRule?.offsetUnit ?? seed?.offsetUnit ?? .minutes)
         _absoluteDate = State(initialValue: existingRule?.absoluteDate ?? .now.addingTimeInterval(3600))
-        _isEnabled = State(initialValue: existingRule?.isEnabled ?? true)
-        _customTitle = State(initialValue: existingRule?.customTitle ?? "")
-        _customBody = State(initialValue: existingRule?.customBody ?? "")
-        _sound = State(initialValue: existingRule?.sound ?? .defaultSound)
-        _interruptionPreference = State(initialValue: existingRule?.interruptionPreference ?? .active)
-        _snoozeMinutes = State(initialValue: existingRule?.snoozeMinutes)
+        _isEnabled = State(initialValue: existingRule?.isEnabled ?? seed?.isEnabled ?? true)
+        _customTitle = State(initialValue: existingRule?.customTitle ?? seed?.customTitle ?? "")
+        _customBody = State(initialValue: existingRule?.customBody ?? seed?.customBody ?? "")
+        _sound = State(initialValue: existingRule?.sound ?? seed?.sound ?? .defaultSound)
+        _interruptionPreference = State(initialValue: existingRule?.interruptionPreference ?? seed?.interruptionPreference ?? .active)
+        _snoozeMinutes = State(initialValue: existingRule?.snoozeMinutes ?? seed?.snoozeMinutes)
     }
 
     var body: some View {
@@ -196,11 +200,20 @@ struct NotificationRuleEditorView: View {
 
     private func delete(_ rule: NotificationRule) {
         let owningEventID = rule.owningEventID
+        // Kue 3.0 Phase 7 correction (docs/35 "Audit") — a real defect this closes: captured
+        // *before* deleting, since `NotificationEngine.reschedule`'s own diff-based cleanup can
+        // only see identifiers still derivable from live data, and this rule's identifier
+        // becomes unenumerable the instant it's deleted — without this, its pending
+        // notification would never be removed and would fire indefinitely with stale content.
+        let pendingIdentifier = rule.pendingRequestIdentifier
         modelContext.delete(rule)
         try? modelContext.save()
         // Requirement I: an explicit tombstone, never inferred from the rule's mere absence
         // the next time its owning event's graph happens to be pushed.
         SyncOutbox.markNotificationRuleDeleted(rule.id, owningEventID: owningEventID)
+        if let pendingIdentifier {
+            SystemNotificationScheduler.shared.removePendingNotificationRequests(withIdentifiers: [pendingIdentifier])
+        }
         rescheduleAndDismiss()
     }
 

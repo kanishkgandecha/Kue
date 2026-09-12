@@ -74,7 +74,13 @@ enum TaskEditingService {
             return
         }
         let identifier = "\(event.id)-\(NotificationTransitionKind.taskDue(taskID: task.id).identifierSuffix)"
-        scheduler.removePendingNotificationRequests(withIdentifiers: [identifier])
+        // Kue 3.0 Phase 7 correction (docs/35 "Audit") — a real defect this closes: this task's
+        // own explicit `NotificationRule` rows (if any) cascade-delete along with it, but their
+        // pending requests were never being removed — captured here, before deletion, for the
+        // same reason `NotificationRuleEditorView.delete(_:)`'s own fix needed to (their
+        // identifiers become unenumerable from live data the instant the task is gone).
+        let ruleIdentifiers = task.notificationRules.compactMap(\.pendingRequestIdentifier)
+        scheduler.removePendingNotificationRequests(withIdentifiers: [identifier] + ruleIdentifiers)
         context.delete(task)
         event.updatedAt = now
         try? context.save()
