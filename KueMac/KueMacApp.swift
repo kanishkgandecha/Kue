@@ -71,6 +71,11 @@ struct KueMacApp: App {
                         // above — `SyncCoordinator.sync` itself already no-ops instantly
                         // unless sync is on, signed in, and past the first-sync decision.
                         .task { await SyncCoordinator.shared.sync(context: container.mainContext, account: accountCoordinator) }
+                        .onChange(of: accountCoordinator.state) { _, newState in
+                            if case .signedIn = newState {
+                                Task { await SyncCoordinator.shared.sync(context: container.mainContext, account: accountCoordinator) }
+                            }
+                        }
                 }
             }
             .frame(minWidth: 760, minHeight: 480)

@@ -121,6 +121,14 @@ struct RootTabView: View {
             .accessibilityIdentifier("tab-settings")
         }
         .accessibilityIdentifier("rootTabBar")
+        // Kue 3.0 Phase 5 production repair: signing back in is an account-recovery trigger.
+        // Re-run the shared sync entry point immediately so an old authentication-error label
+        // cannot survive a successful new session until the next scene activation/manual tap.
+        .onChange(of: accountCoordinator.state) { _, newState in
+            if case .signedIn = newState {
+                Task { await SyncCoordinator.shared.sync(context: modelContext, account: accountCoordinator) }
+            }
+        }
         .onOpenURL { url in
             guard let destination = KueDeepLink.parse(url) else { return }
             switch destination {

@@ -18,6 +18,7 @@
 //
 
 import Foundation
+import os
 
 /// Everything this device remembers about sync state for one signed-in account, independent of
 /// whether the network is reachable right now.
@@ -94,6 +95,7 @@ final class SystemSyncStateStore: SyncStatePersisting, @unchecked Sendable {
     private let fileURLOverride: URL?
 
     private let queue = DispatchQueue(label: "com.kanishkgandecha.Kue.syncstate")
+    private let logger = Logger(subsystem: "com.kanishkgandecha.Kue", category: "SyncState")
 
     private init() { fileURLOverride = nil }
 
@@ -102,6 +104,13 @@ final class SystemSyncStateStore: SyncStatePersisting, @unchecked Sendable {
     private func fileURL(for accountID: UUID?) -> URL {
         if let fileURLOverride { return fileURLOverride }
         let filename = "SyncState-\(accountID?.uuidString ?? "none").json"
+        #if os(macOS)
+        // A sandboxed Mac app must keep this beside its private SwiftData store. Asking for
+        // the generic Application Support directory here used to resolve inconsistently when
+        // Kue was launched by Xcode, and `save` then swallowed the denied write. The store URL
+        // has already resolved the correct sandbox container, so its parent is authoritative.
+        return ModelContainerFactory.storeURL().deletingLastPathComponent().appendingPathComponent(filename)
+        #else
         if let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: ModelContainerFactory.appGroupIdentifier) {
             return containerURL.appendingPathComponent(filename)
         } else if let supportURL = try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true) {
@@ -109,6 +118,7 @@ final class SystemSyncStateStore: SyncStatePersisting, @unchecked Sendable {
         } else {
             return FileManager.default.temporaryDirectory.appendingPathComponent(filename)
         }
+        #endif
     }
 
     func load() -> SyncPersistentState {
@@ -122,8 +132,17 @@ final class SystemSyncStateStore: SyncStatePersisting, @unchecked Sendable {
     func save(_ state: SyncPersistentState) {
         queue.sync {
             let url = fileURL(for: currentAccountID)
-            guard let data = try? JSONEncoder().encode(state) else { return }
-            try? data.write(to: url, options: .atomic)
+            do {
+                try FileManager.default.createDirectory(
+                    at: url.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                let data = try JSONEncoder().encode(state)
+                try data.write(to: url, options: .atomic)
+            } catch {
+                // Never include event content or account identifiers in logs.
+                logger.fault("Failed to persist sync bookkeeping: \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 }

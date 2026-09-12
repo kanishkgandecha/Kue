@@ -141,7 +141,7 @@ final class SyncCoordinator {
 
         status = .syncing
 
-        if case .failure(let error) = await transport.ensureReady() {
+        if case .failure(let error) = await transport.ensureReady(accessToken: activeSession.accessToken) {
             status = statusForTransportError(error, pendingCount: SyncOutbox.pendingChangeCount(store: stateStore))
             recordTransientFailureIfNeeded(error, now: now)
             return status
@@ -268,7 +268,14 @@ final class SyncCoordinator {
             let page = await transport.pull(cursor: cursor, pageSize: Self.defaultPageSize, accessToken: accessToken)
             guard page.error == nil else { return .failed }
 
-            applyPage(page, context: context, state: &state, now: now)
+            do {
+                try applyPage(page, context: context, state: &state, now: now)
+            } catch {
+                // The cursor must remain at the last page that was durably saved. Retrying the
+                // same page is safe; advancing here would permanently skip remote events.
+                context.rollback()
+                return .failed
+            }
             // Requirement H: "persisted cursor only after a page is safely applied" — the
             // context save inside `applyPage` already happened before this line runs.
             cursor = page.nextCursor
@@ -289,7 +296,7 @@ final class SyncCoordinator {
         return .incomplete
     }
 
-    private func applyPage(_ page: SyncPullPage, context: ModelContext, state: inout SyncPersistentState, now: Date) {
+    private func applyPage(_ page: SyncPullPage, context: ModelContext, state: inout SyncPersistentState, now: Date) throws {
         for record in page.changedEvents {
             let existing = (try? context.fetch(FetchDescriptor<KueEvent>(predicate: #Predicate { $0.id == record.id })))?.first
             let localState: SyncConflictResolver.LocalState
@@ -346,7 +353,7 @@ final class SyncCoordinator {
             context.insert(EventGraphMapper.makeExclusion(from: record))
         }
 
-        try? context.save()
+        try context.save()
     }
 
     private func applyWinningRecord(_ record: EventSyncRecord, existing: KueEvent?, context: ModelContext) {

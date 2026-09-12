@@ -85,20 +85,20 @@ struct SupabaseSyncTransportTests {
 
     // MARK: - ensureReady
 
-    @Test func ensureReadySucceedsOn200AndSendsTheAnonKeyNeverAnAccessToken() async {
+    @Test func ensureReadySucceedsOn200AndSendsTheAuthenticatedAccessToken() async {
         let transport = makeTransport { _ in (Data(), 200, [:]) }
-        let result = await transport.ensureReady()
+        let result = await transport.ensureReady(accessToken: "fresh-user-token")
         guard case .success = result else { Issue.record("expected success"); return }
         let sent = RouteStubURLProtocol.capturedRequests.first
-        // `ensureReady` deliberately probes with the anon key, never a real session token — it
-        // must work identically whether or not a user is even signed in yet.
+        // The publishable key still identifies the project, while Authorization must carry the
+        // freshly refreshed user token so RLS evaluates the readiness probe as that user.
         #expect(sent?.value(forHTTPHeaderField: "apikey")?.count == 40)
-        #expect(sent?.value(forHTTPHeaderField: "Authorization")?.hasSuffix(String(repeating: "a", count: 40)) == true)
+        #expect(sent?.value(forHTTPHeaderField: "Authorization") == "Bearer fresh-user-token")
     }
 
     @Test func ensureReadyMapsA401ToNotAuthenticated() async {
         let transport = makeTransport { _ in (Data(), 401, [:]) }
-        let result = await transport.ensureReady()
+        let result = await transport.ensureReady(accessToken: "fresh-user-token")
         guard case .failure(let error) = result else { Issue.record("expected failure"); return }
         #expect(error == .notAuthenticated)
     }

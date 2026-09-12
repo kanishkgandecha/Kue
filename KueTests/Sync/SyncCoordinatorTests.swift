@@ -124,6 +124,11 @@ struct SyncCoordinatorTests {
         let account = await makeSignedInAccount()
         let status = await makeCoordinator(transport: transport, store: store).sync(context: context, account: account)
         #expect(status == .upToDate)
+        guard case .signedIn(let session, _) = account.state else {
+            Issue.record("expected a signed-in account")
+            return
+        }
+        #expect(transport.lastEnsureReadyAccessToken == session.accessToken)
         #expect(transport.eventsInSeqOrder.first { $0.id == event.id }?.title == "Interview")
     }
 

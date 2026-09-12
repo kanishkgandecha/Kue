@@ -32,7 +32,7 @@ struct PersonalBuildSyncExclusionTests {
     func nullTransportFailsClosedOnEveryOperation() async {
         let transport = NullSyncTransport()
 
-        if case .success = await transport.ensureReady() {
+        if case .success = await transport.ensureReady(accessToken: "unused") {
             Issue.record("NullSyncTransport.ensureReady() must never report success")
         }
 

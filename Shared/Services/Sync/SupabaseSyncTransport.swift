@@ -28,11 +28,10 @@ nonisolated final class SupabaseSyncTransport: SyncTransporting {
         self.session = session
     }
 
-    func ensureReady() async -> Result<Void, SyncTransportError> {
-        // A trivial, zero-row SELECT — confirms the endpoint/anon key/token are all valid
+    func ensureReady(accessToken: String) async -> Result<Void, SyncTransportError> {
+        // A trivial, zero-row SELECT — confirms the endpoint/key/fresh user token are all valid
         // before this pass attempts any real push/pull work, without touching any real row.
-        var request = makeRequest(path: "/rest/v1/sync_events", query: [URLQueryItem(name: "limit", value: "0")], method: "GET", accessToken: nil)
-        request.setValue(anonAccessToken, forHTTPHeaderField: "Authorization")
+        let request = makeRequest(path: "/rest/v1/sync_events", query: [URLQueryItem(name: "limit", value: "0")], method: "GET", accessToken: accessToken)
         let (_, response) = await perform(request)
         guard let response else { return .failure(.networkFailure) }
         return (200...299).contains(response.statusCode) ? .success(()) : .failure(mapStatus(response.statusCode))

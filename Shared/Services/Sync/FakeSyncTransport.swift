@@ -49,13 +49,15 @@ final class FakeSyncTransport: SyncTransporting, @unchecked Sendable {
     var permanentlyFailingNotificationRuleDeletionIDs: Set<UUID> = []
 
     var ensureReadyCallCount = 0
+    var lastEnsureReadyAccessToken: String?
     var pushCallCount = 0
     var pullCallCount = 0
     var resetCallCount = 0
 
-    func ensureReady() async -> Result<Void, SyncTransportError> {
+    func ensureReady(accessToken: String) async -> Result<Void, SyncTransportError> {
         lock.withLock {
             ensureReadyCallCount += 1
+            lastEnsureReadyAccessToken = accessToken
             if let error = nextEnsureReadyError {
                 nextEnsureReadyError = nil
                 return .failure(error)
@@ -205,6 +207,7 @@ final class FakeSyncTransport: SyncTransporting, @unchecked Sendable {
         permanentlyFailingExclusionIDs = []
         permanentlyFailingNotificationRuleDeletionIDs = []
         ensureReadyCallCount = 0
+        lastEnsureReadyAccessToken = nil
         pushCallCount = 0
         pullCallCount = 0
         resetCallCount = 0

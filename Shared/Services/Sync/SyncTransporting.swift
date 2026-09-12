@@ -120,7 +120,7 @@ nonisolated struct SyncPullPage: Equatable {
 /// signed out: never constructs a real request, fails closed on every operation. Mirrors
 /// `NullCloudSyncTransport`'s own Kue 2.0 Phase 12 role exactly, generalized past CloudKit.
 struct NullSyncTransport: SyncTransporting {
-    func ensureReady() async -> Result<Void, SyncTransportError> { .failure(.notAuthenticated) }
+    func ensureReady(accessToken: String) async -> Result<Void, SyncTransportError> { .failure(.notAuthenticated) }
     func push(_ batch: SyncPushBatch, accessToken: String) async -> SyncPushResult { SyncPushResult() }
     func pull(cursor: SyncCursor, pageSize: Int, accessToken: String) async -> SyncPullPage { SyncPullPage(nextCursor: cursor, error: .notAuthenticated) }
     func resetLocalAccountState() async {}
@@ -130,7 +130,7 @@ nonisolated protocol SyncTransporting: Sendable {
     /// Idempotent — safe to call at the start of every sync pass. A lightweight readiness/auth
     /// check, not a CloudKit-style "ensure zone exists" (Postgres tables always exist once the
     /// migration is applied; what can fail here is authentication/network only).
-    func ensureReady() async -> Result<Void, SyncTransportError>
+    func ensureReady(accessToken: String) async -> Result<Void, SyncTransportError>
 
     /// `accessToken` is always a *freshly refreshed-if-needed* token, obtained by the caller
     /// (`SyncCoordinator`) through `AccountCoordinator.refreshIfNeeded()` — this transport
