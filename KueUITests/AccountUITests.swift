@@ -199,12 +199,16 @@ final class AccountUITests: XCTestCase {
         app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", FakeAccountProviderFixture.username)).firstMatch
     }
 
-    func testSignedInProfileShowsIdentityAndStatistics() {
+    // Kue 3.0 Phase 6 — docs/34: the inline "Your Kue Activity" list this test used to check
+    // for was replaced by a link out to the dedicated `InsightsView` (reachable from Settings
+    // regardless of sign-in state, not just from a signed-in profile) — this now checks for
+    // that link instead of statistics rendered inline here.
+    func testSignedInProfileShowsIdentityAndALinkToInsights() {
         signInWithFixture()
         XCTAssertTrue(usernameRow().waitForExistence(timeout: 5))
-        let activityHeader = app.staticTexts["Your Kue Activity"]
-        activityHeader.scrollUpUntilHittable(in: app)
-        XCTAssertTrue(activityHeader.waitForExistence(timeout: 5))
+        let insightsLink = app.buttons["insightsLinkFromProfile"]
+        insightsLink.scrollUpUntilHittable(in: app)
+        XCTAssertTrue(insightsLink.waitForExistence(timeout: 5))
     }
 
     func testEditProfileIsReachableAndCancellable() {

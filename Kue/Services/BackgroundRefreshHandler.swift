@@ -24,6 +24,10 @@ enum BackgroundRefreshHandler {
         backgroundScheduler: BackgroundTaskScheduling,
         syncCoordinator: SyncCoordinator? = nil,
         accountCoordinator: AccountCoordinator? = nil,
+        // Kue 3.0 Phase 6 — docs/34 "Refresh behavior": same optional-parameter shape as
+        // `syncCoordinator`/`accountCoordinator` above, for the exact same reason (every
+        // pre-existing call site/test keeps compiling unchanged; `nil` skips this step).
+        statisticsCoordinator: StatisticsCoordinator? = nil,
         now: Date = .now
     ) async {
         // Best-effort supplement, not the reliability guarantee itself (docs/08) — resubmit
@@ -53,6 +57,14 @@ enum BackgroundRefreshHandler {
         // request timeout, comfortably inside a background task's real execution budget.
         if let syncCoordinator, let accountCoordinator, !didExpire {
             _ = await syncCoordinator.sync(context: context, account: accountCoordinator, now: now)
+        }
+
+        // Kue 3.0 Phase 6 — docs/34 "Refresh behavior": a sibling pass, independent of the
+        // sync call above (requirement E — never chained through `SyncCoordinator`'s own
+        // internals). No-ops instantly if the cloud-statistics preference is off.
+        if let statisticsCoordinator, let accountCoordinator, !didExpire {
+            let events = (try? context.fetch(FetchDescriptor<KueEvent>())) ?? []
+            _ = await statisticsCoordinator.refreshCloudUpload(events: events, account: accountCoordinator, now: now)
         }
 
         task.setTaskCompleted(success: !didExpire)

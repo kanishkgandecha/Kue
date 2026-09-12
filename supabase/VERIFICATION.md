@@ -475,3 +475,114 @@ select public.push_notification_rule_deletions(array['<alice_rule_id>']::uuid[])
 **Expected:** `{"results": [{"id": "<alice_rule_id>", "succeeded": true}]}` — already deleted,
 reported as success again (the goal state already holds), never re-reported as a failure just
 because there was no row left to actually update this time.
+
+---
+
+# Phase 6 — Cloud Profile and Productivity Statistics Verification
+
+Covers `supabase/migrations/20260913000000_create_statistics_aggregates.sql` — one table
+(`statistics_aggregates`), owner-only RLS on every verb including `delete`, no RPC (a plain
+PostgREST upsert). Same disclosed limitation as Phases 4/5's own verification above: **none of
+this was run against a real or local instance from this environment.**
+
+## 28. Anonymous denial
+
+```sql
+-- As anon (no session at all).
+select * from public.statistics_aggregates;
+insert into public.statistics_aggregates (user_id, bucket_start) values ('<alice_id>', '2026-03-02');
+```
+**Expected:** the `select` returns zero rows; the `insert` is rejected — `anon` has no policy
+on this table for either verb (only `authenticated` does).
+
+## 29. Cross-user denial (read, write, and delete)
+
+```sql
+-- Alice has already uploaded one row for the current week.
+-- As Bob:
+select * from public.statistics_aggregates where user_id = '<alice_id>';
+update public.statistics_aggregates set total_active_events = 999 where user_id = '<alice_id>';
+delete from public.statistics_aggregates where user_id = '<alice_id>';
+```
+**Expected:** the `select` returns zero rows (filtered, not denied — normal RLS behavior); the
+`update` affects `0 rows`; the `delete` affects `0 rows` — all three of `select`/`update`/
+`delete`'s own `using (auth.uid() = user_id)` clauses exclude Alice's row from Bob's session.
+Confirm afterward that Alice's row is completely unchanged:
+```sql
+-- As Alice.
+select total_active_events from public.statistics_aggregates where user_id = auth.uid();
+```
+
+## 30. Same-user read/write
+
+```sql
+-- As Alice.
+insert into public.statistics_aggregates (user_id, bucket_start, total_active_events, completed_events)
+values (auth.uid(), '2026-03-02', 3, 1)
+on conflict (user_id, bucket_start) do update set total_active_events = excluded.total_active_events, completed_events = excluded.completed_events;
+select total_active_events, completed_events from public.statistics_aggregates where user_id = auth.uid() and bucket_start = '2026-03-02';
+```
+**Expected:** the insert succeeds (both `with check` clauses pass — `auth.uid() = user_id`),
+and the final `select` returns exactly `(3, 1)`.
+
+## 31. Idempotent upsert — a client-side PostgREST upsert, not a custom RPC
+
+```sql
+-- As Alice, simulating what SupabaseStatisticsTransport.upload actually sends: a POST to
+-- /rest/v1/statistics_aggregates?on_conflict=user_id,bucket_start with header
+-- "Prefer: resolution=merge-duplicates,return=minimal", body {"user_id": "<alice_id>",
+-- "bucket_start": "2026-03-02", "total_active_events": 5, ...}. Equivalent raw SQL:
+insert into public.statistics_aggregates (user_id, bucket_start, total_active_events)
+values (auth.uid(), '2026-03-02', 5)
+on conflict (user_id, bucket_start) do update set total_active_events = excluded.total_active_events;
+-- Re-send the identical request a second time.
+insert into public.statistics_aggregates (user_id, bucket_start, total_active_events)
+values (auth.uid(), '2026-03-02', 5)
+on conflict (user_id, bucket_start) do update set total_active_events = excluded.total_active_events;
+select count(*) from public.statistics_aggregates where user_id = auth.uid() and bucket_start = '2026-03-02';
+```
+**Expected:** `count = 1` — the second, identical upload never creates a second row for the
+same account/week; the table's own `primary key (user_id, bucket_start)` is the conflict
+target `on_conflict=user_id,bucket_start` resolves against.
+
+## 32. Invalid aggregate rejection
+
+```sql
+-- As Alice, each of these should be rejected by a CHECK constraint.
+insert into public.statistics_aggregates (user_id, bucket_start, total_active_events) values (auth.uid(), '2026-03-09', -1);
+insert into public.statistics_aggregates (user_id, bucket_start, task_completion_rate) values (auth.uid(), '2026-03-09', 1.5);
+insert into public.statistics_aggregates (user_id, bucket_start, task_completion_rate) values (auth.uid(), '2026-03-09', -0.1);
+insert into public.statistics_aggregates (user_id, bucket_start, current_streak, longest_streak) values (auth.uid(), '2026-03-09', 5, 2);
+```
+**Expected:** every one of the four `insert`s raises `new row for relation
+"statistics_aggregates" violates check constraint` — a negative count
+(`statistics_aggregates_total_active_events_check` et al.), a rate outside `[0, 1]`
+(`statistics_aggregates_task_completion_rate_check`), and `current_streak > longest_streak`
+(`statistics_aggregates_streak_order`) are all structurally impossible to store, not merely
+discouraged by client-side validation.
+
+## 33. Account deletion cascade
+
+```sql
+-- As a service-role connection (never as a client role) — simulates delete-account's own
+-- admin client, exactly like Phase 4's own section 8.
+select auth.admin_delete_user('<bob_id>');
+select count(*) from public.statistics_aggregates where user_id = '<bob_id>';
+```
+**Expected:** `0` — `on delete cascade` on `statistics_aggregates.user_id references
+auth.users(id)` removes every one of that account's aggregate rows automatically.
+
+## 34. Cloud-statistics deletion without deleting the account or local events
+
+```sql
+-- As Alice, with several weeks of uploaded rows.
+delete from public.statistics_aggregates where user_id = auth.uid();
+select count(*) from public.statistics_aggregates where user_id = auth.uid();
+select count(*) from public.profiles where id = auth.uid();
+```
+**Expected:** the aggregate count drops to `0`; the `profiles` row (and, by extension, the
+`auth.users` account itself) is completely unaffected — "Delete Cloud Statistics" (requirement
+F) is scoped to exactly this one table and never touches `profiles`, `auth.users`, or any
+Phase 5 sync table. Local events are, by construction, never reachable from any Supabase table
+at all (requirement A: they are never uploaded to begin with), so there is nothing server-side
+that could delete them even accidentally.

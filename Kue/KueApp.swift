@@ -80,6 +80,11 @@ struct KueApp: App {
         if let fakeSyncCoordinator = SyncCoordinator.makeFromLaunchArguments() {
             SyncCoordinator.shared = fakeSyncCoordinator
         }
+        // Kue 3.0 Phase 6 — docs/34 "Testing." Same reasoning as the sync coordinator above:
+        // real Supabase statistics upload never runs under `KueUITests`.
+        if let fakeStatisticsCoordinator = StatisticsCoordinator.makeFromLaunchArguments() {
+            StatisticsCoordinator.shared = fakeStatisticsCoordinator
+        }
 
         if case .success(let container) = outcome {
             NotificationActionDelegate.shared.context = container.mainContext
@@ -105,7 +110,8 @@ struct KueApp: App {
                         // Kue 3.0 Phase 5 — docs/33 "Background behavior": reuses this exact
                         // entry point rather than a second `BGTaskScheduler` identifier.
                         syncCoordinator: SyncCoordinator.shared,
-                        accountCoordinator: accountCoordinatorForBackgroundRefresh
+                        accountCoordinator: accountCoordinatorForBackgroundRefresh,
+                        statisticsCoordinator: StatisticsCoordinator.shared
                     )
                 }
             }

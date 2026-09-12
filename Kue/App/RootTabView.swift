@@ -127,6 +127,14 @@ struct RootTabView: View {
         .onChange(of: accountCoordinator.state) { _, newState in
             if case .signedIn = newState {
                 Task { await SyncCoordinator.shared.sync(context: modelContext, account: accountCoordinator) }
+                // Kue 3.0 Phase 6 — docs/34 "Refresh behavior": a sibling pass, never chained
+                // through `SyncCoordinator`'s own internals (requirement E). No-ops instantly
+                // if the cloud-statistics preference is off, exactly like sync no-ops when its
+                // own preference is off.
+                Task {
+                    let events = (try? modelContext.fetch(FetchDescriptor<KueEvent>())) ?? []
+                    await StatisticsCoordinator.shared.refreshCloudUpload(events: events, account: accountCoordinator)
+                }
             }
         }
         .onOpenURL { url in

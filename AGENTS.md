@@ -1584,12 +1584,65 @@ parameters, `nil` by default so every pre-existing call site/test keeps compilin
 real bug found via this phase's own test-writing: `SyncCoordinator.sync` was unconditionally
 clearing a fresh rate-limit `retryNotBefore` the same pass that had just set it, since "push/pull
 succeeded" only meant "no transport-level failure," not "nothing was rate-limited" — fixed to
-only reset that bookkeeping when the pass didn't just set a new backoff window itself. **Disclosed
-gaps, not silently skipped**: no dedicated `SupabaseSyncTransport`-level unit tests (exercised
-only indirectly via `FakeSyncTransport`), no new `KueUITests`/`KueMacUITests` for the sync UI
-surfaces themselves (the coordinator logic beneath them is unit-tested), no large-dataset sync
-performance benchmark. **No Realtime/WebSocket work, collaboration, or public sharing was
-built — those remain explicitly out of scope, per this phase's own governing instructions.**
+only reset that bookkeeping when the pass didn't just set a new backoff window itself. **No
+Realtime/WebSocket work, collaboration, or public sharing was built — those remain explicitly
+out of scope, per this phase's own governing instructions.**
+
+**A Phase 5 correctness/verification pass (later the same phase) fixed four real defects an
+initial report had missed**, all documented in the corrected docs/33: (1) every `sync_*`
+table's primary key was the bare client-generated `id` alone, letting two different accounts'
+same UUID collide — fixed with composite `(id, user_id)` primary keys and matching composite
+foreign keys on every child table; (2) `push_event_graph`'s `expectedRevision = 0` could
+silently overwrite an *existing* row a client merely didn't know the revision of — fixed so `0`
+is create-only; (3) `client_mutation_id` was carried through but never actually checked —
+fixed with real idempotent-replay detection (a verified retry returns the original revision
+untouched, never re-applied or bumped); (4) `push_recurrence_exclusions`/
+`push_notification_rule_deletions` returned only a bare aggregate count — fixed to return a
+truthful per-item result array, with the Swift transport/coordinator updated to never treat a
+batch-wide 2xx as proof every item succeeded. This same pass also closed every gap the original
+report disclosed: `SupabaseSyncTransportTests.swift` (24 tests, `URLProtocol`-stubbed),
+`SyncPerformanceBenchmarkTests.swift`/`SupabaseSyncSmokeTests.swift` (`KueMacTests`), and one
+new iPhone first-sync-decision UI test — **`KueMacUITests` coverage for the sync surfaces was
+still not added** (no fake-account/fake-sync launch-argument wiring exists for that target),
+disclosed honestly rather than fabricated. `supabase/VERIFICATION.md` §§13–27 were rewritten to
+match the corrected SQL exactly, including proof (§17) that two accounts can upload the
+identical client-generated UUID with no collision or disclosure.
+
+**Kue 3.0 Phase 6 ("Cloud Profile and Productivity Statistics") is done** — see
+docs/34-kue-3-cloud-profile-and-productivity-statistics.md for the full contract. Extends
+(never replaces) Phase 4's `ProfileStatisticsEngine`: a Phase 6 audit found and fixed real
+defects (cancelled/skipped events were conflated; a first-draft "preparation workload" metric
+was defined around `EventStatus.preparing`, which `EventStatusEngine.derive` can never actually
+produce — caught by this phase's own test, redefined around task due dates instead) and added
+genuinely new metrics (7/30-day upcoming windows, completions by type, weekly activity over a
+bounded 8-week window, a "longest" streak alongside the existing "current" one, average task
+completion lead time) — still no productivity score, ranking, or gamified language anywhere.
+New `Shared/Services/Statistics/`: `StatisticsAggregatePayload` (the one, deliberately narrow
+14-numeric-field upload shape — never event/task titles, notes, locations, OCR/voice text,
+Calendar identifiers, or UUIDs), `StatisticsTransporting`/`SupabaseStatisticsTransport`/
+`FakeStatisticsTransport` (a completely separate protocol from `SyncTransporting`, per its own
+explicit instruction not to mix aggregate-statistics state into event-graph sync), `Statistics
+Coordinator` (debounced, account-isolated cloud upload — mirrors `SyncCoordinator`'s shape but
+owns only the cloud half; the local half needs no coordinator at all, since `@Query` already
+re-invokes on every relevant local change for free), and `CloudStatisticsPreference` (App
+Group `UserDefaults`-backed, default off, independent of `SyncPreference`). New migration
+`supabase/migrations/20260913000000_create_statistics_aggregates.sql`: one table, one row per
+account per ISO week, a plain PostgREST upsert (no RPC needed, unlike Phase 5's event graph —
+an aggregate overwrite is always sound), owner-only RLS on every verb *including* `delete`
+(unlike Phase 5's sync tables, a real hard delete is appropriate here for "Delete Cloud
+Statistics"). New UI: `Kue/Features/Insights/InsightsView.swift` (iPhone, reachable from
+Settings regardless of sign-in state — signed-out users get full local statistics) and
+`KueMac/MacInsightsView.swift` (a native Mac Settings tab, not an embedded iPhone view). No
+SwiftData schema change of any kind — every new piece of state is either pure computation or
+App-Group/JSON-file-backed local bookkeeping, the same non-schema-touching shape Phase 5's own
+sync outbox/cursor already established. A real, expected regression was found and fixed via
+this phase's own re-testing: `AccountUITests.testSignedInProfileShowsIdentityAndStatistics`
+checked for the old inline "Your Kue Activity" list, removed in favor of a single link out to
+the new Insights screen (renamed to `testSignedInProfileShowsIdentityAndALinkToInsights`).
+**Disclosed, not built**: cross-device merged weekly-activity charting via the transport's own
+(fully tested) `fetchRecentAggregates` — no UI consumes it yet; `KueMacUITests` coverage for
+`MacInsightsView` — same missing fake-launch-argument-wiring gap Phase 5's own correction pass
+already disclosed for `MacSyncView`.
 
 Kue 3.0 Phase 1 — a fourth target, `KueMac`, a native macOS app; see docs/29 for the full
 contract. Several files moved from `Kue/Services/` into `Shared/Services/` (unchanged logic,

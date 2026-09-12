@@ -95,6 +95,17 @@ struct SettingsView: View {
                 .accessibilityIdentifier("accountLink")
             }
 
+            // Kue 3.0 Phase 6 — docs/34 "iPhone experience." Reachable regardless of sign-in
+            // state (requirement A: "signed-out users must still receive useful statistics").
+            Section {
+                NavigationLink {
+                    InsightsView()
+                } label: {
+                    Label("Insights", systemImage: "chart.bar.xaxis")
+                }
+                .accessibilityIdentifier("insightsLink")
+            }
+
             Section {
                 permissionStatusRow
                 if authorizationStatus == .denied {
@@ -449,6 +460,12 @@ struct SettingsView: View {
                         let eventCount = summary.eventsInserted + summary.eventsUpdated
                         backupAlertMessage = "Restored \(eventCount) event\(eventCount == 1 ? "" : "s")."
                         preference = UserPreferenceStore.current(context: modelContext)
+                        // Kue 3.0 Phase 6 — docs/34 "Refresh behavior": a restore can change
+                        // the local statistics picture substantially; refresh the cloud upload
+                        // the same way any other trigger point does (no-ops instantly if the
+                        // preference is off or signed out).
+                        let restoredEvents = (try? modelContext.fetch(FetchDescriptor<KueEvent>())) ?? []
+                        Task { await StatisticsCoordinator.shared.refreshCloudUpload(events: restoredEvents, account: accountCoordinator) }
                     } catch {
                         backupAlertMessage = "Restore failed: \(error.localizedDescription)"
                     }

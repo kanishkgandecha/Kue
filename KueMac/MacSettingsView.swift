@@ -23,6 +23,8 @@ struct MacSettingsView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.calendarProvider) private var calendarProvider
+    // Kue 3.0 Phase 6 — docs/34 "Refresh behavior."
+    @Environment(AccountCoordinator.self) private var accountCoordinator
 
     @State private var notificationStatus: UNAuthorizationStatus = .notDetermined
     @State private var notificationPreferences = NotificationGlobalPreferences.current
@@ -43,6 +45,7 @@ struct MacSettingsView: View {
         TabView {
             generalTab.tabItem { Label("General", systemImage: "gearshape") }
             MacAccountView().tabItem { Label("Account", systemImage: "person.crop.circle") }
+            MacInsightsView().tabItem { Label("Insights", systemImage: "chart.bar.xaxis") }
             MacSyncView().tabItem { Label("Sync", systemImage: "arrow.triangle.2.circlepath.icloud") }
             notificationsTab.tabItem { Label("Notifications", systemImage: "bell") }
             backupTab.tabItem { Label("Backup", systemImage: "arrow.down.doc") }
@@ -421,6 +424,9 @@ struct MacSettingsView: View {
                 let summary = try await BackupRestoreService.restore(payload: payload, context: modelContext)
                 let count = summary.eventsInserted + summary.eventsUpdated
                 backupAlertMessage = "Restored \(count) event\(count == 1 ? "" : "s")."
+                // Kue 3.0 Phase 6 — docs/34 "Refresh behavior."
+                let restoredEvents = (try? modelContext.fetch(FetchDescriptor<KueEvent>())) ?? []
+                Task { await StatisticsCoordinator.shared.refreshCloudUpload(events: restoredEvents, account: accountCoordinator) }
             } catch {
                 backupAlertMessage = "Restore failed: \(error.localizedDescription)"
             }

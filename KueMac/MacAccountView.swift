@@ -338,13 +338,10 @@ private struct MacSessionExpiredView: View {
 
 private struct MacAccountProfileView: View {
     @Environment(AccountCoordinator.self) private var accountCoordinator
-    @Query private var events: [KueEvent]
     @State private var isPresentingEditProfile = false
     @State private var isConfirmingSignOut = false
     @State private var isConfirmingDeleteAccount = false
     @State private var isDeletingAccount = false
-
-    private var statistics: ProfileStatistics { ProfileStatisticsEngine.compute(events: events) }
 
     var body: some View {
         Form {
@@ -360,25 +357,8 @@ private struct MacAccountProfileView: View {
                 .accessibilityIdentifier("macAccountIdentitySection")
 
                 Section {
-                    LabeledContent("Active Events", value: "\(statistics.totalActiveEvents)")
-                    LabeledContent("Upcoming", value: "\(statistics.upcomingEvents)")
-                    LabeledContent("Needs Review", value: "\(statistics.eventsNeedingReview)")
-                    LabeledContent("Completed", value: "\(statistics.completedEvents)")
-                    LabeledContent("Tasks Completed", value: "\(statistics.completedTasks)")
-                    LabeledContent("Tasks Pending", value: "\(statistics.pendingTasks)")
-                    if let rate = statistics.completionRate {
-                        LabeledContent("Task Completion Rate", value: rate.formatted(.percent.precision(.fractionLength(0))))
-                    }
-                    if let nearest = statistics.nearestUpcomingEvent {
-                        LabeledContent("Next Up", value: "\(nearest.title) — \(nearest.isToday ? "Today" : nearest.startDate.formatted(date: .abbreviated, time: .omitted))")
-                    }
-                    ForEach(EventType.allCases.filter { statistics.countsByEventType[$0, default: 0] > 0 }, id: \.self) { type in
-                        LabeledContent(type.displayName, value: "\(statistics.countsByEventType[type, default: 0])")
-                    }
-                } header: {
-                    Text("Your Kue Activity")
-                } footer: {
-                    Text("Computed from what's on this Mac right now — never uploaded.")
+                    Text("See the Insights tab (in Settings) for your full activity dashboard — the same statistics engine, computed from what's on this Mac right now.")
+                        .foregroundStyle(.secondary)
                 }
 
                 Section {

@@ -3,9 +3,13 @@
 //  Kue
 //
 //  Kue 3.0 Phase 4 — docs/32 "iPhone experience." The signed-in half of `AccountHubView`'s
-//  dispatch: profile identity, session status, local usage statistics
-//  (`ProfileStatisticsEngine`, computed from the already-open SwiftData store — never
-//  uploaded), edit, sign-out, and account deletion.
+//  dispatch: profile identity, session status, edit, sign-out, and account deletion.
+//
+//  Kue 3.0 Phase 6 — docs/34: the inline "Your Kue Activity" statistics list this section used
+//  to render in place now links out to the dedicated `InsightsView` instead (reachable from
+//  Settings regardless of sign-in state — statistics are useful signed out too, requirement A).
+//  Duplicating a second, cramped rendering of the same `ProfileStatisticsEngine` output here
+//  would just be two displays to keep consistent for no benefit.
 //
 
 import SwiftUI
@@ -13,19 +17,16 @@ import SwiftData
 
 struct AccountProfileView: View {
     @Environment(AccountCoordinator.self) private var accountCoordinator
-    @Query private var events: [KueEvent]
     @State private var isPresentingEditProfile = false
     @State private var isConfirmingSignOut = false
     @State private var isConfirmingDeleteAccount = false
     @State private var isDeletingAccount = false
 
-    private var statistics: ProfileStatistics { ProfileStatisticsEngine.compute(events: events) }
-
     var body: some View {
         List {
             if case .signedIn(let session, let profile) = accountCoordinator.state {
                 identitySection(session: session, profile: profile)
-                statisticsSection
+                insightsLinkSection
                 actionsSection
             }
 
@@ -75,30 +76,16 @@ struct AccountProfileView: View {
         }
     }
 
-    private var statisticsSection: some View {
+    private var insightsLinkSection: some View {
         Section {
-            LabeledContent("Active Events", value: "\(statistics.totalActiveEvents)")
-            LabeledContent("Upcoming", value: "\(statistics.upcomingEvents)")
-            LabeledContent("Needs Review", value: "\(statistics.eventsNeedingReview)")
-            LabeledContent("Completed", value: "\(statistics.completedEvents)")
-            LabeledContent("Tasks Completed", value: "\(statistics.completedTasks)")
-            LabeledContent("Tasks Pending", value: "\(statistics.pendingTasks)")
-            if let rate = statistics.completionRate {
-                LabeledContent("Task Completion Rate", value: rate.formatted(.percent.precision(.fractionLength(0))))
+            NavigationLink {
+                InsightsView()
+            } label: {
+                Label("Your Insights", systemImage: "chart.bar.xaxis")
             }
-            if let nearest = statistics.nearestUpcomingEvent {
-                LabeledContent("Next Up", value: "\(nearest.title) — \(nearest.isToday ? "Today" : nearest.startDate.formatted(date: .abbreviated, time: .omitted))")
-            }
-            if let streak = statistics.preparationStreak, streak > 0 {
-                LabeledContent("Completion Streak", value: "\(streak)")
-            }
-            ForEach(EventType.allCases.filter { statistics.countsByEventType[$0, default: 0] > 0 }, id: \.self) { type in
-                LabeledContent(type.displayName, value: "\(statistics.countsByEventType[type, default: 0])")
-            }
-        } header: {
-            Text("Your Kue Activity")
+            .accessibilityIdentifier("insightsLinkFromProfile")
         } footer: {
-            Text("Computed from what's on this device right now — never uploaded.")
+            Text("Activity, streaks, and completion trends — computed from what's on this device, with an optional cloud backup you control.")
         }
     }
 

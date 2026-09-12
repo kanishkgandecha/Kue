@@ -101,6 +101,11 @@ enum UITestLaunchConfiguration {
     /// `SystemSecureStore` when present.
     static let fakeAccountArgument = "-uiTestFakeAccounts"
 
+    /// Kue 3.0 Phase 6 — must match `StatisticsCoordinator.uiTestLaunchArgument` exactly.
+    /// `KueApp` installs a fully fake-backed `StatisticsCoordinator` (in-memory transport/
+    /// state store) in place of the real Supabase-backed one when present.
+    static let fakeStatisticsArgument = "-uiTestFakeStatistics"
+
     /// The simulator's interface orientation is a *device*-level property, not scoped to one
     /// app process — it doesn't reset just because a test relaunches the app. A stray rotation
     /// left over from an earlier test (or an earlier run against the same booted simulator)
