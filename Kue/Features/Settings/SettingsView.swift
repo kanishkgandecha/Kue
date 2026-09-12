@@ -45,11 +45,12 @@ struct SettingsView: View {
     @State private var showLiveActivityTitle = LiveActivityPrivacyPreference.current.showTitle
     @State private var showLiveActivityNextTask = LiveActivityPrivacyPreference.current.showNextTask
 
-    // MARK: Kue 2.0 Phase 11 — iCloud Sync (docs/26 "K./G.")
+    // MARK: Kue 3.0 Phase 5 — Cross-Device Sync (docs/33)
     @State private var isSyncEnabled = SyncPreference.current.isEnabled
     @State private var isPerformingSyncNow = false
     @State private var syncPersistentState = SyncCoordinator.shared.stateStore.load()
-    @State private var isReviewingAccountChange = false
+    @State private var isPresentingFirstSyncDecision = false
+    @State private var isConfirmingDisableSync = false
 
     // MARK: Kue 2.0 Phase 12 — Backup & Restore (docs/28)
     @State private var isExportingBackup = false
@@ -285,84 +286,11 @@ struct SettingsView: View {
             }
 
             Section {
-                #if KUE_PERSONAL_BUILD
-                // Kue 2.0 Phase 12 — docs/27: this build's entitlements structurally exclude
-                // CloudKit (the free Apple Developer Personal Team can't provision it), so
-                // there's no working toggle to show — a disabled one that silently does
-                // nothing on tap would be dishonest. `SyncPreference` is also forced off at
-                // the source (see SyncPreference.swift), so this copy and that behavior can
-                // never drift apart.
-                Label("iCloud Sync Requires Apple Developer Program", systemImage: "icloud.slash")
-                    .foregroundStyle(KueColor.secondaryText)
-                    .accessibilityIdentifier("iCloudSyncUnavailableLabel")
-                #else
-                Toggle("iCloud Sync", isOn: Binding(
-                    get: { isSyncEnabled },
-                    set: { newValue in
-                        isSyncEnabled = newValue
-                        SyncPreference.setEnabled(newValue)
-                        if newValue {
-                            Task {
-                                isPerformingSyncNow = true
-                                await SyncCoordinator.shared.sync(context: modelContext)
-                                syncPersistentState = SyncCoordinator.shared.stateStore.load()
-                                isPerformingSyncNow = false
-                            }
-                        } else {
-                            // docs/26 "K.": "Disabling sync stops cloud transfers, retains
-                            // local data, does not delete CloudKit content, does not delete
-                            // local content." No mutation here beyond the preference flip —
-                            // `SyncCoordinator.sync` itself already checks `SyncPreference`
-                            // first thing and no-ops entirely while it's off.
-                            SyncCoordinator.shared.pauseForSignOut()
-                        }
-                    }
-                ))
-                .accessibilityIdentifier("iCloudSyncToggle")
-
-                if isSyncEnabled {
-                    syncStatusRow
-                    if let lastSync = syncPersistentState.lastSuccessfulSyncAt {
-                        LabeledContent("Last Synced", value: lastSync.formatted(date: .abbreviated, time: .shortened))
-                            .accessibilityIdentifier("lastSyncedLabel")
-                    }
-                    let pendingCount = SyncOutbox.pendingChangeCount(store: SyncCoordinator.shared.stateStore)
-                    if pendingCount > 0 {
-                        LabeledContent("Waiting to Upload", value: "\(pendingCount)")
-                            .accessibilityIdentifier("pendingSyncCountLabel")
-                    }
-                    Button {
-                        Task {
-                            isPerformingSyncNow = true
-                            await SyncCoordinator.shared.sync(context: modelContext)
-                            syncPersistentState = SyncCoordinator.shared.stateStore.load()
-                            isPerformingSyncNow = false
-                        }
-                    } label: {
-                        if isPerformingSyncNow {
-                            ProgressView()
-                        } else {
-                            Text("Sync Now")
-                        }
-                    }
-                    .accessibilityIdentifier("syncNowButton")
-                    .disabled(isPerformingSyncNow)
-
-                    if SyncCoordinator.shared.status == .accountChanged {
-                        Button("Review Account Change") { isReviewingAccountChange = true }
-                            .accessibilityIdentifier("reviewAccountChangeButton")
-                    }
-                }
-                #endif
+                syncSectionContent
             } header: {
-                Text("iCloud Sync")
+                Text("Sync")
             } footer: {
-                #if KUE_PERSONAL_BUILD
-                Text("This build was installed directly from source without a paid Apple Developer Program membership, which iCloud sync requires. Your events stay on this device only. Back up from Settings → Backup & Restore before reinstalling.")
-                #else
-                // docs/26 "K.": privacy explanation — never claims immediacy.
-                Text("Syncs your events privately through your own iCloud account — Kue has no server of its own and no one else can see your data. Sync timing depends on network and iCloud availability, not guaranteed immediate.")
-                #endif
+                Text(syncSectionFooterText)
             }
 
             Section {
@@ -447,21 +375,35 @@ struct SettingsView: View {
             .accessibilityIdentifier("confirmDeleteEverythingButton")
         }
         .confirmationDialog(
-            "Local Kue data currently belongs to a different iCloud account. Keep your data on this device and start syncing fresh with the new account?",
-            isPresented: $isReviewingAccountChange,
+            "Turn off sync? Your events stay on this device exactly as they are — nothing is deleted, locally or in your account. Other devices simply stop receiving new changes from this one until you turn it back on.",
+            isPresented: $isConfirmingDisableSync,
             titleVisibility: .visible
         ) {
-            // docs/26 "G.": the only offered path — the previous account's queued/engine
-            // state is quarantined, this device's local data is fully preserved, and the new
-            // account starts as a fresh initial-sync target. Never a silent merge.
-            Button("Keep My Data & Start Fresh") {
-                Task {
-                    await SyncCoordinator.shared.resolveAccountChange(keepLocalAndStartFresh: true)
-                    await SyncCoordinator.shared.sync(context: modelContext)
-                    syncPersistentState = SyncCoordinator.shared.stateStore.load()
-                }
+            Button("Turn Off Sync", role: .destructive) {
+                isSyncEnabled = false
+                SyncPreference.setEnabled(false)
+                SyncCoordinator.shared.pauseForSignOut()
             }
-            .accessibilityIdentifier("confirmAccountChangeButton")
+            .accessibilityIdentifier("confirmDisableSyncButton")
+        }
+        .sheet(isPresented: $isPresentingFirstSyncDecision) {
+            AccountFirstSyncDecisionView { decision in
+                switch decision {
+                case .notNow:
+                    SyncCoordinator.shared.deferInitialSyncDecision()
+                    isSyncEnabled = false
+                case .proceed(let uploadExisting):
+                    SyncCoordinator.shared.recordInitialSyncDecision(uploadExistingLocalData: uploadExisting, context: modelContext)
+                    isSyncEnabled = true
+                    Task {
+                        isPerformingSyncNow = true
+                        await SyncCoordinator.shared.sync(context: modelContext, account: accountCoordinator)
+                        syncPersistentState = SyncCoordinator.shared.stateStore.load()
+                        isPerformingSyncNow = false
+                    }
+                }
+                isPresentingFirstSyncDecision = false
+            }
         }
         // MARK: Kue 2.0 Phase 12 — Backup & Restore (docs/28)
         .fileExporter(
@@ -553,27 +495,137 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - Sync (Kue 3.0 Phase 5 — docs/33 "Sync status and controls")
+
+    /// Requirement: honest state per what's actually true right now — signed out, missing
+    /// configuration, first-sync decision pending, or an active `SyncStatus` once sync is
+    /// actually turned on. Never a working-looking toggle that silently does nothing.
+    @ViewBuilder
+    private var syncSectionContent: some View {
+        switch accountCoordinator.state {
+        case .unavailable:
+            Label("Sync Isn't Set Up in This Build", systemImage: "icloud.slash")
+                .foregroundStyle(KueColor.secondaryText)
+                .accessibilityIdentifier("syncUnavailableLabel")
+        case .signedOut, .authenticating, .awaitingEmailConfirmation, .passwordRecovery, .sessionExpired:
+            NavigationLink {
+                AccountHubView()
+            } label: {
+                Label("Sign In to Enable Sync", systemImage: "person.crop.circle.badge.plus")
+            }
+            .accessibilityIdentifier("signInToEnableSyncLink")
+        case .signedIn:
+            if !syncPersistentState.hasCompletedInitialSyncDecision {
+                Button("Set Up Sync") { isPresentingFirstSyncDecision = true }
+                    .accessibilityIdentifier("setUpSyncButton")
+            } else {
+                Toggle("Sync", isOn: Binding(
+                    get: { isSyncEnabled },
+                    set: { newValue in
+                        if newValue {
+                            isSyncEnabled = true
+                            SyncPreference.setEnabled(true)
+                            Task {
+                                isPerformingSyncNow = true
+                                await SyncCoordinator.shared.sync(context: modelContext, account: accountCoordinator)
+                                syncPersistentState = SyncCoordinator.shared.stateStore.load()
+                                isPerformingSyncNow = false
+                            }
+                        } else {
+                            // Requirement P: "no destructive reset button without a separate
+                            // confirmation" — turning sync off doesn't delete anything, but it
+                            // does stop other devices from receiving this one's changes, which
+                            // deserves an explicit, explained confirmation rather than a silent
+                            // toggle flip.
+                            isConfirmingDisableSync = true
+                        }
+                    }
+                ))
+                .accessibilityIdentifier("syncToggle")
+
+                if isSyncEnabled {
+                    syncStatusRow
+                    if let lastSync = syncPersistentState.lastSuccessfulSyncAt {
+                        LabeledContent("Last Synced", value: lastSync.formatted(date: .abbreviated, time: .shortened))
+                            .accessibilityIdentifier("lastSyncedLabel")
+                    }
+                    let pendingCount = SyncOutbox.pendingChangeCount(store: SyncCoordinator.shared.stateStore)
+                    if pendingCount > 0 {
+                        LabeledContent("Waiting to Upload", value: "\(pendingCount)")
+                            .accessibilityIdentifier("pendingSyncCountLabel")
+                    }
+                    Button {
+                        Task {
+                            isPerformingSyncNow = true
+                            await SyncCoordinator.shared.sync(context: modelContext, account: accountCoordinator)
+                            syncPersistentState = SyncCoordinator.shared.stateStore.load()
+                            isPerformingSyncNow = false
+                        }
+                    } label: {
+                        if isPerformingSyncNow {
+                            ProgressView()
+                        } else {
+                            Text("Sync Now")
+                        }
+                    }
+                    .accessibilityIdentifier("syncNowButton")
+                    .disabled(isPerformingSyncNow)
+
+                    // Requirement Q: a scheduled retry (backoff) is shown as information, not
+                    // framed as something the user needs to act on — "Retry" here is only ever
+                    // an explicit manual override of that wait, reusing the exact same
+                    // `sync(context:account:)` call "Sync Now" does.
+                    if case .retryScheduled = SyncCoordinator.shared.status {
+                        Button("Retry Now") {
+                            Task {
+                                isPerformingSyncNow = true
+                                await SyncCoordinator.shared.sync(context: modelContext, account: accountCoordinator)
+                                syncPersistentState = SyncCoordinator.shared.stateStore.load()
+                                isPerformingSyncNow = false
+                            }
+                        }
+                        .accessibilityIdentifier("retrySyncButton")
+                    }
+                }
+            }
+        }
+    }
+
+    private var syncSectionFooterText: String {
+        switch accountCoordinator.state {
+        case .unavailable:
+            return "This build doesn't have sync configured. Every local feature still works fully — nothing here is required."
+        case .signedOut, .authenticating, .awaitingEmailConfirmation, .passwordRecovery, .sessionExpired:
+            return "Sign in with a free Kue account to keep events in sync between your iPhone and Mac. Everything works fully without one."
+        case .signedIn:
+            return "Syncs your events privately through your own Kue account. Kue can't see your data — Row Level Security means only you can ever read or write it. Sync timing depends on network availability, never guaranteed immediate."
+        }
+    }
+
     @ViewBuilder
     private var syncStatusRow: some View {
         let status = SyncCoordinator.shared.status
         Label(status.displayText, systemImage: syncStatusSymbol(status))
-            .foregroundStyle(status == .accountChanged || status.isErrorLike ? KueColor.warning : KueColor.secondaryText)
+            .foregroundStyle(status.isErrorLike ? KueColor.warning : KueColor.secondaryText)
             .accessibilityIdentifier("syncStatusLabel")
     }
 
     private func syncStatusSymbol(_ status: SyncStatus) -> String {
         switch status {
         case .off: return "icloud.slash"
-        case .checkingAccount, .syncing: return "arrow.triangle.2.circlepath.icloud"
+        case .localOnly: return "icloud.slash"
+        case .waitingForAccount: return "person.crop.circle.badge.clock"
+        case .firstSyncDecisionRequired: return "questionmark.circle"
+        case .syncing: return "arrow.triangle.2.circlepath.icloud"
         case .upToDate: return "checkmark.icloud"
-        case .waitingForNetwork: return "wifi.slash"
-        case .waitingForSignIn: return "person.crop.circle.badge.exclamationmark"
-        case .paused: return "pause.circle"
+        case .offline: return "wifi.slash"
+        case .authenticationExpired: return "person.crop.circle.badge.exclamationmark"
+        case .retryScheduled: return "clock.arrow.circlepath"
         case .changesWaitingToUpload: return "icloud.and.arrow.up"
+        case .changesWaitingToDownload: return "icloud.and.arrow.down"
         case .conflictNeedsReview: return "exclamationmark.icloud"
-        case .temporarilyUnavailable: return "icloud.slash"
+        case .partialFailure: return "exclamationmark.icloud"
         case .syncError: return "exclamationmark.triangle"
-        case .accountChanged: return "person.crop.circle.badge.exclamationmark"
         }
     }
 

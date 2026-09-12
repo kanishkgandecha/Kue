@@ -187,12 +187,20 @@ struct NotificationRuleEditorView: View {
             if let task { task.notificationRules.append(rule) } else { event.notificationRules.append(rule) }
         }
         try? modelContext.save()
+        // Kue 3.0 Phase 5 — docs/33 "Local outbox": a rule add/edit travels embedded in its
+        // owning event's next graph push (`EventSyncRecord.notificationRules`), exactly like a
+        // task edit already does — never its own separate sync record.
+        SyncOutbox.markNotificationRulesDirty(owningEventID: rule.owningEventID ?? event.id)
         rescheduleAndDismiss()
     }
 
     private func delete(_ rule: NotificationRule) {
+        let owningEventID = rule.owningEventID
         modelContext.delete(rule)
         try? modelContext.save()
+        // Requirement I: an explicit tombstone, never inferred from the rule's mere absence
+        // the next time its owning event's graph happens to be pushed.
+        SyncOutbox.markNotificationRuleDeleted(rule.id, owningEventID: owningEventID)
         rescheduleAndDismiss()
     }
 
@@ -206,6 +214,7 @@ struct NotificationRuleEditorView: View {
         modelContext.insert(copy)
         if let task = rule.task { task.notificationRules.append(copy) } else if let event = rule.event { event.notificationRules.append(copy) }
         try? modelContext.save()
+        if let owningEventID = copy.owningEventID { SyncOutbox.markNotificationRulesDirty(owningEventID: owningEventID) }
         rescheduleAndDismiss()
     }
 

@@ -25,7 +25,17 @@ nonisolated enum BackupCoder {
         let notificationRules = try context.fetch(FetchDescriptor<NotificationRule>())
 
         return BackupPayload(
-            events: events.map(EventGraphMapper.record(for:)),
+            // Kue 3.0 Phase 5 — `EventGraphMapper.record(for:)` now also embeds an event's
+            // notification rules (for sync push), but `.kuebackup` already has its own,
+            // separate, independently-tested top-level `notificationRules` backup mechanism
+            // below — cleared here so a restore's event-processing loop (which reuses this
+            // same `EventGraphMapper.apply`/`makeEvent`) never double-creates a rule already
+            // handled by that dedicated path.
+            events: events.map { event in
+                var record = EventGraphMapper.record(for: event)
+                record.notificationRules = []
+                return record
+            },
             exclusions: exclusions.map(EventGraphMapper.record(for:)),
             templates: templates.map(templatePayload),
             userPreference: preference.map {

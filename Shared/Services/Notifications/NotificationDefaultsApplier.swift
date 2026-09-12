@@ -90,7 +90,12 @@ enum NotificationDefaultsApplier {
                 context.insert(rule)
                 eventChanged = true
             }
-            if eventChanged { changed += 1 }
+            if eventChanged {
+                changed += 1
+                // Kue 3.0 Phase 5 — docs/33 "Local outbox": a bulk apply is still one dirty
+                // mark per affected event, same as any other notification-rule mutation.
+                SyncOutbox.markNotificationRulesDirty(owningEventID: event.id)
+            }
         }
         try? context.save()
         return changed

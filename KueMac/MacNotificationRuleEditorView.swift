@@ -174,12 +174,17 @@ struct MacNotificationRuleEditorView: View {
             event.notificationRules.append(rule)
         }
         try? modelContext.save()
+        // Kue 3.0 Phase 5 — docs/33 "Local outbox": travels embedded in the owning event's
+        // next graph push, exactly like a task edit already does.
+        SyncOutbox.markNotificationRulesDirty(owningEventID: rule.owningEventID ?? event.id)
         rescheduleAndDismiss()
     }
 
     private func delete(_ rule: NotificationRule) {
+        let owningEventID = rule.owningEventID
         modelContext.delete(rule)
         try? modelContext.save()
+        SyncOutbox.markNotificationRuleDeleted(rule.id, owningEventID: owningEventID)
         rescheduleAndDismiss()
     }
 
@@ -193,6 +198,7 @@ struct MacNotificationRuleEditorView: View {
         modelContext.insert(copy)
         if let owningEvent = rule.event { owningEvent.notificationRules.append(copy) }
         try? modelContext.save()
+        if let owningEventID = copy.owningEventID { SyncOutbox.markNotificationRulesDirty(owningEventID: owningEventID) }
         rescheduleAndDismiss()
     }
 

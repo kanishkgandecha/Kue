@@ -88,8 +88,9 @@ struct EventGraphMapperTests {
 
         let orphaned = EventGraphMapper.apply(record, to: event)
 
-        #expect(orphaned.count == 1)
-        #expect(orphaned.first?.id == removedTask.id)
+        #expect(orphaned.orphanedTasks.count == 1)
+        #expect(orphaned.orphanedTasks.first?.id == removedTask.id)
+        #expect(orphaned.orphanedNotificationRules.isEmpty)
         #expect(event.tasks.count == 2)
         // `keptTask` is the *same* SwiftData object, updated in place — identity preserved.
         #expect(event.tasks.contains { $0.id == keptTask.id && $0.title == "Keep (edited)" && $0.isCompleted })

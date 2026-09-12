@@ -28,6 +28,10 @@ struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.kueHaptics) private var haptics
+    // Kue 3.0 Phase 5 — docs/33 "Architecture." `SyncCoordinator.sync(context:account:)` needs
+    // Phase 4's `AccountCoordinator` for identity/session refresh — never constructs or owns
+    // one of its own.
+    @Environment(AccountCoordinator.self) private var accountCoordinator
     @Query(sort: \KueEvent.startDate) private var events: [KueEvent]
     @State private var isCompletedExpanded = false
     @State private var isLaterExpanded = false
@@ -76,7 +80,7 @@ struct HomeView: View {
             // Kue 2.0 Phase 11 — docs/26 "M.": launch is one of the sync-trigger points, same
             // reasoning as the reconciliation `.task` immediately above — never blocks first
             // frame (this runs after `body` is already on screen), never polls afterward.
-            await SyncCoordinator.shared.sync(context: modelContext)
+            await SyncCoordinator.shared.sync(context: modelContext, account: accountCoordinator)
         }
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {
@@ -92,7 +96,7 @@ struct HomeView: View {
                 // Kue 2.0 Phase 11 — docs/26 "M.": scene activation is another documented
                 // sync-trigger point (alongside launch, manual Sync Now, outbox changes, and
                 // network/account recovery) — never continuous polling.
-                Task { await SyncCoordinator.shared.sync(context: modelContext) }
+                Task { await SyncCoordinator.shared.sync(context: modelContext, account: accountCoordinator) }
             case .background:
                 // Standard BGAppRefreshTask pattern — schedule the next best-effort
                 // opportunity as we leave the foreground.

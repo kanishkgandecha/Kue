@@ -92,13 +92,20 @@ struct KueApp: App {
             // true, which is itself only ever set by `KueUITests`.
             Self.seedCalendarFixtureIfNeeded(context: container.mainContext)
             Self.resetLockScreenSelectionIfNeeded()
+            // Captured as a local constant, not `self.accountCoordinator` directly — `self` is
+            // a struct here, and an escaping closure can't capture a mutating struct's `self`.
+            let accountCoordinatorForBackgroundRefresh = accountCoordinator
             SystemBackgroundTaskScheduler.shared.register(identifier: BackgroundRefreshTask.identifier) { task in
                 Task { @MainActor in
                     await BackgroundRefreshHandler.handle(
                         task,
                         context: container.mainContext,
                         scheduler: SystemNotificationScheduler.shared,
-                        backgroundScheduler: SystemBackgroundTaskScheduler.shared
+                        backgroundScheduler: SystemBackgroundTaskScheduler.shared,
+                        // Kue 3.0 Phase 5 — docs/33 "Background behavior": reuses this exact
+                        // entry point rather than a second `BGTaskScheduler` identifier.
+                        syncCoordinator: SyncCoordinator.shared,
+                        accountCoordinator: accountCoordinatorForBackgroundRefresh
                     )
                 }
             }

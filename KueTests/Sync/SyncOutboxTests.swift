@@ -16,7 +16,7 @@ struct SyncOutboxTests {
     // MARK: 18/19 — offline create/edit/delete; multiple edits collapse
 
     @Test func multipleOfflineEditsCollapseToOnePendingUpload() {
-        let store = FakeCloudSyncStateStore()
+        let store = FakeSyncStateStore()
         let eventID = UUID()
         SyncOutbox.markEventDirty(eventID, store: store)
         SyncOutbox.markEventDirty(eventID, store: store)
@@ -25,7 +25,7 @@ struct SyncOutboxTests {
     }
 
     @Test func offlineDeleteRecordsATombstoneAndClearsAnyPendingUpload() {
-        let store = FakeCloudSyncStateStore()
+        let store = FakeSyncStateStore()
         let eventID = UUID()
         SyncOutbox.markEventDirty(eventID, store: store)
         SyncOutbox.markEventDeleted(eventID, now: now, store: store)
@@ -36,7 +36,7 @@ struct SyncOutboxTests {
     }
 
     @Test func editAfterAnUnsentDeleteSupersedesTheDeletion() {
-        let store = FakeCloudSyncStateStore()
+        let store = FakeSyncStateStore()
         let eventID = UUID()
         SyncOutbox.markEventDeleted(eventID, now: now, store: store)
         SyncOutbox.markEventDirty(eventID, store: store)
@@ -48,7 +48,7 @@ struct SyncOutboxTests {
     // MARK: 20 — delete before unsent create
 
     @Test func discardNeverUploadedClearsBothQueuesWithNoTombstone() {
-        let store = FakeCloudSyncStateStore()
+        let store = FakeSyncStateStore()
         let eventID = UUID()
         SyncOutbox.markEventDirty(eventID, store: store)
         SyncOutbox.discardNeverUploaded(eventID, store: store)
@@ -61,7 +61,7 @@ struct SyncOutboxTests {
     // MARK: Pending count
 
     @Test func pendingChangeCountSumsEveryQueue() {
-        let store = FakeCloudSyncStateStore()
+        let store = FakeSyncStateStore()
         SyncOutbox.markEventDirty(UUID(), store: store)
         SyncOutbox.markEventDirty(UUID(), store: store)
         SyncOutbox.markEventDeleted(UUID(), now: now, store: store)
@@ -72,7 +72,7 @@ struct SyncOutboxTests {
     // MARK: Tombstone retention
 
     @Test func tombstonesWithinRetentionWindowSurvivePruning() {
-        let store = FakeCloudSyncStateStore()
+        let store = FakeSyncStateStore()
         let eventID = UUID()
         SyncOutbox.markEventDeleted(eventID, now: now, store: store)
         let pruned = SyncOutbox.pruneExpiredTombstones(now: now.addingTimeInterval(60), store: store)
@@ -81,7 +81,7 @@ struct SyncOutboxTests {
     }
 
     @Test func tombstonesPastRetentionWindowArePruned() {
-        let store = FakeCloudSyncStateStore()
+        let store = FakeSyncStateStore()
         let eventID = UUID()
         SyncOutbox.markEventDeleted(eventID, now: now, store: store)
         let farFuture = now.addingTimeInterval(SyncOutbox.tombstoneRetention + 86_400)
@@ -91,7 +91,7 @@ struct SyncOutboxTests {
     }
 
     // MARK: Durability — persists across "process relaunch" (a fresh store instance for a
-    // real file-backed store; here, proving the state a fresh `SystemCloudSyncStateStore`
+    // real file-backed store; here, proving the state a fresh `SystemSyncStateStore`
     // instance reads back matches what an earlier instance wrote to the same file).
 
     @Test func systemStateStorePersistsAcrossInstances() {
@@ -99,10 +99,10 @@ struct SyncOutboxTests {
         defer { try? FileManager.default.removeItem(at: fileURL) }
 
         let eventID = UUID()
-        let firstInstance = SystemCloudSyncStateStore(fileURL: fileURL)
+        let firstInstance = SystemSyncStateStore(fileURL: fileURL)
         SyncOutbox.markEventDirty(eventID, store: firstInstance)
 
-        let secondInstance = SystemCloudSyncStateStore(fileURL: fileURL)
+        let secondInstance = SystemSyncStateStore(fileURL: fileURL)
         #expect(secondInstance.load().pendingEventUploads == [eventID])
     }
 }

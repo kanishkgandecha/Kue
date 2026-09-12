@@ -46,9 +46,61 @@ nonisolated enum EventGraphMapper {
             tasks: event.tasks.map(taskPayload).sorted { $0.sortOrder < $1.sortOrder },
             schedule: event.schedule.map(schedulePayload),
             widgetConfiguration: event.widgetConfiguration.map(widgetConfigurationPayload),
+            notificationRules: notificationRulePayloads(for: event),
             createdAt: event.createdAt,
             updatedAt: event.updatedAt
         )
+    }
+
+    /// Kue 3.0 Phase 5 — the event's own rules plus every one of its tasks' rules, flattened
+    /// into one array with `taskID` distinguishing ownership (mirrors `NotificationRule`'s own
+    /// "exactly one of event/task" invariant).
+    private static func notificationRulePayloads(for event: KueEvent) -> [NotificationRuleSyncPayload] {
+        let ownRules = event.notificationRules.map { notificationRulePayload($0, taskID: nil) }
+        let taskRules = event.tasks.flatMap { task in task.notificationRules.map { notificationRulePayload($0, taskID: task.id) } }
+        return (ownRules + taskRules).sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    private static func notificationRulePayload(_ rule: NotificationRule, taskID: UUID?) -> NotificationRuleSyncPayload {
+        NotificationRuleSyncPayload(
+            id: rule.id, taskID: taskID, anchor: rule.anchor.rawValue, offsetDirection: rule.offsetDirection.rawValue,
+            offsetQuantity: rule.offsetQuantity, offsetUnit: rule.offsetUnit.rawValue, absoluteDate: rule.absoluteDate,
+            isEnabled: rule.isEnabled, customTitle: rule.customTitle, customBody: rule.customBody,
+            sound: rule.sound.rawValue, interruptionPreference: rule.interruptionPreference.rawValue,
+            snoozeMinutes: rule.snoozeMinutes, sortOrder: rule.sortOrder, createdAt: rule.createdAt, updatedAt: rule.updatedAt
+        )
+    }
+
+    private static func makeNotificationRule(from payload: NotificationRuleSyncPayload, event: KueEvent?, task: KueTask?) -> NotificationRule {
+        NotificationRule(
+            id: payload.id, event: event, task: task,
+            anchor: NotificationRuleAnchor(rawValue: payload.anchor) ?? .eventStart,
+            offsetDirection: NotificationOffsetDirection(rawValue: payload.offsetDirection) ?? .before,
+            offsetQuantity: payload.offsetQuantity,
+            offsetUnit: NotificationOffsetUnit(rawValue: payload.offsetUnit) ?? .minutes,
+            absoluteDate: payload.absoluteDate, isEnabled: payload.isEnabled,
+            customTitle: payload.customTitle, customBody: payload.customBody,
+            sound: NotificationSoundOption(rawValue: payload.sound) ?? .defaultSound,
+            interruptionPreference: NotificationInterruptionPreference(rawValue: payload.interruptionPreference) ?? .active,
+            snoozeMinutes: payload.snoozeMinutes, sortOrder: payload.sortOrder,
+            createdAt: payload.createdAt, updatedAt: payload.updatedAt
+        )
+    }
+
+    private static func apply(_ payload: NotificationRuleSyncPayload, to rule: NotificationRule) {
+        rule.anchor = NotificationRuleAnchor(rawValue: payload.anchor) ?? .eventStart
+        rule.offsetDirection = NotificationOffsetDirection(rawValue: payload.offsetDirection) ?? .before
+        rule.offsetQuantity = payload.offsetQuantity
+        rule.offsetUnit = NotificationOffsetUnit(rawValue: payload.offsetUnit) ?? .minutes
+        rule.absoluteDate = payload.absoluteDate
+        rule.isEnabled = payload.isEnabled
+        rule.customTitle = payload.customTitle
+        rule.customBody = payload.customBody
+        rule.sound = NotificationSoundOption(rawValue: payload.sound) ?? .defaultSound
+        rule.interruptionPreference = NotificationInterruptionPreference(rawValue: payload.interruptionPreference) ?? .active
+        rule.snoozeMinutes = payload.snoozeMinutes
+        rule.sortOrder = payload.sortOrder
+        rule.updatedAt = payload.updatedAt
     }
 
     /// Constructs a brand-new, not-yet-inserted `KueEvent` (with its full child graph) from a
@@ -91,6 +143,16 @@ nonisolated enum EventGraphMapper {
         if let widgetConfiguration = record.widgetConfiguration {
             event.widgetConfiguration = makeWidgetConfiguration(from: widgetConfiguration, event: event)
         }
+        let tasksByID = Dictionary(uniqueKeysWithValues: event.tasks.map { ($0.id, $0) })
+        var ownRules: [NotificationRule] = []
+        for payload in record.notificationRules {
+            if let taskID = payload.taskID, let task = tasksByID[taskID] {
+                task.notificationRules.append(makeNotificationRule(from: payload, event: nil, task: task))
+            } else {
+                ownRules.append(makeNotificationRule(from: payload, event: event, task: nil))
+            }
+        }
+        event.notificationRules = ownRules
         return event
     }
 
@@ -102,14 +164,14 @@ nonisolated enum EventGraphMapper {
     /// inserted; one that only exists locally is removed — the remote graph becomes the
     /// complete truth for this event. Never touches `externalCalendar*` fields (device-local).
     ///
-    /// Returns the local `KueTask`s this call orphaned (present locally, absent from
-    /// `record.tasks`) — their `event` back-reference no longer points anywhere meaningful
-    /// once `mergedTasks` replaces `event.tasks` below, but SwiftData's cascade inverse
-    /// doesn't auto-delete an orphan, so the caller (`SyncCoordinator`, which owns the
-    /// `ModelContext` this pure mapper deliberately never touches) must `context.delete(_:)`
-    /// each one explicitly.
+    /// Returns the local `KueTask`s and `NotificationRule`s this call orphaned (present
+    /// locally, absent from `record.tasks`/`record.notificationRules`) — their back-reference
+    /// no longer points anywhere meaningful once the merged arrays replace the originals below,
+    /// but SwiftData's cascade inverse doesn't auto-delete an orphan, so the caller
+    /// (`SyncCoordinator`, which owns the `ModelContext` this pure mapper deliberately never
+    /// touches) must `context.delete(_:)` each one explicitly.
     @discardableResult
-    static func apply(_ record: EventSyncRecord, to event: KueEvent) -> [KueTask] {
+    static func apply(_ record: EventSyncRecord, to event: KueEvent) -> (orphanedTasks: [KueTask], orphanedNotificationRules: [NotificationRule]) {
         event.title = record.title
         event.eventType = EventType(rawValue: record.eventType) ?? .generic
         event.startDate = record.startDate
@@ -166,7 +228,30 @@ nonisolated enum EventGraphMapper {
             event.widgetConfiguration = nil
         }
 
-        return Array(remainingLocalTasks.values)
+        // Notification rules — same reconcile-by-id-within-scope shape as tasks above, scoped
+        // across the event's own rules plus every (possibly-just-merged) task's rules.
+        let mergedTasksByID = Dictionary(uniqueKeysWithValues: event.tasks.map { ($0.id, $0) })
+        var remainingLocalRules = Dictionary(uniqueKeysWithValues: event.notificationRules.map { ($0.id, $0) })
+        for task in event.tasks {
+            for rule in task.notificationRules { remainingLocalRules[rule.id] = rule }
+        }
+        var mergedOwnRules: [NotificationRule] = []
+        var mergedTaskRules: [UUID: [NotificationRule]] = [:] // taskID -> rules
+        for payload in record.notificationRules {
+            let existing = remainingLocalRules.removeValue(forKey: payload.id)
+            if let taskID = payload.taskID {
+                guard let task = mergedTasksByID[taskID] else { continue } // owner missing from this graph — skip, never crash
+                if let existing { apply(payload, to: existing); mergedTaskRules[taskID, default: []].append(existing) }
+                else { mergedTaskRules[taskID, default: []].append(makeNotificationRule(from: payload, event: nil, task: task)) }
+            } else {
+                if let existing { apply(payload, to: existing); mergedOwnRules.append(existing) }
+                else { mergedOwnRules.append(makeNotificationRule(from: payload, event: event, task: nil)) }
+            }
+        }
+        event.notificationRules = mergedOwnRules
+        for task in event.tasks { task.notificationRules = mergedTaskRules[task.id] ?? [] }
+
+        return (Array(remainingLocalTasks.values), Array(remainingLocalRules.values))
     }
 
     // MARK: - RecurrenceExclusion

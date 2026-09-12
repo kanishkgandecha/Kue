@@ -31,6 +31,12 @@ struct KueMacApp: App {
     @State private var accountCoordinator = Self.makeAccountCoordinator()
 
     init() {
+        // Kue 3.0 Phase 5 — same "real transport never runs under KueMacUITests" seam
+        // `KueApp.init()`'s own `SyncCoordinator.makeFromLaunchArguments()` call already
+        // establishes for iPhone.
+        if let fakeSyncCoordinator = SyncCoordinator.makeFromLaunchArguments() {
+            SyncCoordinator.shared = fakeSyncCoordinator
+        }
         switch ModelContainerFactory.makeDefaultOrDiagnostic() {
         case .success(let container):
             self.container = container
@@ -60,6 +66,11 @@ struct KueMacApp: App {
                         // Kue 3.0 Phase 4 — never blocks the window from opening; local data
                         // (the two sweeps above) is already independent of this.
                         .task { await accountCoordinator.restoreSession() }
+                        // Kue 3.0 Phase 5 — docs/33 "Architecture": the same launch-trigger
+                        // reasoning as `accountCoordinator.restoreSession()` immediately
+                        // above — `SyncCoordinator.sync` itself already no-ops instantly
+                        // unless sync is on, signed in, and past the first-sync decision.
+                        .task { await SyncCoordinator.shared.sync(context: container.mainContext, account: accountCoordinator) }
                 }
             }
             .frame(minWidth: 760, minHeight: 480)

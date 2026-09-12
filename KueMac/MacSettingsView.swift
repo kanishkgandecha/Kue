@@ -43,6 +43,7 @@ struct MacSettingsView: View {
         TabView {
             generalTab.tabItem { Label("General", systemImage: "gearshape") }
             MacAccountView().tabItem { Label("Account", systemImage: "person.crop.circle") }
+            MacSyncView().tabItem { Label("Sync", systemImage: "arrow.triangle.2.circlepath.icloud") }
             notificationsTab.tabItem { Label("Notifications", systemImage: "bell") }
             backupTab.tabItem { Label("Backup", systemImage: "arrow.down.doc") }
             aboutTab.tabItem { Label("About", systemImage: "info.circle") }

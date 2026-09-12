@@ -67,6 +67,38 @@ nonisolated struct WidgetConfigurationPayload: Codable, Equatable {
     var isEnabled: Bool
 }
 
+/// Kue 3.0 Phase 5 — docs/33 "Synchronized scope." One `NotificationRule`, event- or
+/// task-owned within *this* event's own graph — `taskID` is `nil` for an event-owned rule, or
+/// one of this event's own `tasks[].id` for a task-owned one (mirrors the local model's own
+/// "exactly one of event/task" invariant). Travels embedded here rather than as its own synced
+/// entity, exactly like `TaskSyncPayload` already does — it has no independent identity apart
+/// from the event graph it belongs to, and a rule add/edit is pushed by re-sending the whole
+/// event graph (`SyncOutbox.markNotificationRulesDirty`), never a separate sync record. Its
+/// *deletion*, unlike an edit, does get an explicit tombstone (requirement I) — see
+/// `SyncOutbox.markNotificationRuleDeleted`/`SyncPushBatch.notificationRuleDeletions` — so a
+/// rule's absence from this array is corroborated by that explicit signal, not the sole proof
+/// of deletion.
+nonisolated struct NotificationRuleSyncPayload: Codable, Equatable {
+    var id: UUID
+    var taskID: UUID?
+    /// Raw value of `NotificationRuleAnchor`. Unrecognized future case falls back to
+    /// `.eventStart` (never crashes the whole event's decode over one unknown rule anchor).
+    var anchor: String
+    var offsetDirection: String
+    var offsetQuantity: Int
+    var offsetUnit: String
+    var absoluteDate: Date?
+    var isEnabled: Bool
+    var customTitle: String?
+    var customBody: String?
+    var sound: String
+    var interruptionPreference: String
+    var snoozeMinutes: Int?
+    var sortOrder: Int
+    var createdAt: Date
+    var updatedAt: Date
+}
+
 nonisolated struct RecurrenceRulePayload: Codable, Equatable {
     /// Raw value of `RecurrenceRule.Frequency`.
     var frequency: String
@@ -110,12 +142,25 @@ nonisolated struct EventSyncRecord: Codable, Equatable {
     var tasks: [TaskSyncPayload]
     var schedule: SchedulePayload?
     var widgetConfiguration: WidgetConfigurationPayload?
+    /// Kue 3.0 Phase 5 — see `NotificationRuleSyncPayload`'s own header.
+    var notificationRules: [NotificationRuleSyncPayload]
     var createdAt: Date
-    /// docs/26 "H." — the whole-graph conflict-resolution timestamp. Bumped by every
-    /// `EventActions`/`WidgetIntentActions` explicit mutation (Kue 2.0 Phase 11 audit fix —
-    /// see those files' own comments), deliberately *not* by `EventStatusEngine.reconcile`'s
-    /// purely time-derived `status` cache refresh.
+    /// The whole-graph conflict-resolution timestamp for a *local* record (this device's own
+    /// `KueEvent.updatedAt`, bumped by every `EventActions`/`WidgetIntentActions` explicit
+    /// mutation). For a record decoded from a *pull* response, `SupabaseSyncTransport` stamps
+    /// this with the server's own `server_updated_at` instead — never a remote device's local
+    /// clock — before `SyncConflictResolver` ever sees it (docs/33 "Conflict policy": "do not
+    /// trust client clocks as the conflict authority").
     var updatedAt: Date
+    /// Kue 3.0 Phase 5 — the server-assigned revision this record was fetched at (0 for a
+    /// purely local, never-yet-pushed record). Sent back as `expectedRevision` on this event's
+    /// next push for optimistic-concurrency conflict detection — see `SyncPushResult
+    /// .conflictedEventIDs`.
+    var revision: Int64
+    /// This device's own idempotency key for the *specific* mutation this push represents — a
+    /// retried push of the identical local state reuses the same value, so the server can
+    /// recognize a duplicate delivery even where content alone wouldn't prove it.
+    var clientMutationID: UUID
 
     init(
         recordFormatVersion: Int = SyncRecordFormat.currentEventFormatVersion,
@@ -126,7 +171,8 @@ nonisolated struct EventSyncRecord: Codable, Equatable {
         recurrence: RecurrenceRulePayload?, seriesID: UUID?, recurrenceAnchorDate: Date?,
         isRecurrenceException: Bool, isSkipped: Bool, skippedAt: Date?,
         tasks: [TaskSyncPayload], schedule: SchedulePayload?, widgetConfiguration: WidgetConfigurationPayload?,
-        createdAt: Date, updatedAt: Date
+        notificationRules: [NotificationRuleSyncPayload] = [],
+        createdAt: Date, updatedAt: Date, revision: Int64 = 0, clientMutationID: UUID = UUID()
     ) {
         self.recordFormatVersion = recordFormatVersion
         self.id = id
@@ -154,8 +200,11 @@ nonisolated struct EventSyncRecord: Codable, Equatable {
         self.tasks = tasks
         self.schedule = schedule
         self.widgetConfiguration = widgetConfiguration
+        self.notificationRules = notificationRules
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.revision = revision
+        self.clientMutationID = clientMutationID
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -163,7 +212,8 @@ nonisolated struct EventSyncRecord: Codable, Equatable {
              estimatedDurationMinutes, isAllDay, timeZoneIdentifier, location, notes,
              source, priority, isCancelled, cancelledAt, isManuallyCompleted, manuallyCompletedAt,
              recurrence, seriesID, recurrenceAnchorDate, isRecurrenceException, isSkipped, skippedAt,
-             tasks, schedule, widgetConfiguration, createdAt, updatedAt
+             tasks, schedule, widgetConfiguration, notificationRules, createdAt, updatedAt,
+             revision, clientMutationID
     }
 
     /// Tolerant decode — docs/26 "O.": missing optional fields fall back to safe defaults,
@@ -202,8 +252,11 @@ nonisolated struct EventSyncRecord: Codable, Equatable {
         tasks = try container.decodeIfPresent([TaskSyncPayload].self, forKey: .tasks) ?? []
         schedule = try container.decodeIfPresent(SchedulePayload.self, forKey: .schedule)
         widgetConfiguration = try container.decodeIfPresent(WidgetConfigurationPayload.self, forKey: .widgetConfiguration)
+        notificationRules = try container.decodeIfPresent([NotificationRuleSyncPayload].self, forKey: .notificationRules) ?? []
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? startDate
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? startDate
+        revision = try container.decodeIfPresent(Int64.self, forKey: .revision) ?? 0
+        clientMutationID = try container.decodeIfPresent(UUID.self, forKey: .clientMutationID) ?? UUID()
     }
 }
 
@@ -214,16 +267,18 @@ nonisolated struct RecurrenceExclusionSyncRecord: Codable, Equatable {
     var id: UUID
     var seriesID: UUID
     var excludedAnchorDate: Date
+    var clientMutationID: UUID
 
-    init(recordFormatVersion: Int = SyncRecordFormat.currentRecurrenceExclusionFormatVersion, id: UUID, seriesID: UUID, excludedAnchorDate: Date) {
+    init(recordFormatVersion: Int = SyncRecordFormat.currentRecurrenceExclusionFormatVersion, id: UUID, seriesID: UUID, excludedAnchorDate: Date, clientMutationID: UUID = UUID()) {
         self.recordFormatVersion = recordFormatVersion
         self.id = id
         self.seriesID = seriesID
         self.excludedAnchorDate = excludedAnchorDate
+        self.clientMutationID = clientMutationID
     }
 
     private enum CodingKeys: String, CodingKey {
-        case recordFormatVersion, id, seriesID, excludedAnchorDate
+        case recordFormatVersion, id, seriesID, excludedAnchorDate, clientMutationID
     }
 
     init(from decoder: Decoder) throws {
@@ -236,5 +291,6 @@ nonisolated struct RecurrenceExclusionSyncRecord: Codable, Equatable {
         id = try container.decode(UUID.self, forKey: .id)
         seriesID = try container.decode(UUID.self, forKey: .seriesID)
         excludedAnchorDate = try container.decode(Date.self, forKey: .excludedAnchorDate)
+        clientMutationID = try container.decodeIfPresent(UUID.self, forKey: .clientMutationID) ?? UUID()
     }
 }

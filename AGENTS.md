@@ -1544,6 +1544,53 @@ reserved/invalid candidate, and both it and the new helper explicitly `revoke ..
 before granting only the roles that need them. Full regression: `KueTests` 1002/1002 (909 + 93
 Accounts tests, exact), `AccountUITests` 11/11, `KueMacTests` 44/44 — all re-run after this pass.
 
+**Kue 3.0 Phase 5 ("Supabase Cross-Device Synchronization") is done** — see
+docs/33-kue-3-supabase-cross-device-sync.md for the full contract. Supabase (Phase 4's account
+backend) is now Kue's sole production cross-device sync system, in every build configuration
+including Kue Personal — Kue 2.0 Phase 11's CloudKit sync (docs/26) is retired: its
+CloudKit-API-specific files (`SystemCloudSyncTransport.swift`'s `CKSyncEngine` driver,
+`SystemCloudAccountProvider.swift`, `CloudAccountProviding.swift`, `CloudKitContainerIdentifier
+.swift`, `SyncClock.swift`, `SyncDeviceIdentityProviding.swift`, `FakeCloudSyncTransport.swift`)
+are deleted, while its transport-independent logic — `SyncOutbox` (dirty-marking/tombstones,
+unchanged in shape and call sites), `SyncConflictResolver` (whole-graph LWW, unchanged),
+`EventGraphMapper`/`EventSyncRecord` (encode/decode) — is reused and extended, renamed away
+from "Cloud" naming (`CloudSyncTransporting` → `SyncTransporting`, `CloudSyncStatePersisting` →
+`SyncStatePersisting`). `SyncCoordinator.swift` and the new `SupabaseSyncTransport.swift` moved
+from `Kue/Services/Sync/` (iOS-app-only) to `Shared/Services/Sync/` since Mac now runs sync too.
+New checked-in migration `supabase/migrations/20260912000000_create_sync_tables.sql`: five
+normalized tables (`sync_events`, `sync_tasks`, `sync_schedules`, `sync_recurrence_exclusions`,
+`sync_notification_rules`), each with a server-controlled `revision`/`server_updated_at` (a
+shared trigger overwrites any client-supplied value — never trust a device clock for conflict
+ordering), a `server_seq` drawn from one shared sequence (the keyset pull cursor), and owner-only
+RLS with `security invoker` push RPCs (never `definer` — a bug in one can never reach another
+user's row, since the function's own DML is itself still subject to the same RLS policies a raw
+PostgREST call would face). `EventSyncRecord` gained `notificationRules`/`revision`/
+`clientMutationID`; `NotificationRule` (event- or task-owned) syncs for the first time, embedded
+in its owning event's graph for edits, with its own explicit deletion tombstone (`SyncOutbox
+.markNotificationRuleDeleted`) rather than inferring deletion from absence.
+`SyncConflictResolver.mergeRecurringOccurrence` (new) splits a recurring occurrence's content
+fields from its three outcome flags so a content edit on one device can never silently discard
+an offline completion/cancellation/skip from another — an explicit outcome on one side always
+survives a merge against a side with no explicit outcome, falling back to `updatedAt` only when
+both sides carry conflicting explicit outcomes. `AccountFirstSyncDecisionView` (iPhone)/
+`MacFirstSyncDecisionView` (Mac, no shared SwiftUI view target between platforms) present one of
+four local-vs-cloud states before ever pushing/pulling anything, computed from a real (read-only)
+probe — never a silent upload or replace. `SyncStatus` gained `.localOnly`/
+`.firstSyncDecisionRequired`/`.authenticationExpired`/`.retryScheduled`/`.partialFailure`;
+Settings' iPhone "Sync" section and a new Mac Settings "Sync" tab (`MacSyncView`) both read it.
+Background sync reuses the single existing `BGAppRefreshTask` identifier
+(`BackgroundRefreshHandler.handle` gained optional `syncCoordinator`/`accountCoordinator`
+parameters, `nil` by default so every pre-existing call site/test keeps compiling unchanged). A
+real bug found via this phase's own test-writing: `SyncCoordinator.sync` was unconditionally
+clearing a fresh rate-limit `retryNotBefore` the same pass that had just set it, since "push/pull
+succeeded" only meant "no transport-level failure," not "nothing was rate-limited" — fixed to
+only reset that bookkeeping when the pass didn't just set a new backoff window itself. **Disclosed
+gaps, not silently skipped**: no dedicated `SupabaseSyncTransport`-level unit tests (exercised
+only indirectly via `FakeSyncTransport`), no new `KueUITests`/`KueMacUITests` for the sync UI
+surfaces themselves (the coordinator logic beneath them is unit-tested), no large-dataset sync
+performance benchmark. **No Realtime/WebSocket work, collaboration, or public sharing was
+built — those remain explicitly out of scope, per this phase's own governing instructions.**
+
 Kue 3.0 Phase 1 — a fourth target, `KueMac`, a native macOS app; see docs/29 for the full
 contract. Several files moved from `Kue/Services/` into `Shared/Services/` (unchanged logic,
 same "the widget/App-Intent process needs it too" reasoning Phase 9 already used) so `KueMac`

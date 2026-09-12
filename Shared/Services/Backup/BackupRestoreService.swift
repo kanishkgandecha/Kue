@@ -49,7 +49,8 @@ nonisolated enum BackupRestoreService {
             case .applyRemote:
                 if let existing {
                     let orphaned = EventGraphMapper.apply(record, to: existing)
-                    for task in orphaned { context.delete(task) }
+                    for task in orphaned.orphanedTasks { context.delete(task) }
+                    for rule in orphaned.orphanedNotificationRules { context.delete(rule) }
                     summary.eventsUpdated += 1
                 } else {
                     context.insert(EventGraphMapper.makeEvent(from: record))
