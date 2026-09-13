@@ -20,6 +20,33 @@
 //  complete/unarchive "revive" an event, so they re-run the full reschedule pass instead
 //  (async — see NotificationEngine.reschedule) since the event may regain candidates.
 //
+//  Kue 3.0 Phase 8 correction pass — docs/36 "Reconciliation lifetime": `cancel`/`complete`/
+//  `skip`/`archive` are synchronous convenience wrappers that fire Live Activity/Spotlight
+//  reconciliation via an *unawaited* `Task`. That's genuinely safe when the caller is the
+//  main app's own long-lived process and the mutating view has nothing further to do (a
+//  Home/Event Detail button tap — the container/context these Tasks capture is the app-scoped
+//  `ModelContainer.mainContext`, alive for the whole process lifetime, so a sheet dismissing or
+//  a view tearing down underneath it changes nothing). It is **not** safe wherever the calling
+//  process/continuation can be suspended immediately after the mutating call returns — found by
+//  direct audit to be a real, pre-existing condition (not hypothetical) at three call sites:
+//  `CancelEventIntent`/`CompleteEventIntent`/`SkipEventIntent` (App Intents with
+//  `openAppWhenRun = false`, which the system can suspend right after `perform()` returns) and
+//  `NotificationActionHandler.handle` (its caller invokes the delegate's `completionHandler()`
+//  immediately after `handle` returns, which is the documented signal telling the system it may
+//  suspend the process). Each terminal action below therefore has two forms: the original sync
+//  wrapper (fire-and-forget, kept for the ~40 already-safe UI call sites) and a new `...
+//  AwaitingReconciliation` async twin that performs the identical mutation and then genuinely
+//  awaits Live Activity + Spotlight reconciliation before returning — used by the three App
+//  Intents above, `NotificationActionHandler`, `PlanningActionRouter`, and any test that needs
+//  a deterministic completion signal instead of an arbitrary sleep. Mutation semantics
+//  (`isCancelled`/`isManuallyCompleted`/etc., notification removal, sync-outbox marking, widget
+//  reload) are identical between the two forms — only how the trailing reconciliation is
+//  awaited differs. Account switching/sign-out (`AccountCoordinator.signOut`) and backup
+//  restore never call these functions at all and never recreate/tear down the shared
+//  `ModelContainer` (confirmed by direct inspection — Kue's local store is a single,
+//  account-agnostic, process-lifetime singleton; Personal/local-only mode is exactly this
+//  already), so neither is a real risk vector for this lifetime hazard in this codebase today.
+//
 
 import Foundation
 import SwiftData
@@ -27,8 +54,27 @@ import WidgetKit
 
 enum EventActions {
     /// Cancelling and manually completing are mutually exclusive — cancelling clears any
-    /// prior manual completion.
+    /// prior manual completion. Fire-and-forget reconciliation — see this file's own header
+    /// for exactly which callers this is (and isn't) safe for. Idempotent: calling this again
+    /// on an already-cancelled event re-applies the same field values and re-runs
+    /// reconciliation harmlessly (notification removal/Live-Activity/Spotlight are themselves
+    /// idempotent — see `EventActionsReconciliationTests`).
     static func cancel(_ event: KueEvent, context: ModelContext, now: Date = .now, scheduler: NotificationScheduling = SystemNotificationScheduler.shared, liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared, spotlightIndexer: SpotlightIndexing = SystemSpotlightIndexer.shared) {
+        applyCancel(event, context: context, now: now, scheduler: scheduler)
+        Task { await reconcileAfterMutation(event, context: context, manager: liveActivityManager, indexer: spotlightIndexer, now: now) }
+    }
+
+    /// Deterministic twin of `cancel` — identical mutation, but returns only once Live
+    /// Activity + Spotlight reconciliation has actually finished. Required wherever the
+    /// caller's own process/continuation can be suspended immediately after returning (App
+    /// Intents, notification actions) or wherever a test needs a real completion signal
+    /// instead of an arbitrary sleep — see this file's own header.
+    static func cancelAwaitingReconciliation(_ event: KueEvent, context: ModelContext, now: Date = .now, scheduler: NotificationScheduling = SystemNotificationScheduler.shared, liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared, spotlightIndexer: SpotlightIndexing = SystemSpotlightIndexer.shared) async {
+        applyCancel(event, context: context, now: now, scheduler: scheduler)
+        await reconcileAfterMutation(event, context: context, manager: liveActivityManager, indexer: spotlightIndexer, now: now)
+    }
+
+    private static func applyCancel(_ event: KueEvent, context: ModelContext, now: Date, scheduler: NotificationScheduling) {
         event.isCancelled = true
         event.cancelledAt = now
         event.isManuallyCompleted = false
@@ -45,7 +91,6 @@ enum EventActions {
         SyncOutbox.markEventDirty(event.id)
         reloadWidget()
         NotificationEngine.removeAllNotifications(for: event, scheduler: scheduler)
-        reconcileAfterMutation(event, context: context, manager: liveActivityManager, indexer: spotlightIndexer, now: now)
     }
 
     static func uncancel(_ event: KueEvent, context: ModelContext, now: Date = .now, scheduler: NotificationScheduling = SystemNotificationScheduler.shared, liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared, spotlightIndexer: SpotlightIndexing = SystemSpotlightIndexer.shared) async {
@@ -63,8 +108,20 @@ enum EventActions {
         await spotlightIndexer.index([SpotlightEventPayloadBuilder.payload(for: event, now: now)])
     }
 
-    /// Manually completing clears any prior cancellation — mirror of `cancel`.
+    /// Manually completing clears any prior cancellation — mirror of `cancel`. See `cancel`'s
+    /// own comment for the fire-and-forget-safety/idempotency notes that apply identically here.
     static func complete(_ event: KueEvent, context: ModelContext, now: Date = .now, scheduler: NotificationScheduling = SystemNotificationScheduler.shared, liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared, spotlightIndexer: SpotlightIndexing = SystemSpotlightIndexer.shared) {
+        applyComplete(event, context: context, now: now, scheduler: scheduler)
+        Task { await reconcileAfterMutation(event, context: context, manager: liveActivityManager, indexer: spotlightIndexer, now: now) }
+    }
+
+    /// Deterministic twin of `complete` — see `cancelAwaitingReconciliation`'s own comment.
+    static func completeAwaitingReconciliation(_ event: KueEvent, context: ModelContext, now: Date = .now, scheduler: NotificationScheduling = SystemNotificationScheduler.shared, liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared, spotlightIndexer: SpotlightIndexing = SystemSpotlightIndexer.shared) async {
+        applyComplete(event, context: context, now: now, scheduler: scheduler)
+        await reconcileAfterMutation(event, context: context, manager: liveActivityManager, indexer: spotlightIndexer, now: now)
+    }
+
+    private static func applyComplete(_ event: KueEvent, context: ModelContext, now: Date, scheduler: NotificationScheduling) {
         event.isManuallyCompleted = true
         event.manuallyCompletedAt = now
         event.isCancelled = false
@@ -77,7 +134,6 @@ enum EventActions {
         SyncOutbox.markEventDirty(event.id)
         reloadWidget()
         NotificationEngine.removeAllNotifications(for: event, scheduler: scheduler)
-        reconcileAfterMutation(event, context: context, manager: liveActivityManager, indexer: spotlightIndexer, now: now)
     }
 
     static func uncomplete(_ event: KueEvent, context: ModelContext, now: Date = .now, scheduler: NotificationScheduling = SystemNotificationScheduler.shared, liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared, spotlightIndexer: SpotlightIndexing = SystemSpotlightIndexer.shared) async {
@@ -102,6 +158,17 @@ enum EventActions {
     /// Also marks `isRecurrenceException` — a skip is a deviation from the rule and must never
     /// be silently regenerated by replenishment.
     static func skip(_ event: KueEvent, context: ModelContext, now: Date = .now, scheduler: NotificationScheduling = SystemNotificationScheduler.shared, liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared, spotlightIndexer: SpotlightIndexing = SystemSpotlightIndexer.shared) {
+        applySkip(event, context: context, now: now, scheduler: scheduler)
+        Task { await reconcileAfterMutation(event, context: context, manager: liveActivityManager, indexer: spotlightIndexer, now: now) }
+    }
+
+    /// Deterministic twin of `skip` — see `cancelAwaitingReconciliation`'s own comment.
+    static func skipAwaitingReconciliation(_ event: KueEvent, context: ModelContext, now: Date = .now, scheduler: NotificationScheduling = SystemNotificationScheduler.shared, liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared, spotlightIndexer: SpotlightIndexing = SystemSpotlightIndexer.shared) async {
+        applySkip(event, context: context, now: now, scheduler: scheduler)
+        await reconcileAfterMutation(event, context: context, manager: liveActivityManager, indexer: spotlightIndexer, now: now)
+    }
+
+    private static func applySkip(_ event: KueEvent, context: ModelContext, now: Date, scheduler: NotificationScheduling) {
         event.isSkipped = true
         event.skippedAt = now
         event.isCancelled = false
@@ -117,7 +184,6 @@ enum EventActions {
         SyncOutbox.markEventDirty(event.id)
         reloadWidget()
         NotificationEngine.removeAllNotifications(for: event, scheduler: scheduler)
-        reconcileAfterMutation(event, context: context, manager: liveActivityManager, indexer: spotlightIndexer, now: now)
     }
 
     static func unskip(_ event: KueEvent, context: ModelContext, now: Date = .now, scheduler: NotificationScheduling = SystemNotificationScheduler.shared, liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared, spotlightIndexer: SpotlightIndexing = SystemSpotlightIndexer.shared) async {
@@ -137,6 +203,17 @@ enum EventActions {
 
     /// Immediate manual archive, independent of the auto-archive window.
     static func archive(_ event: KueEvent, context: ModelContext, now: Date = .now, scheduler: NotificationScheduling = SystemNotificationScheduler.shared, liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared, spotlightIndexer: SpotlightIndexing = SystemSpotlightIndexer.shared) {
+        applyArchive(event, context: context, now: now, scheduler: scheduler)
+        Task { await reconcileAfterMutation(event, context: context, manager: liveActivityManager, indexer: spotlightIndexer, now: now) }
+    }
+
+    /// Deterministic twin of `archive` — see `cancelAwaitingReconciliation`'s own comment.
+    static func archiveAwaitingReconciliation(_ event: KueEvent, context: ModelContext, now: Date = .now, scheduler: NotificationScheduling = SystemNotificationScheduler.shared, liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared, spotlightIndexer: SpotlightIndexing = SystemSpotlightIndexer.shared) async {
+        applyArchive(event, context: context, now: now, scheduler: scheduler)
+        await reconcileAfterMutation(event, context: context, manager: liveActivityManager, indexer: spotlightIndexer, now: now)
+    }
+
+    private static func applyArchive(_ event: KueEvent, context: ModelContext, now: Date, scheduler: NotificationScheduling) {
         event.status = .archived
         event.updatedAt = now
         try? context.save()
@@ -145,7 +222,6 @@ enum EventActions {
         SyncOutbox.markEventDirty(event.id)
         reloadWidget()
         NotificationEngine.removeAllNotifications(for: event, scheduler: scheduler)
-        reconcileAfterMutation(event, context: context, manager: liveActivityManager, indexer: spotlightIndexer, now: now)
     }
 
     /// Restores an archived event to its freshly-derived, date-driven status.
@@ -169,20 +245,39 @@ enum EventActions {
     /// cancel/complete/archive, which leave the event in the store). Captures the id first for
     /// the same reason, so the Live Activity reconciliation below still knows which activity
     /// (if any) needs to move to `.unavailable`.
-    static func delete(_ event: KueEvent, context: ModelContext, scheduler: NotificationScheduling = SystemNotificationScheduler.shared, liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared, spotlightIndexer: SpotlightIndexing = SystemSpotlightIndexer.shared) {
+    static func delete(_ event: KueEvent, context: ModelContext, now: Date = .now, scheduler: NotificationScheduling = SystemNotificationScheduler.shared, liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared, spotlightIndexer: SpotlightIndexing = SystemSpotlightIndexer.shared) {
+        let deletedID = applyDelete(event, context: context, now: now, scheduler: scheduler)
+        Task { await reconcileAfterDelete(deletedID, context: context, manager: liveActivityManager, indexer: spotlightIndexer, now: now) }
+    }
+
+    /// Deterministic twin of `delete` — see `cancelAwaitingReconciliation`'s own comment. Not
+    /// currently called from any App Intent/notification-action path (only UI and
+    /// `OccurrenceReconciliationService`, both already safe), but exposed for the same
+    /// future-proofing/testability reason the other four terminal actions have one.
+    static func deleteAwaitingReconciliation(_ event: KueEvent, context: ModelContext, now: Date = .now, scheduler: NotificationScheduling = SystemNotificationScheduler.shared, liveActivityManager: LiveActivityManaging = SystemLiveActivityManager.shared, spotlightIndexer: SpotlightIndexing = SystemSpotlightIndexer.shared) async {
+        let deletedID = applyDelete(event, context: context, now: now, scheduler: scheduler)
+        await reconcileAfterDelete(deletedID, context: context, manager: liveActivityManager, indexer: spotlightIndexer, now: now)
+    }
+
+    @discardableResult
+    private static func applyDelete(_ event: KueEvent, context: ModelContext, now: Date, scheduler: NotificationScheduling) -> UUID {
         let identifiers = NotificationCandidateBuilder.allIdentifiers(for: event)
         let deletedID = event.id
         context.delete(event)
         try? context.save()
         // Kue 2.0 Phase 11 — docs/26 "E.": a deletion enqueues a tombstone, not a dirty-upload
         // mark — see `SyncOutbox.markEventDeleted`'s own header.
-        SyncOutbox.markEventDeleted(deletedID, now: .now)
+        SyncOutbox.markEventDeleted(deletedID, now: now)
         reloadWidget()
         if !identifiers.isEmpty {
             scheduler.removePendingNotificationRequests(withIdentifiers: identifiers)
         }
-        reconcileLiveActivity(context: context, manager: liveActivityManager, now: .now)
-        Task { await spotlightIndexer.remove(eventIDs: [deletedID]) }
+        return deletedID
+    }
+
+    private static func reconcileAfterDelete(_ deletedID: UUID, context: ModelContext, manager: LiveActivityManaging, indexer: SpotlightIndexing, now: Date) async {
+        await LiveActivityReconciler.reconcile(context: context, manager: manager, now: now)
+        await indexer.remove(eventIDs: [deletedID])
     }
 
     /// Fire-and-forget — safe to call even when no widget is placed, and safe to call from
@@ -201,26 +296,19 @@ enum EventActions {
         await NotificationEngine.reschedule(context: context, intensity: intensity, scheduler: scheduler, now: now)
     }
 
-    /// Kue 2.0 Phase 9 — the app process stays alive well past a button tap (unlike a widget
-    /// extension's `perform()`), so a detached `Task` here is safe and avoids making every
-    /// synchronous action in this file `async` (which would ripple into every button call
-    /// site and every existing synchronous `EventActionsNotificationTests`/`EventCRUDTests`
-    /// call, for no behavioral benefit — the widget-extension-triggered path in
-    /// `WidgetIntentActions` *does* need to `await` this directly, since that process can be
-    /// suspended immediately after returning).
-    private static func reconcileLiveActivity(context: ModelContext, manager: LiveActivityManaging, now: Date) {
-        Task { await LiveActivityReconciler.reconcile(context: context, manager: manager, now: now) }
-    }
-
-    /// Kue 2.0 Phase 10 — same fire-and-forget reasoning as `reconcileLiveActivity` above,
-    /// bundled together since every synchronous terminal-state action needs both: the Live
-    /// Activity reconciled *and* Spotlight's copy of this event's status/title kept current
-    /// (docs/24 "G."). `event` (not just its id) is captured before the `Task` starts so a
-    /// caller that mutates the same object again immediately after still reads consistently —
-    /// SwiftData model objects are reference types, so this closure sees the state as of
-    /// whenever the Task actually runs, same as `reconcileLiveActivity`'s own `context` capture.
-    private static func reconcileAfterMutation(_ event: KueEvent, context: ModelContext, manager: LiveActivityManaging, indexer: SpotlightIndexing, now: Date) {
-        reconcileLiveActivity(context: context, manager: manager, now: now)
-        Task { await indexer.index([SpotlightEventPayloadBuilder.payload(for: event, now: now)]) }
+    /// Kue 3.0 Phase 8 correction pass — the one place Live Activity + Spotlight reconciliation
+    /// actually happens after a terminal mutation, for both the fire-and-forget sync wrappers
+    /// (called from inside their own `Task { await ... }`) and the `...AwaitingReconciliation`
+    /// twins (called directly, `await`ed by the caller). No child `Task` is spawned here
+    /// itself — previously this split into two separately-orphaned Tasks (one for Live
+    /// Activity, one for Spotlight), which is exactly what made "wait for reconciliation to
+    /// finish" impossible to express deterministically; awaiting both sequentially in one
+    /// place is what makes the `...AwaitingReconciliation` variants a real, awaitable
+    /// completion signal. `event` (not just its id) is captured by value from the caller before
+    /// this runs, so a caller that mutates the same object again immediately after still reads
+    /// consistently.
+    private static func reconcileAfterMutation(_ event: KueEvent, context: ModelContext, manager: LiveActivityManaging, indexer: SpotlightIndexing, now: Date) async {
+        await LiveActivityReconciler.reconcile(context: context, manager: manager, now: now)
+        await indexer.index([SpotlightEventPayloadBuilder.payload(for: event, now: now)])
     }
 }

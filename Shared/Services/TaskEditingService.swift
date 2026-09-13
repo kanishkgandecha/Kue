@@ -45,6 +45,27 @@ enum TaskEditingService {
         if let eventID = task.event?.id { SyncOutbox.markEventDirty(eventID) }
     }
 
+    /// Kue 3.0 Phase 8 — docs/36. No existing service could change a task's own `dueDate`
+    /// (every prior path either regenerates the whole set from `SchedulingEngine` or leaves
+    /// dates untouched), and the planner's "Move a Task Earlier"/"Reduce Today's Load" accept
+    /// actions need exactly this one narrow capability — so this is a genuine, minimal
+    /// addition rather than a duplicate of anything. Mirrors every other mutation here: bump
+    /// `updatedAt`, mark the sync outbox, reschedule the task-due notification for its new
+    /// date, reload the widget.
+    static func rescheduleTask(
+        _ task: KueTask, to newDueDate: Date, context: ModelContext,
+        scheduler: NotificationScheduling = SystemNotificationScheduler.shared, now: Date = .now
+    ) async {
+        guard newDueDate != task.dueDate else { return }
+        task.dueDate = newDueDate
+        task.event?.updatedAt = now
+        try? context.save()
+        if let eventID = task.event?.id { SyncOutbox.markEventDirty(eventID) }
+        let intensity = UserPreferenceStore.current(context: context).notificationIntensity
+        await NotificationEngine.reschedule(context: context, intensity: intensity, scheduler: scheduler, now: now)
+        EventActions.reloadWidget()
+    }
+
     /// The reverse of `WidgetIntentActions.completeTask` — nothing else in the codebase
     /// offers this, since every existing completion path is the one-way widget/notification
     /// button. Deliberately doesn't re-schedule the task-due notification that completing

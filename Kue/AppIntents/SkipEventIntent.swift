@@ -35,7 +35,10 @@ struct SkipEventIntent: AppIntent {
             throw KueIntentError.invalidInput(message: "\"\(event.title)\" isn't part of a recurring series, so there's nothing to skip.")
         }
         try await requestConfirmation(dialog: "Skip this occurrence of \"\(event.title)\" in Kue?")
-        EventActions.skip(event, context: context)
+        // Kue 3.0 Phase 8 correction pass — see `CancelEventIntent`'s own comment: this
+        // process can be suspended immediately after `perform()` returns, so reconciliation
+        // must be awaited, not fired-and-forgotten.
+        await EventActions.skipAwaitingReconciliation(event, context: context)
         return .result(dialog: "Skipped \"\(event.title)\" in Kue.")
     }
 }

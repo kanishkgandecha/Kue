@@ -106,6 +106,18 @@ struct SettingsView: View {
                 .accessibilityIdentifier("insightsLink")
             }
 
+            // Kue 3.0 Phase 8 — docs/36 "G." Works fully signed-out — nothing here is gated
+            // on `AccountCoordinator`, matching Insights' own "available regardless of
+            // sign-in state" precedent immediately above.
+            Section {
+                NavigationLink {
+                    SmartPlanningSettingsView()
+                } label: {
+                    Label("Smart Planning", systemImage: "sparkles")
+                }
+                .accessibilityIdentifier("smartPlanningLink")
+            }
+
             Section {
                 permissionStatusRow
                 if authorizationStatus == .denied {

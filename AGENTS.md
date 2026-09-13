@@ -1680,6 +1680,115 @@ occurrences in one action (new occurrences already inherit rules via the pre-exi
 template-copy mechanism; editing existing future ones individually still works). Full
 regression: `KueTests` 1072/1072, `KueMacTests` 51/51, `NotificationStudioUITests` 5/5.
 
+**Kue 3.0 Phase 8 ("Smart Planning and Productivity Intelligence") is done** — see docs/36 for
+the full contract. A new `Shared/Services/Planning/` module: a pure `nonisolated
+SmartPlanningEngine.makePlan(_:)` (off the main actor by design, per the module's own default
+`@MainActor` isolation setting) taking plain `PlanningEventSnapshot`/`PlanningTaskSnapshot`
+values (never `KueEvent`/`KueTask` directly — `PlanningSnapshotBuilder` is the one `@MainActor`
+bridge, reusing `EventStatusEngine.derive` rather than re-deriving status) and producing an
+immutable `TodayPlan` of `PlanningRecommendation`s across all ten required categories (Work on
+Next, Schedule Preparation, Move a Task Earlier, Reduce Today's Load, Resolve Scheduling
+Conflict, Review Overdue Task, Confirm Event Outcome, Prepare for Upcoming Event, Protect a
+Focus Block, Review an At-Risk Event). Every recommendation id is content-derived (category +
+affected ids + a day-granularity fingerprint), never a fresh `UUID()` — this is what makes
+`RecommendationDismissalStore`'s expiry work without extra bookkeeping and what makes
+"identical input → identical plan" hold trivially. New iPhone Today Plan sheet
+(`Kue/Features/Planning/TodayPlanView.swift`, reached via a Home toolbar button) and a native
+Mac two-column `.plan` sidebar destination (`KueMac/MacTodayPlanView.swift`) share one
+`@Observable` `TodayPlanViewModel` that runs the actual scoring pass inside
+`Task.detached(priority: .userInitiated)`. `PlanningActionRouter` routes every Accept/Confirm-
+Outcome/Add-to-Calendar action through existing services only —
+`TaskEditingService.rescheduleTask` (new, narrow: no prior service could change a task's own
+due date), `EventActions.complete`/`.skip`/`.cancel`, `CalendarProviding.save` — never a
+parallel mutation path; "Start Focus" is iOS-only
+(`Kue/Services/Planning/PlanningFocusActions.swift`, wrapping the existing
+`LiveActivityFocusCoordinator`) since Live Activities don't exist on macOS. **No SwiftData
+schema change, no Supabase sync** — `SmartPlanningPreferences`/`RecommendationDismissalStore`
+are App Group `UserDefaults` JSON, explicitly device-local (same precedent as
+`NotificationGlobalPreferences`), and there is deliberately no `FocusBlock` model at all — a
+proposed block only becomes durable by turning into a real Calendar event or a real Live
+Activity. Apple Intelligence wording enhancement was deliberately **not built** (the spec marks
+it optional and the deterministic explanations already satisfy every requirement — the existing
+`AIAvailabilityChecking` seam is documented as the ready-made hook if a future phase wants it).
+**One real defect found by direct code audit and fixed**: `PlanningSnapshotBuilder` was
+filtering on `EventStatusEngine.derive(...)  != .archived`, but `derive()` can never itself
+return `.archived` (that status only ever comes from the persisted field via an explicit
+archive action) — the filter never actually excluded anything; fixed to check the persisted
+`event.status` directly, caught by `PlanningActionRouterTests.archivedEventsAreExcludedFromTheSnapshot`
+before shipping. **Disclosed, not built**: deep interactive `KueUITests` coverage of a specific
+recommendation's explanation/action buttons (no existing UI-test fixture seeds a past-dated/
+overdue event without a real date-picker interaction) — see docs/36 "L."/"O." for what's
+covered instead and the manual physical-device checklist.
+
+**Kue 3.0 Phase 8 correction pass is done** — see docs/36's own "L." and "M." for the full
+writeup. Three issues, all resolved:
+
+1. **`EventCRUDTests` was never actually matching zero tests.** The original report checked
+   only the legacy XCTest-bridge "Executed N tests" line, which reads `0` for every pure Swift
+   Testing suite in this target regardless of whether it ran — `-only-testing:KueTests/
+   EventCRUDTests` (the correct identifier: module `KueTests`, top-level
+   `struct EventCRUDTests`) was already right, and the xcresult's own `testNodes` plus the
+   Swift Testing event stream's `Test run with 10 tests in 1 suite passed` line confirm all 10
+   really ran and passed. The real fix here is procedural: check `◇ Suite ... started` /
+   `✔ Suite ... passed` / `Test run with N tests in M suites passed`, never the XCTest-bridge
+   count, when verifying a Swift Testing suite via `xcodebuild`.
+2. **The `settle()` sleep is gone — replaced with a real, awaitable completion path.** Audited
+   whether the reconciliation-lifetime hazard was only a test artifact (it wasn't):
+   `EventActions.complete`/`.cancel`/`.skip`/`.archive`/`.delete` launch unawaited `Task`
+   reconciliation work that's safe only when the caller's process/context is guaranteed to
+   outlive it. Direct audit found three real production call sites where that guarantee
+   doesn't hold — `CancelEventIntent`/`CompleteEventIntent`/`SkipEventIntent` (App Intents,
+   `openAppWhenRun = false`, suspendable right after `perform()` returns) and
+   `NotificationActionHandler.handle` (its caller signals "suspend me now" via
+   `completionHandler()` immediately after `handle` returns). Fixed in `EventActions.swift`:
+   each terminal action now has a deterministic `...AwaitingReconciliation` async twin that
+   awaits Live Activity + Spotlight reconciliation directly (no `Task`) — used by all three
+   App Intents, `NotificationActionHandler`, and `PlanningActionRouter.confirmOutcome`; the
+   original fire-and-forget sync wrappers stay for the ~40 UI call sites where that pattern is
+   genuinely safe (documented explicitly in that file's own header, alongside the direct
+   confirmation that account-switching/sign-out and backup restore never touch these functions
+   or the shared `ModelContainer` at all). New `EventActionsReconciliationTests.swift` (9
+   tests) proves deterministic completion, safe container release, and idempotency — including
+   a real, previously-unproven case: a second `cancel` on an already-ended Live Activity
+   correctly finds nothing left to reconcile, rather than assuming "runs twice" is the whole of
+   idempotency.
+3. **Planning engine: ~65–70× faster at 5,000 events, from real profiling, not guesswork.**
+   Temporary per-category timers inside `makePlan` (added, used, then removed) found
+   `generateSchedulePreparation` alone taking ~4.3s of a ~6.2s total — `bestAvailableSlot` was
+   rebuilding and re-sorting the entire busy-interval list from scratch on every call, once per
+   candidate event. Fixed by precomputing `Context.sortedBusyIntervals` once per `makePlan`
+   call. That fix also exposed that the original 5,000-event benchmark fixture was itself
+   unrealistic (all events clustered into a ~60-hour window, causing `generateResolveConflicts`
+   to construct on the order of 200,000 pairwise-conflict recommendations) — corrected to a
+   realistic ~2-year spread, after which `Context.workingDaysUntil`'s O(days) day-by-day loop
+   became the next real cost (~365 iterations for a year-out event); replaced with an O(1)
+   full-weeks-plus-remainder closed form (any 7 consecutive calendar days contain each weekday
+   exactly once), verified equivalent to the original via exact boundary tests in
+   `SmartPlanningEngineTests` (one independently cross-checked against a plain Python
+   `datetime.timedelta` walk). Benchmark: 100/1,000/5,000 events now ~0.002s/~0.02s/~0.10s
+   (was ~0.005s/~0.6–0.7s/~6.6–7.4s) — comfortably under the 2-second target, nothing deferred.
+   `SmartPlanningEngine` remains `nonisolated` and off the main actor via
+   `Task.detached(priority: .userInitiated)`; identical inputs remain deterministic.
+
+Files changed in this pass: `Shared/Services/EventActions.swift` (the five
+`...AwaitingReconciliation` twins), `Kue/AppIntents/{Cancel,Complete,Skip}EventIntent.swift`,
+`Kue/Services/NotificationActionHandler.swift`, `Shared/Services/Planning/
+PlanningActionRouter.swift` (`confirmOutcome` now calls the awaitable variants),
+`Shared/Services/Planning/SmartPlanningEngine.swift` (the two performance fixes),
+`KueTests/EventActionsReconciliationTests.swift` (new), `KueTests/Planning/
+PlanningActionRouterTests.swift` (`settle()` removed), `KueTests/Planning/
+SmartPlanningEngineTests.swift` (equivalence tests added), `KueTests/Planning/
+SmartPlanningPerformanceBenchmarkTests.swift` (realistic fixture). Verification:
+`KueTests/Planning/*` + `EventActionsReconciliationTests` (55/55), corrected `EventCRUDTests`
+(10/10), directly-affected regression (`EventActionsNotificationTests`,
+`AppIntentMutationConsistencyTests`, `EventDuplicationServiceTests`,
+`LiveActivityReconcilerTests`, `OccurrenceReconciliationServiceTests`,
+`WidgetIntentActionsTests` — 59/59 combined), `KueMacTests` full suite (54/54),
+`TodayPlanUITests` (4/4), clean `Kue` and `Kue Mac Personal` builds — all
+`-parallel-testing-enabled NO`, no crash/restart in any run. Phase 9 was not started; no Git
+operations, physical-device access, production-store access, or live Supabase mutation
+occurred.
+
 Kue 3.0 Phase 1 — a fourth target, `KueMac`, a native macOS app; see docs/29 for the full
 contract. Several files moved from `Kue/Services/` into `Shared/Services/` (unchanged logic,
 same "the widget/App-Intent process needs it too" reasoning Phase 9 already used) so `KueMac`

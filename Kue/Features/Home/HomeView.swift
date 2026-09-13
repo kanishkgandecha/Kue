@@ -35,6 +35,8 @@ struct HomeView: View {
     @Query(sort: \KueEvent.startDate) private var events: [KueEvent]
     @State private var isCompletedExpanded = false
     @State private var isLaterExpanded = false
+    // Kue 3.0 Phase 8 — docs/36 "D."
+    @State private var isShowingTodayPlan = false
 
     private var visibleEvents: [KueEvent] {
         events.filter { $0.status != .archived }
@@ -73,7 +75,22 @@ struct HomeView: View {
                     ToolbarItem(placement: .principal) {
                         KueWordmark()
                     }
+                    // Kue 3.0 Phase 8 — docs/36 "D.": reachable from Home without
+                    // overwhelming the existing dated sections — a sheet, same presentation
+                    // `EventUnavailableView`/`LockScreenEventSelectionView` already use for a
+                    // Home-launched destination that isn't a pushed detail screen.
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            isShowingTodayPlan = true
+                        } label: {
+                            Label("Today Plan", systemImage: "sparkles")
+                        }
+                        .accessibilityIdentifier("todayPlanButton")
+                    }
                 }
+        }
+        .sheet(isPresented: $isShowingTodayPlan) {
+            TodayPlanView()
         }
         .task { await EventReconciliation.run(context: modelContext) }
         .task {

@@ -13,13 +13,14 @@ import SwiftUI
 import SwiftData
 
 enum MacSidebarDestination: String, CaseIterable, Identifiable {
-    case home, today, upcoming, needsReview, search, templates, completed
+    case home, plan, today, upcoming, needsReview, search, templates, completed
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .home: return "Home"
+        case .plan: return "Plan"
         case .today: return "Today"
         case .upcoming: return "Upcoming"
         case .needsReview: return "Needs Review"
@@ -32,6 +33,7 @@ enum MacSidebarDestination: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .home: return "house"
+        case .plan: return "sparkles"
         case .today: return "sun.max"
         case .upcoming: return "calendar"
         case .needsReview: return "exclamationmark.circle"
@@ -152,6 +154,8 @@ struct RootSplitView: View {
         switch selectedDestination {
         case .home:
             MacHomeListView(events: allEvents, selectedEventID: $selectedEventID, onNewEvent: presentNewEvent)
+        case .plan:
+            MacTodayPlanView(selectedEventID: $selectedEventID)
         case .today:
             MacFilteredListView(
                 title: "Today",

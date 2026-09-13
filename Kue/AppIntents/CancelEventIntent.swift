@@ -33,7 +33,11 @@ struct CancelEventIntent: AppIntent {
         let context = try KueIntentSupport.makeContext()
         let event = try KueIntentSupport.resolveEvent(eventIDString: eventIDString, query: query, context: context)
         try await requestConfirmation(dialog: "Cancel \"\(event.title)\" in Kue?")
-        EventActions.cancel(event, context: context)
+        // Kue 3.0 Phase 8 correction pass — the awaitable variant, not `cancel`: this intent's
+        // hosting process can be suspended the instant `perform()` returns
+        // (`openAppWhenRun = false`), so Live Activity/Spotlight reconciliation must actually
+        // finish before that happens, not be left running in an orphaned `Task`.
+        await EventActions.cancelAwaitingReconciliation(event, context: context)
         return .result(dialog: "Cancelled \"\(event.title)\" in Kue.")
     }
 }

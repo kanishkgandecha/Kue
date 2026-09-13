@@ -32,7 +32,10 @@ struct CompleteEventIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let context = try KueIntentSupport.makeContext()
         let event = try KueIntentSupport.resolveEvent(eventIDString: eventIDString, query: query, context: context)
-        EventActions.complete(event, context: context)
+        // Kue 3.0 Phase 8 correction pass — see `CancelEventIntent`'s own comment: this
+        // process can be suspended immediately after `perform()` returns, so reconciliation
+        // must be awaited, not fired-and-forgotten.
+        await EventActions.completeAwaitingReconciliation(event, context: context)
         return .result(dialog: "Marked \"\(event.title)\" complete in Kue.")
     }
 }

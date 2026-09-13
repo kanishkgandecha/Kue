@@ -48,6 +48,7 @@ struct MacSettingsView: View {
             generalTab.tabItem { Label("General", systemImage: "gearshape") }
             MacAccountView().tabItem { Label("Account", systemImage: "person.crop.circle") }
             MacInsightsView().tabItem { Label("Insights", systemImage: "chart.bar.xaxis") }
+            MacSmartPlanningSettingsView().tabItem { Label("Planning", systemImage: "sparkles") }
             MacSyncView().tabItem { Label("Sync", systemImage: "arrow.triangle.2.circlepath.icloud") }
             notificationsTab.tabItem { Label("Notifications", systemImage: "bell") }
             backupTab.tabItem { Label("Backup", systemImage: "arrow.down.doc") }

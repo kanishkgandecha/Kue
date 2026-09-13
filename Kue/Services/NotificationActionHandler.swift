@@ -117,13 +117,19 @@ enum NotificationActionHandler {
         let descriptor = FetchDescriptor<KueEvent>(predicate: #Predicate { $0.id == eventID })
         guard let event = (try? context.fetch(descriptor))?.first else { return }
 
+        // Kue 3.0 Phase 8 correction pass — the awaitable variants, not the fire-and-forget
+        // `EventActions.complete`/`skip`/`cancel`: `NotificationActionDelegate` calls this
+        // `handle` function, then immediately calls `completionHandler()` — the documented
+        // signal to `UNUserNotificationCenter` that this process may now be suspended. An
+        // orphaned reconciliation `Task` left running past that point is not guaranteed to
+        // ever complete.
         switch response.actionIdentifier {
         case NotificationActionIdentifiers.completeActionID:
-            EventActions.complete(event, context: context, scheduler: scheduler, liveActivityManager: liveActivityManager, spotlightIndexer: spotlightIndexer)
+            await EventActions.completeAwaitingReconciliation(event, context: context, scheduler: scheduler, liveActivityManager: liveActivityManager, spotlightIndexer: spotlightIndexer)
         case NotificationActionIdentifiers.skipActionID:
-            EventActions.skip(event, context: context, scheduler: scheduler, liveActivityManager: liveActivityManager, spotlightIndexer: spotlightIndexer)
+            await EventActions.skipAwaitingReconciliation(event, context: context, scheduler: scheduler, liveActivityManager: liveActivityManager, spotlightIndexer: spotlightIndexer)
         case NotificationActionIdentifiers.cancelActionID:
-            EventActions.cancel(event, context: context, scheduler: scheduler, liveActivityManager: liveActivityManager, spotlightIndexer: spotlightIndexer)
+            await EventActions.cancelAwaitingReconciliation(event, context: context, scheduler: scheduler, liveActivityManager: liveActivityManager, spotlightIndexer: spotlightIndexer)
         default:
             break
         }
